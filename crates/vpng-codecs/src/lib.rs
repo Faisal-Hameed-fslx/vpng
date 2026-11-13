@@ -1,18 +1,19 @@
 //! `vpng-codecs` — tile codecs behind a single trait.
 //!
-//! v0.1 implements only the Raw codec. Every other id is reserved and rejected
-//! with [`vpng_core::ErrorKind::UnsupportedFeature`] rather than silently
-//! mis-decoded. See ADR-0004 for the id table.
+//! Implemented: Raw (id 0) and Palette (id 1). Every other id is reserved and
+//! rejected with [`vpng_core::ErrorKind::UnsupportedFeature`] rather than
+//! silently mis-decoded. See ADR-0004 for the id table.
 
 #![forbid(unsafe_code)]
 
+pub mod palette;
 pub mod raw;
 
 use vpng_core::{Error, Limits, PixelFormat, Result};
 
 /// Codec id 0: uncompressed tile bytes. Always available.
 pub const CODEC_RAW: u8 = 0;
-/// Codec id 1: per-tile palette. Reserved in v0.1.
+/// Codec id 1: per-tile palette.
 pub const CODEC_PALETTE: u8 = 1;
 /// Codec id 2: run-length. Reserved in v0.1.
 pub const CODEC_RLE: u8 = 2;
@@ -24,6 +25,19 @@ pub const CODEC_LZ77: u8 = 4;
 pub const CODEC_PREDICTOR_DICTIONARY: u8 = 5;
 /// Codec id 6: context-adaptive entropy coding. Reserved in v0.1.
 pub const CODEC_CONTEXT_ENTROPY: u8 = 6;
+
+/// Sentinel for "let the encoder pick the smallest codec for each tile".
+///
+/// It is never written to a file: the directory entry records the concrete
+/// codec that was actually used.
+pub const CODEC_AUTO: u8 = u8::MAX;
+
+/// Every codec this build implements, in ascending id order.
+///
+/// A cost-based selector iterates this in order, so when two codecs produce
+/// payloads of equal size the lowest id wins (a defined, deterministic
+/// tie-break).
+pub const IMPLEMENTED_CODEC_IDS: &[u8] = &[CODEC_RAW, CODEC_PALETTE];
 
 /// Everything a codec needs to encode one tile.
 #[derive(Debug, Clone, Copy)]
@@ -49,6 +63,11 @@ pub struct DecodeContext {
 /// every byte string `x` that is a valid tile buffer for the context's format
 /// and geometry. They must never allocate from `input.len()` without first
 /// checking a limit.
+///
+/// `encode` returns [`vpng_core::ErrorKind::UnsupportedFeature`] when the codec
+/// cannot represent this particular tile (for example a palette meeting a 257th
+/// distinct color). A cost-based selector treats that as "skip this candidate"
+/// and falls back to another codec; it is not a failure of the input.
 pub trait TileCodec: Send + Sync {
     /// Stable on-disk identifier.
     fn codec_id(&self) -> u8;
@@ -85,7 +104,7 @@ pub fn codec_name(id: u8) -> Option<&'static str> {
 
 /// Whether this build can decode and encode the given codec id.
 pub fn is_implemented(id: u8) -> bool {
-    id == CODEC_RAW
+    IMPLEMENTED_CODEC_IDS.contains(&id)
 }
 
 /// Look up a codec, failing with [`vpng_core::ErrorKind::UnsupportedFeature`] for
@@ -93,6 +112,7 @@ pub fn is_implemented(id: u8) -> bool {
 pub fn get_codec(id: u8) -> Result<&'static dyn TileCodec> {
     match id {
         CODEC_RAW => Ok(&raw::RAW_CODEC),
+        CODEC_PALETTE => Ok(&palette::PALETTE_CODEC),
         other => {
             let name = codec_name(other).unwrap_or("unknown");
             if codec_name(other).is_some() {
@@ -117,9 +137,28 @@ mod tests {
     }
 
     #[test]
+    fn palette_is_available() {
+        assert!(is_implemented(CODEC_PALETTE));
+        assert_eq!(get_codec(CODEC_PALETTE).unwrap().codec_id(), CODEC_PALETTE);
+        assert_eq!(get_codec(CODEC_PALETTE).unwrap().name(), "palette");
+    }
+
+    #[test]
+    fn implemented_ids_are_ascending_and_consistent() {
+        let ids = IMPLEMENTED_CODEC_IDS;
+        assert!(ids.windows(2).all(|w| w[0] < w[1]), "ids must ascend");
+        for &id in ids {
+            assert!(is_implemented(id));
+            assert_eq!(get_codec(id).unwrap().codec_id(), id);
+            assert!(codec_name(id).is_some());
+        }
+        // The Raw fallback must always be present.
+        assert!(ids.contains(&CODEC_RAW));
+    }
+
+    #[test]
     fn reserved_codecs_are_unsupported() {
         for id in [
-            CODEC_PALETTE,
             CODEC_RLE,
             CODEC_PREDICTOR,
             CODEC_LZ77,

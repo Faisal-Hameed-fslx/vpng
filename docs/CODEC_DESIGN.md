@@ -32,14 +32,30 @@ The payload is the tile's canonical bytes verbatim. It is the correctness
 baseline, the golden reference, and the fallback that guarantees a valid encoding
 always exists. `compressed_length == uncompressed_length` for every tile.
 
+## v0.1: Palette (id 1) — ADR-0009
+
+A per-tile palette built from the tile's own pixels only. Palette entries are the
+exact canonical pixel bytes (so alpha and every channel survive), indices are
+packed at the smallest valid width (1, 2, 4 or 8 bits) and read MSB-first, and
+entries are ordered by first appearance. The payload is canonical: the index
+width must be minimal for the entry count, every index must be in range, the
+length must be exact, and the final byte's padding bits must be zero; a decoder
+rejects anything else.
+
+A tile with more than 256 distinct pixel values, an empty pixel buffer, or a
+payload above the per-tile size limit is reported as **not representable**
+(`UnsupportedFeature`), and a selector falls back to another codec. This is not
+an input error.
+
+Byte-level golden vectors for 1/2/3/16/256/>256 colors and the canonical-form
+rejections live in `vpng-codecs/src/palette.rs`; whole-file golden vectors and
+property tests live in `vpng-testkit/tests/palette.rs`.
+
 ## Planned codecs and their gates
 
 Each must land with its own golden vectors and property tests before any size
 claim is made.
 
-* **Palette (id 1).** Per-tile palette, exact entries, smallest valid index width,
-  fall back to Raw when palette overhead exceeds it. Test 1/2/3/16/256/>256
-  distinct colors.
 * **Run-length (id 2).** Exact repeated symbols or pixel tuples, bounded run
   length, unambiguous escapes, no pathological expansion.
 * **Spatial predictor + entropy (id 3).** Left, up, upper-left, average, Paeth,
@@ -52,10 +68,24 @@ claim is made.
 * **Context-adaptive entropy (id 6).** Canonical Huffman, range coding, and CABAC
   are all evaluated on *complete* payload size including model headers.
 
-## Hybrid selection (P2 onward)
+## Hybrid selection
 
 For each tile: estimate candidate costs, run the promising candidates, include
 all per-codec overhead, choose the smallest complete payload, fall back to Raw,
 record the choice and measured cost, and break ties deterministically (lowest
 codec id wins). Selection never relies only on an entropy estimate when a real
 encoded size is available.
+
+This is implemented in `vpng-encoder`'s `select_payload`: for each tile it tries
+every id in `vpng_codecs::IMPLEMENTED_CODEC_IDS` in ascending order, skips a codec
+that reports the tile as not representable, keeps the smallest payload, and
+requires a strictly smaller payload to replace the incumbent (so equal sizes keep
+the lower id). The concrete id chosen is written into the tile's directory entry;
+the header's `default_codec` is informational. `EncodeOptions::with_codec` forces
+a single codec and `with_auto_codec` restores selection.
+
+## Test images exercised per codec
+
+* Palette: 1, 2, 3, 16, 256, and >256 distinct colors, across all eight v0.1
+  pixel formats, including forced-codec and auto-selection paths.
+* Raw: every format and the incompressible-noise fallback.

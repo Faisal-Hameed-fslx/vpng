@@ -13,7 +13,7 @@ use vpng_container::{
 use vpng_core::{Limits, PixelFormat};
 use vpng_decoder::Document;
 use vpng_encoder::{encode, EncodeOptions};
-use vpng_testkit::gradient;
+use vpng_testkit::{checker, gradient};
 
 fn golden_dir() -> PathBuf {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/golden");
@@ -37,7 +37,15 @@ fn assert_golden(name: &str, bytes: &[u8]) {
 #[test]
 fn golden_gradient_64x64_rgba8_tile16() {
     let image = gradient(64, 64, PixelFormat::rgba8(), 1);
-    let report = encode(&image, &EncodeOptions::default().with_tile_size(16, 16)).unwrap();
+    // Pin the Raw payload layout explicitly: automatic selection may choose
+    // another codec, which would be a different (also valid) golden file.
+    let report = encode(
+        &image,
+        &EncodeOptions::default()
+            .with_tile_size(16, 16)
+            .with_codec(vpng_codecs::CODEC_RAW),
+    )
+    .unwrap();
     assert_golden("gradient_64x64_rgba8_tile16.vpng", &report.bytes);
 
     // The golden file must also decode back to the exact pixels.
@@ -49,8 +57,42 @@ fn golden_gradient_64x64_rgba8_tile16() {
 #[test]
 fn golden_gradient_300x180_rgb16_tile64() {
     let image = gradient(300, 180, PixelFormat::rgb16(), 2);
-    let report = encode(&image, &EncodeOptions::default().with_tile_size(64, 64)).unwrap();
+    let report = encode(
+        &image,
+        &EncodeOptions::default()
+            .with_tile_size(64, 64)
+            .with_codec(vpng_codecs::CODEC_RAW),
+    )
+    .unwrap();
     assert_golden("gradient_300x180_rgb16_tile64.vpng", &report.bytes);
+}
+
+#[test]
+fn golden_palette_checker_64x64_rgba8_tile32() {
+    // A two-color checkerboard with 32x32 tiles: every tile is a 2-entry
+    // palette, so this golden file pins the palette payload layout through the
+    // whole container (header, directory, packed indices).
+    let image = checker(64, 64, PixelFormat::rgba8(), 8);
+    let report = encode(
+        &image,
+        &EncodeOptions::default()
+            .with_tile_size(32, 32)
+            .with_codec(vpng_codecs::CODEC_PALETTE),
+    )
+    .unwrap();
+    assert!(
+        report
+            .codec_ids
+            .iter()
+            .all(|&id| id == vpng_codecs::CODEC_PALETTE),
+        "the golden file must actually use the palette codec"
+    );
+    assert_golden("palette_checker_64x64_rgba8_tile32.vpng", &report.bytes);
+
+    // The golden file must also decode back to the exact pixels.
+    let limits = Limits::default();
+    let document = Document::parse(&report.bytes, &limits).unwrap();
+    assert_eq!(document.decode_all(&limits).unwrap(), image);
 }
 
 #[test]

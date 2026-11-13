@@ -49,6 +49,49 @@ offset  bytes                       meaning
 other field is exact. The golden test `header_layout_is_pinned` asserts the same
 facts against the encoder's real output.
 
+## Worked example: 8 × 1 gray8, Palette
+
+An image of eight gray pixels `AA 55 AA 55 AA 55 AA 55`, one 256×256 nominal
+tile (clipped to 8×1), encoded as Palette. Raw would need 8 payload bytes; the
+palette needs 5, so this is a case an auto-selecting encoder genuinely chooses
+Palette for. Two distinct values appear in first-appearance order (`0xAA` →
+index 0, `0x55` → index 1), so the index width is 1 bit and the indices
+`0 1 0 1 0 1 0 1` pack MSB-first into `0b0101_0101 = 0x55`. Total file size:
+`64 + 40 + 4 + 5 = 113` bytes.
+
+```text
+offset  bytes                       meaning
+------  --------------------------  ---------------------------------------
+...     (header, as above, but)
+16      08 00 00 00                 width 8
+20      01 00 00 00                 height 1
+27      01                          default codec 1 (Palette)
+40      71 00 00 00 00 00 00 00     declared file size 113
+
+64      00 00 00 00                 tile x = 0
+68      00 00 00 00                 tile y = 0
+72      08 00                       tile width = 8
+74      01 00                       tile height = 1
+76      01                          codec id 1 (Palette)
+77      00                          predictor id 0
+78      00 00                       flags 0
+80      6C 00 00 00 00 00 00 00     payload offset 108
+88      05 00 00 00 00 00 00 00     compressed length 5
+96      08 00 00 00                 uncompressed length 8 (= 8 * 1 * 1)
+100     ?? ?? ?? ??                 payload CRC32C
+104     ?? ?? ?? ??                 directory CRC32C over bytes [64..104)
+
+108     00                          palette header: width code 0 => 1 bit
+109     01                          entry_count - 1 = 1  (two entries)
+110     AA                          entry 0
+111     55                          entry 1
+112     55                          packed indices 0,1,0,1,0,1,0,1 (MSB-first)
+```
+
+The palette payload (5 bytes) is smaller than the tile's canonical bytes (8), so
+an auto-selecting encoder picks it. When the palette overhead does not pay for
+itself (very few or very many colors), selection falls back to Raw.
+
 ## General assembly order
 
 1. Header (64 bytes, checksum computed last).

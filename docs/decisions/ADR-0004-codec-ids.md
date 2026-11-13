@@ -36,6 +36,7 @@ may reference bytes outside its own tile.
 
 ## Consequences
 
-* v0.1 implements only id 0. Ids 1–6 are reserved and decoding one fails with
-  `UnsupportedFeature`; the decoder never guesses.
+* v0.1 implements ids 0 (Raw) and 1 (Palette). Ids 2–6 are reserved and decoding
+  one fails with `UnsupportedFeature`; the decoder never guesses. The payload
+  layout of id 1 is fixed by ADR-0009.
 * Adding a codec later does not renumber anything.

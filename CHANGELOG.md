@@ -8,30 +8,41 @@ separately as major.minor in the header.
 
 First implementation phase. The workspace **builds and passes its tests**:
 `cargo build --workspace` exits 0 and `cargo test --workspace` reports
-99 passed / 0 failed on `stable-x86_64-pc-windows-gnu` (rustc 1.100.0). See
+122 passed / 0 failed on `stable-x86_64-pc-windows-gnu` (rustc 1.100.0). See
 `docs/ROADMAP_STATUS.md` for the recorded evidence.
 
 ### Added
 
 * Format specification `docs/VPNG_SPEC_0_1.md`: 64-byte header, 40-byte tile
   directory entries, payload layout, invariants, limits, exit codes.
-* Architecture decision records ADR-0001 through ADR-0008 resolving the roadmap's
+* Architecture decision records ADR-0001 through ADR-0009 resolving the roadmap's
   open questions (header checksum coverage, directory layout, directory
-  authority, codec ids, grid derivation, size units, CRC32C, 16-bit support).
+  authority, codec ids, grid derivation, size units, CRC32C, 16-bit support,
+  palette payload layout).
 * `docs/REPOSITORY_AUDIT.md`, `docs/ROADMAP_STATUS.md`, `docs/THREAT_MODEL.md`,
   `docs/BITSTREAM.md`, `docs/CODEC_DESIGN.md`, `docs/EDITING_MODEL.md`,
   `docs/MEMORY_MODEL.md`, `docs/BENCHMARKS.md`.
 * Rust workspace with eight crates:
   * `vpng-core` — pixel formats, geometry, checked arithmetic, errors, limits.
   * `vpng-container` — header, directory, CRC32C, SHA-256 canonical digest.
-  * `vpng-codecs` — `TileCodec` trait and the Raw codec; ids 1–6 reserved.
+  * `vpng-codecs` — `TileCodec` trait, the Raw and Palette codecs, and the
+    per-tile codec registry; ids 2–6 reserved.
   * `vpng-tiling` — `TileGrid`, exact partition, region-to-tile mapping.
-  * `vpng-encoder` — canonical pixels to a complete `.vpng` file, exact size
-    accounting, `SizeLimitExceeded`.
+  * `vpng-encoder` — canonical pixels to a complete `.vpng` file, per-tile
+    smallest-payload codec selection, exact size accounting, `SizeLimitExceeded`.
   * `vpng-decoder` — validated `Document`, full/tile/region decode.
   * `vpng-testkit` — deterministic PRNG and image generators.
   * `vpng-cli` — `encode`, `decode`, `info`, `check`, `verify`, `decode-region`,
     `extract-tile`, with stable exit codes and `--json`.
+* **Palette codec (id 1, ADR-0009).** Per-tile palette of exact canonical pixel
+  bytes, indices packed MSB-first at the smallest valid width, canonical form
+  enforced by the decoder. Falls back to another codec when a tile has more than
+  256 distinct colours. Byte-level golden vectors, a whole-file golden fixture,
+  and property tests, with `--codec auto|raw|palette` on the CLI.
+* **Per-tile codec selection.** `EncodeOptions` defaults to `CODEC_AUTO`: each
+  tile gets the smallest payload any implemented codec offers, ties going to the
+  lowest id, with Raw as the guaranteed fallback. `with_codec(id)` forces one
+  codec; the concrete choice is recorded in each directory entry.
 * Layered integrity: `vpng info` (header + directory, O(1)), `vpng check` (every
   tile payload CRC32C, no pixel decode), `vpng verify` (exact pixels against a
   reference). `info` now prints an explicit note that payloads were not
@@ -43,7 +54,9 @@ First implementation phase. The workspace **builds and passes its tests**:
 
 ### Known limitations
 
-* Raw codec only; compression ratio is 1.0 by construction.
+* Palette and Raw only; the remaining baseline codecs (ids 2–6) are reserved.
+  Raw ratio is 1.0 by construction; palette shrinks palette-friendly tiles but no
+  corpus-based compression claim is made.
 * Uniform fixed-size tiles only.
 * No tile cache, no parallel decode, no streaming reader.
 * No editing engine, previews, or Python bindings yet.

@@ -11,9 +11,16 @@ use vpng_testkit::gradient;
 
 fn valid_file() -> Vec<u8> {
     let image = gradient(128, 96, PixelFormat::rgba8(), 1);
-    encode(&image, &EncodeOptions::default().with_tile_size(64, 64))
-        .unwrap()
-        .bytes
+    // Force Raw so this suite exercises the container structure, not codec
+    // selection; palette robustness is covered in `palette.rs`.
+    encode(
+        &image,
+        &EncodeOptions::default()
+            .with_tile_size(64, 64)
+            .with_codec(vpng_codecs::CODEC_RAW),
+    )
+    .unwrap()
+    .bytes
 }
 
 fn expect_rejected(bytes: &[u8], what: &str) {

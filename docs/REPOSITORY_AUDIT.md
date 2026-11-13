@@ -83,12 +83,12 @@ vpng/ (root = E:\VPNG)
 ├── crates/
 │   ├── vpng-core/                 formats, geometry, checked math, errors, limits
 │   ├── vpng-container/            header, directory, checksums, canonical digest
-│   ├── vpng-codecs/               TileCodec trait + Raw codec; reserved ids
+│   ├── vpng-codecs/               TileCodec trait + Raw/Palette codecs; ids 2-6 reserved
 │   ├── vpng-tiling/               TileGrid, region-to-tile mapping
 │   ├── vpng-encoder/              canonical pixels -> .vpng bytes
 │   ├── vpng-decoder/              .vpng bytes -> full/tile/region pixels
 │   ├── vpng-testkit/              deterministic fixtures + conformance tests
-│   └── vpng-cli/                  encode/decode/info/verify/decode-region/extract-tile
+│   └── vpng-cli/                  encode/decode/info/check/verify/decode-region/extract-tile
 ├── docs/                          spec, audit, status, threat model, ADRs
 ├── benchmarks/corpus_manifest.json
 └── python/                        experiment + corpus + tools skeleton
@@ -110,7 +110,7 @@ No dependency is used inside `vpng-core`, `vpng-codecs`, or `vpng-tiling`.
 
 Resolved during the build phase:
 
-1. ~~**Nothing is compiled.**~~ Resolved: the workspace builds and 99 tests pass.
+1. ~~**Nothing is compiled.**~~ Resolved: the workspace builds and 122 tests pass.
 2. ~~**`png` crate API surface.**~~ Resolved: `png` resolved to 0.17.16 and
    `crates/vpng-cli/src/convert.rs` compiled on the first attempt, including
    `Reader::output_buffer_size`.

@@ -125,9 +125,11 @@ fn write_output_image(args: &Args, path: &str, image: &vpng_core::CanonicalImage
 
 fn parse_codec(text: &str) -> Result<u8> {
     match text.to_ascii_lowercase().as_str() {
+        "auto" => Ok(vpng_codecs::CODEC_AUTO),
         "raw" | "0" => Ok(vpng_codecs::CODEC_RAW),
+        "palette" | "1" => Ok(vpng_codecs::CODEC_PALETTE),
         other => Err(Error::unsupported(format!(
-            "codec `{other}` is not implemented in v0.1 (only raw)"
+            "codec `{other}` is not implemented in v0.1 (available: auto, raw, palette)"
         ))),
     }
 }
@@ -439,7 +441,7 @@ OPTIONS:
     --tile-size <n>        Square tile edge for encoding (default 256)
     --tile-width <n>       Non-square tile width
     --tile-height <n>      Non-square tile height
-    --codec <name>         Codec to use (only `raw` in v0.1)
+    --codec <name>         Codec: auto (default), raw, palette
     --max-size <size>      Decimal byte ceiling, e.g. 10MB (ADR-0006)
     --max-size-mib <n>     Binary MiB ceiling
     --input-format <kind>  png | raw | vpng (default: by extension)

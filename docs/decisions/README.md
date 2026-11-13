@@ -14,6 +14,7 @@ with a status, the question, the decision, the rationale, and the consequences.
 | [0006](ADR-0006-size-units.md) | MB vs MiB (§2.5) | accepted |
 | [0007](ADR-0007-crc32c.md) | corruption checksum (§18.5) | accepted |
 | [0008](ADR-0008-16bit.md) | 16-bit in the first release (§18.15) | accepted |
+| [0009](ADR-0009-palette-payload.md) | palette payload layout and canonical index packing (§6.2) | accepted |
 
 ### Still open
 

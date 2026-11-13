@@ -31,9 +31,11 @@ rate under 10 MB.
 ## Required experiments (roadmap §17)
 
 * **E1** Raw container overhead — header, directory, metadata overhead; all
-  formats. *Ready to run once a toolchain exists; only Raw is implemented.*
-* **E2** Codec comparison per image and tile size. *Blocked on P2.*
-* **E3** Hybrid vs best individual codec. *Blocked on P2.*
+  formats. *Runnable now (Raw and Palette are implemented).*
+* **E2** Codec comparison per image and tile size. *Partially unblocked: Raw vs
+  Palette are runnable; the rest wait on P2.*
+* **E3** Hybrid vs best individual codec. *Partially unblocked: Raw vs Palette
+  vs auto-selection are runnable.*
 * **E4** Tile size 32/64/128/256/512/1024: size, random-access latency, edit cost,
   memory. *Raw-only portion runnable now.*
 * **E5** Region decode at multiple sizes and locations; verify only intersecting

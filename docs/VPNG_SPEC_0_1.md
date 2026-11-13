@@ -178,7 +178,7 @@ A file whose entries cannot be explained by one uniform grid is corrupt.
 | id | codec                     | v0.1 status |
 |---:|---------------------------|-------------|
 | 0  | Raw                       | implemented |
-| 1  | Palette                   | reserved |
+| 1  | Palette                   | implemented |
 | 2  | Run-length                | reserved |
 | 3  | Spatial predictor + entropy | reserved |
 | 4  | LZ77 dictionary           | reserved |
@@ -193,6 +193,30 @@ A decoder that meets a reserved or unknown codec id must fail with
 The payload is the tile's canonical pixel bytes verbatim.
 `compressed_length == uncompressed_length`. Encoding never expands or alters a
 byte.
+
+### 5.2 Palette codec (id 1) — ADR-0009
+
+A per-tile palette. The palette is built from the tile's own pixels only. The
+payload is:
+
+```text
+offset 0   u8   index-width code: 0=>1, 1=>2, 2=>4, 3=>8 bits; bits 2..7 zero
+offset 1   u8   entry_count - 1    (entry_count is 1..=256)
+offset 2   ..   entry_count * bytes_per_pixel  palette entries
+...        ..   ceil(pixel_count * index_bits / 8)  packed indices, MSB-first
+```
+
+* Each palette entry is the tile's exact canonical pixel bytes, so alpha and
+  every channel value are preserved.
+* Entries are assigned in first-appearance order and indices are packed
+  MSB-first; the unused low bits of the final byte are zero.
+* The payload is canonical: byte 0's reserved bits are zero, the index width is
+  the smallest that addresses `entry_count`, every index is `< entry_count`, the
+  payload length is exactly the formula above, and the padding bits are zero. A
+  decoder rejects any other form.
+* A tile with more than 256 distinct pixel values is **not representable** by
+  this codec; the encoder falls back to another codec (ultimately Raw). It is not
+  an input error.
 
 ---
 
