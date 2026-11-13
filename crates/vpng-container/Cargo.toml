@@ -1,0 +1,13 @@
+[package]
+name = "vpng-container"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "VPNG container: signature, header, tile directory, checksums, canonical digest."
+
+[dependencies]
+vpng-core.workspace = true
+crc32c.workspace = true
+sha2.workspace = true

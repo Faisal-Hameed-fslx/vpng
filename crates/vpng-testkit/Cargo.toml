@@ -1,0 +1,16 @@
+[package]
+name = "vpng-testkit"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Shared synthetic-image generators and conformance helpers for VPNG tests."
+
+[dependencies]
+vpng-core.workspace = true
+vpng-container.workspace = true
+vpng-codecs.workspace = true
+vpng-tiling.workspace = true
+vpng-encoder.workspace = true
+vpng-decoder.workspace = true

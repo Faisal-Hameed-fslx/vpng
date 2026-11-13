@@ -1,0 +1,11 @@
+[package]
+name = "vpng-tiling"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "VPNG tile geometry: partition planning, region-to-tile mapping."
+
+[dependencies]
+vpng-core.workspace = true

@@ -1,0 +1,8 @@
+# Pin the toolchain channel so CI and local builds agree.
+# The host triple is chosen at install time (see docs/REPOSITORY_AUDIT.md).
+# On this machine no MSVC linker is present, so install the GNU host:
+#   rustup-init.exe -y --default-host x86_64-pc-windows-gnu --profile minimal
+[toolchain]
+channel = "stable"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

@@ -1,0 +1,44 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/vpng-core",
+    "crates/vpng-container",
+    "crates/vpng-codecs",
+    "crates/vpng-tiling",
+    "crates/vpng-encoder",
+    "crates/vpng-decoder",
+    "crates/vpng-testkit",
+    "crates/vpng-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.74"
+license = "MIT"
+authors = ["VPNG contributors"]
+description = "VPNG: a lossless, adaptive, tiled, random-access image format and editing engine"
+repository = "https://example.invalid/vpng"
+
+[workspace.dependencies]
+vpng-core = { path = "crates/vpng-core" }
+vpng-container = { path = "crates/vpng-container" }
+vpng-codecs = { path = "crates/vpng-codecs" }
+vpng-tiling = { path = "crates/vpng-tiling" }
+vpng-encoder = { path = "crates/vpng-encoder" }
+vpng-decoder = { path = "crates/vpng-decoder" }
+crc32c = "0.6"
+sha2 = "0.10"
+png = "0.17"
+
+# Deterministic, reproducible release builds.
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "unwind"
+
+[profile.bench]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
