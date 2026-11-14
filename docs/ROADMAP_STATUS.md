@@ -1,6 +1,6 @@
 # Roadmap status
 
-**Updated:** 2026-11-13
+**Updated:** 2026-11-14
 **Legend:**
 
 * `PASS` — the required test **exists and was executed**, and the observed result
@@ -18,7 +18,7 @@
 | Default host | `x86_64-pc-windows-gnu` |
 | Active toolchain | overridden by `E:\VPNG\rust-toolchain.toml` |
 | `cargo build --workspace` | **exit 0**, `Finished dev profile ... in 3.29s` |
-| `cargo test --workspace` | **exit 0**, `122 passed; 0 failed` |
+| `cargo test --workspace` | **exit 0**, `144 passed; 0 failed` |
 | `cargo fmt --all --check` | **exit 0**, no diffs |
 | `cargo clippy --workspace --all-targets` | **exit 0**, zero warnings |
 
@@ -31,7 +31,7 @@ No Visual Studio is required: the GNU host ships `rust-lld` and a
 |-------|--------------|--------|----------|
 | P0 — repository audit and specification | unambiguous field sizes; executable serialization tests; reproducible build env | **PASS** | `vpng-container` 19 tests pass (header is exactly 64 bytes, directory entry exactly 40 bytes, round-trips exact, checksum detects a flipped byte). Build environment recorded in §1 and `docs/REPOSITORY_AUDIT.md`. |
 | P1 — minimal valid container | exact round-trip all formats; golden files; tile-only decode; malformed tests | **PASS** | `roundtrip.rs` 7 pass, `golden.rs` 5 pass, `malformed.rs` 12 pass, `vpng-decoder` 8 pass. Structural integrity checking (`vpng check`) is implemented and tested. See §3 for the CLI end-to-end run. |
-| P2 — baseline codecs | palette, RLE, predictor, LZ77, entropy | **PARTIAL** | Palette (id 1) implemented with byte-level golden vectors, whole-file golden fixture, and property tests (§3.1, A06); RLE (id 2) still reserved and rejected. Cost-based per-tile selection with a Raw fallback is implemented and tested. |
+| P2 — baseline codecs | palette, RLE, predictor, LZ77, entropy | **PARTIAL** | Palette (id 1) implemented with byte-level golden vectors, whole-file golden fixture, and property tests (§3.1, A06); RLE (id 2) implemented with byte-level golden vectors, a whole-file golden fixture, and conformance tests (§3.2, A07). Predictor (id 3), LZ77 (id 4), predictor+dictionary (id 5), and entropy (id 6) remain reserved and are rejected on decode. Cost-based per-tile selection with a Raw fallback is implemented and tested. |
 | P3 — adaptive tiling, region decode | region == crop; coverage validation; bounded cache; parallel decode | **PARTIAL** | Fixed-grid region decode and exact-coverage validation pass (`region_decode_equals_full_decode_crop`). Adaptive tiling, tile cache, and parallel decode are not started. |
 | P4 — editing engine | localized edit; payload reuse; crash safety; undo/redo | **NOT STARTED** | Design only (`docs/EDITING_MODEL.md`). |
 | P5 — preview and multiresolution | thumbnail, pyramid | **NOT STARTED** | |
@@ -86,7 +86,26 @@ Encoded via `--input-format raw`.
 The directory of the auto file records `codec_id = 1` for all four tiles; the
 auto and forced-palette files are byte-identical from offset 64 to end of file.
 
-### 3.2 Finding: `info` is not an integrity check — resolved by `check`
+### 3.2 Run-length codec end-to-end evidence (flat gray8, tile 64)
+
+Fixture: a 128×128 gray8 image with every pixel set to `0x55` — the run-length
+codec's ideal case. Encoded via `--input-format raw`.
+
+| # | Command | Exit | Observed |
+|---|---------|-----:|----------|
+| 22 | `vpng encode src.raw auto.vpng --input-format raw --width 128 --height 128 --format gray8 --tile-size 64` | 0 | auto **picks Run-length**: 4 tiles, 484 bytes, ratio 33.851x, 0.030 B/px, sha256 `14e7013b...b699fe76` |
+| 23 | `vpng encode src.raw raw.vpng ... --codec raw` | 0 | 4 tiles, 16,612 bytes; the auto file is **0.029x** of Raw |
+| 24 | `vpng encode src.raw pal.vpng ... --codec palette` | 0 | 4 tiles, 2,288 bytes; auto is **0.212x** of Palette |
+| 25 | `vpng encode src.raw rle.vpng ... --codec rle` | 0 | 484 bytes; identical to the auto file from offset 64 to end of file |
+| 26 | `vpng verify src.raw auto.vpng ...` | 0 | `PASS` — decoded digest equals source digest |
+| 27 | `vpng decode auto.vpng restored.png` | 0 | writes 128×128 gray8 PNG |
+| 28 | `vpng check auto.vpng` | 0 | `OK` — 4 tiles, 256 payload bytes verified with CRC32C |
+
+The directory records `codec_id = 2` for all four tiles. The auto and
+forced-RLE files differ only in the informational header `default_codec` byte
+(auto writes 0, forced writes 2); the rest of the file is byte-identical.
+
+### 3.3 Finding: `info` is not an integrity check — resolved by `check`
 
 Step 15 (`info` on a payload-corrupted file) returns **exit 0**. This is
 expected rather than a defect: `info` parses only the header and directory and
@@ -123,7 +142,7 @@ Integrity is therefore layered and each command states its own scope:
 | A04 | Transparent RGB preservation | dedicated test | **PASS** | `transparent_pixel_channels_are_preserved` |
 | A05 | Raw fallback | incompressible test | **PASS** | `noise_roundtrips_exactly_everywhere` (uniform random) and `incompressible_noise_falls_back_to_raw` / `auto_selection_falls_back_to_raw_for_noise` |
 | A06 | Palette codec | golden vectors | **PASS** | byte-level vectors in `vpng-codecs/src/palette.rs` (1/2/3/16/256/>256 colours); golden fixture `palette_checker_64x64_rgba8_tile32.vpng`; property tests `vpng-testkit/tests/palette.rs` 5 pass; CLI §3.1 |
-| A07 | RLE codec | golden vectors | NOT STARTED | |
+| A07 | RLE codec | golden vectors | **PASS** | byte-level vectors in `vpng-codecs/src/rle.rs` (literal/repeat boundaries, run splitting, multi-byte symbols, malformed streams); golden fixture `rle_mixed_64x64_gray8_tile64.vpng`; conformance tests `vpng-testkit/tests/rle.rs` 6 pass; CLI §3.2 |
 | A08 | Prediction codec | property tests | NOT STARTED | |
 | A09 | Dictionary codec | property tests | NOT STARTED | |
 | A10 | Entropy coder | golden vectors | NOT STARTED | |
@@ -147,19 +166,20 @@ Integrity is therefore layered and each command states its own scope:
 | Suite | Tests | Result |
 |-------|------:|--------|
 | `vpng-cli` unit | 11 | ok |
-| `vpng-codecs` unit | 20 | ok |
+| `vpng-codecs` unit | 35 | ok |
 | `vpng-container` unit | 19 | ok |
 | `vpng-core` unit | 19 | ok |
 | `vpng-decoder` unit | 8 | ok |
-| `vpng-encoder` unit | 8 | ok |
+| `vpng-encoder` unit | 9 | ok |
 | `vpng-tiling` unit | 6 | ok |
 | `vpng-testkit` unit | 2 | ok |
 | `tests/golden.rs` | 5 | ok |
 | `tests/malformed.rs` | 12 | ok |
 | `tests/palette.rs` | 5 | ok |
+| `tests/rle.rs` | 6 | ok |
 | `tests/roundtrip.rs` | 7 | ok |
 | Doc-tests | 0 | ok |
-| **Total** | **122** | **122 passed, 0 failed** |
+| **Total** | **144** | **144 passed, 0 failed** |
 
 ## 6. Defects found and fixed this phase
 
@@ -175,24 +195,27 @@ Integrity is therefore layered and each command states its own scope:
 | 8 | `error: this file contains an unclosed delimiter` in `vpng-decoder/src/lib.rs` | an edit anchor overlapped the tail of `tile_decode_matches_full_image_span`, dropping its loop body | restored the missing body; build/test/clippy/fmt all green afterwards |
 | 9 | `error[E0432]: unresolved import vpng_testkit` in `vpng-codecs` tests | the palette unit test imported `V0_1_FORMATS` from `vpng-testkit`, which `vpng-codecs` must not depend on (dependency cycle) | inlined the eight formats in the test |
 | 10 | clippy MSRV warnings: `is_multiple_of` stable since 1.87, `is_none_or` since 1.82 | used std methods newer than the workspace `rust-version` (1.74) | replaced with `% == 0` and `map_or(true, ..)` |
+| 11 | `clippy::unnecessary_cast` warning | `x as u32` where `x` was already `u32` in an RLE test fixture | removed the cast |
 
 No defect was found in the container, encoder, or decoder logic itself. The three
 `integrity_check_*` tests were added with the `check` command (5 → 8 decoder
 tests); the palette phase added the codec, the selection logic, and 23 tests
-(99 → 122).
+(99 → 122); the RLE phase added the codec, the registry/selector/CLI wiring, and
+22 tests (122 → 144).
 
 ## 7. Not yet measured (explicitly no claims)
 
 Corpus success rate under 10 MB, 16K performance, memory ceilings, edit latency,
 and streaming behavior. Palette demonstrably shrinks palette-friendly tiles (CLI
-§3.1: 7.148x on a synthetic two-colour image), but with no corpus there is no
+§3.1: 7.148x on a synthetic two-colour image) and Run-length shrinks flat tiles
+(CLI §3.2: 33.851x on a synthetic flat image), but with no corpus there is no
 general compression claim; Raw stays ≈1.0x and remains the guaranteed fallback.
 These remain targets, not results. No "faster than X" or "fits in 10 MB" claim is
 made anywhere in this repository.
 
 ## 8. Next phase
 
-P2 continues: palette (id 1) has landed; implement the remaining baseline codecs
-(ids 2–6) one at a time — next is RLE (id 2) — each with golden vectors and
-property tests before any size claim, keeping Raw as the guaranteed fallback and
-never sacrificing exactness.
+P2 continues: palette (id 1) and RLE (id 2) have landed; implement the remaining
+baseline codecs (ids 3–6) one at a time — next is the spatial predictor (id 3) —
+each with golden vectors and property tests before any size claim, keeping Raw as
+the guaranteed fallback and never sacrificing exactness.

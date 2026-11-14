@@ -391,7 +391,7 @@ mod tests {
     #[test]
     fn reserved_codec_is_rejected() {
         let image = gradient(64, 64, PixelFormat::rgba8());
-        let options = EncodeOptions::default().with_codec(vpng_codecs::CODEC_RLE);
+        let options = EncodeOptions::default().with_codec(vpng_codecs::CODEC_PREDICTOR);
         assert_eq!(
             encode(&image, &options).unwrap_err().kind(),
             vpng_core::ErrorKind::UnsupportedFeature
@@ -453,8 +453,8 @@ mod tests {
 
     #[test]
     fn auto_selection_records_a_codec_per_tile() {
-        // A 4x2 grid where the top-left tile is flat (palette) and the rest are
-        // full-color noise (raw), so both codecs must appear.
+        // A 4x2 grid where the top-left tile is flat and the rest are full-color
+        // noise, so a compressing codec and Raw must both appear.
         let width = 256u32;
         let height = 128u32;
         let mut data = vec![0u8; width as usize * height as usize * 4];
@@ -479,7 +479,11 @@ mod tests {
 
         assert_eq!(report.tile_count, 8);
         assert_eq!(report.codec_ids.len(), 8);
-        assert_eq!(report.codec_ids[0], vpng_codecs::CODEC_PALETTE);
+        assert_ne!(
+            report.codec_ids[0],
+            vpng_codecs::CODEC_RAW,
+            "the flat tile should be compressed by some codec"
+        );
         assert!(
             report
                 .codec_ids
@@ -488,6 +492,37 @@ mod tests {
                 .all(|&id| id == vpng_codecs::CODEC_RAW),
             "noise tiles should fall back to raw: {:?}",
             report.codec_ids
+        );
+    }
+
+    /// A single flat color: the run-length codec's ideal case.
+    fn flat(width: u32, height: u32, format: PixelFormat, value: u8) -> CanonicalImage {
+        let bpp = format.bytes_per_pixel() as usize;
+        let data = vec![value; width as usize * height as usize * bpp];
+        CanonicalImage::from_vec(width, height, format, data).unwrap()
+    }
+
+    #[test]
+    fn auto_selection_uses_rle_for_flat_tiles() {
+        let image = flat(64, 64, PixelFormat::rgba8(), 0x42);
+        let options = EncodeOptions::default().with_tile_size(64, 64);
+
+        let auto = encode(&image, &options).unwrap();
+        assert_eq!(
+            auto.codec_ids,
+            vec![vpng_codecs::CODEC_RLE],
+            "a flat tile is a run: {:?}",
+            auto.codec_ids
+        );
+
+        let raw = encode(&image, &options.with_codec(vpng_codecs::CODEC_RAW)).unwrap();
+        let palette = encode(&image, &options.with_codec(vpng_codecs::CODEC_PALETTE)).unwrap();
+        assert!(
+            auto.file_size < raw.file_size && auto.file_size < palette.file_size,
+            "rle {} should beat raw {} and palette {}",
+            auto.file_size,
+            raw.file_size,
+            palette.file_size
         );
     }
 }

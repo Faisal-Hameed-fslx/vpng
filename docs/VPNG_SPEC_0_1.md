@@ -179,7 +179,7 @@ A file whose entries cannot be explained by one uniform grid is corrupt.
 |---:|---------------------------|-------------|
 | 0  | Raw                       | implemented |
 | 1  | Palette                   | implemented |
-| 2  | Run-length                | reserved |
+| 2  | Run-length                | implemented |
 | 3  | Spatial predictor + entropy | reserved |
 | 4  | LZ77 dictionary           | reserved |
 | 5  | Predictor + dictionary    | reserved |
@@ -217,6 +217,29 @@ offset 2   ..   entry_count * bytes_per_pixel  palette entries
 * A tile with more than 256 distinct pixel values is **not representable** by
   this codec; the encoder falls back to another codec (ultimately Raw). It is not
   an input error.
+
+### 5.3 Run-length codec (id 2) — ADR-0010
+
+Runs are counted in whole pixels (symbols), never bytes. The payload is a sequence
+of self-delimiting tokens, each beginning with a 1-byte control:
+
+```text
+control 0x00..=0x7F   literal run: count = control + 1 (1..=128)
+                      followed by count symbols, verbatim
+control 0x81..=0xFF   repeat run:  count = (control & 0x7F) + 1 (2..=128)
+                      followed by one symbol, repeated count times
+control 0x80          malformed (a repeat run of length 1)
+```
+
+* The maximum run length is 128 symbols per token; longer runs are split.
+* Tokens are self-delimiting, so a symbol is never mistaken for a control and no
+  escaping is required.
+* A decoder accepts any well-formed stream and rejects a length-1 repeat, a
+  truncated token, a run past the expected pixel count, or a stream whose total
+  does not equal the tile's pixel count. The encoder's exact output (pinned by
+  golden vectors) is not the only well-formed stream.
+* Only an empty tile or a payload above the per-tile size limit is **not
+  representable**; the encoder then falls back to another codec.
 
 ---
 

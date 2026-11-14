@@ -128,8 +128,9 @@ fn parse_codec(text: &str) -> Result<u8> {
         "auto" => Ok(vpng_codecs::CODEC_AUTO),
         "raw" | "0" => Ok(vpng_codecs::CODEC_RAW),
         "palette" | "1" => Ok(vpng_codecs::CODEC_PALETTE),
+        "rle" | "2" => Ok(vpng_codecs::CODEC_RLE),
         other => Err(Error::unsupported(format!(
-            "codec `{other}` is not implemented in v0.1 (available: auto, raw, palette)"
+            "codec `{other}` is not implemented in v0.1 (available: auto, raw, palette, rle)"
         ))),
     }
 }
@@ -441,7 +442,7 @@ OPTIONS:
     --tile-size <n>        Square tile edge for encoding (default 256)
     --tile-width <n>       Non-square tile width
     --tile-height <n>      Non-square tile height
-    --codec <name>         Codec: auto (default), raw, palette
+    --codec <name>         Codec: auto (default), raw, palette, rle
     --max-size <size>      Decimal byte ceiling, e.g. 10MB (ADR-0006)
     --max-size-mib <n>     Binary MiB ceiling
     --input-format <kind>  png | raw | vpng (default: by extension)

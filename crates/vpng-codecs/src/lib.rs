@@ -1,13 +1,14 @@
 //! `vpng-codecs` — tile codecs behind a single trait.
 //!
-//! Implemented: Raw (id 0) and Palette (id 1). Every other id is reserved and
-//! rejected with [`vpng_core::ErrorKind::UnsupportedFeature`] rather than
-//! silently mis-decoded. See ADR-0004 for the id table.
+//! Implemented: Raw (id 0), Palette (id 1) and Run-length (id 2). Every other id
+//! is reserved and rejected with [`vpng_core::ErrorKind::UnsupportedFeature`]
+//! rather than silently mis-decoded. See ADR-0004 for the id table.
 
 #![forbid(unsafe_code)]
 
 pub mod palette;
 pub mod raw;
+pub mod rle;
 
 use vpng_core::{Error, Limits, PixelFormat, Result};
 
@@ -15,7 +16,7 @@ use vpng_core::{Error, Limits, PixelFormat, Result};
 pub const CODEC_RAW: u8 = 0;
 /// Codec id 1: per-tile palette.
 pub const CODEC_PALETTE: u8 = 1;
-/// Codec id 2: run-length. Reserved in v0.1.
+/// Codec id 2: run-length.
 pub const CODEC_RLE: u8 = 2;
 /// Codec id 3: spatial prediction plus entropy. Reserved in v0.1.
 pub const CODEC_PREDICTOR: u8 = 3;
@@ -37,7 +38,7 @@ pub const CODEC_AUTO: u8 = u8::MAX;
 /// A cost-based selector iterates this in order, so when two codecs produce
 /// payloads of equal size the lowest id wins (a defined, deterministic
 /// tie-break).
-pub const IMPLEMENTED_CODEC_IDS: &[u8] = &[CODEC_RAW, CODEC_PALETTE];
+pub const IMPLEMENTED_CODEC_IDS: &[u8] = &[CODEC_RAW, CODEC_PALETTE, CODEC_RLE];
 
 /// Everything a codec needs to encode one tile.
 #[derive(Debug, Clone, Copy)]
@@ -113,6 +114,7 @@ pub fn get_codec(id: u8) -> Result<&'static dyn TileCodec> {
     match id {
         CODEC_RAW => Ok(&raw::RAW_CODEC),
         CODEC_PALETTE => Ok(&palette::PALETTE_CODEC),
+        CODEC_RLE => Ok(&rle::RLE_CODEC),
         other => {
             let name = codec_name(other).unwrap_or("unknown");
             if codec_name(other).is_some() {
@@ -144,6 +146,13 @@ mod tests {
     }
 
     #[test]
+    fn rle_is_available() {
+        assert!(is_implemented(CODEC_RLE));
+        assert_eq!(get_codec(CODEC_RLE).unwrap().codec_id(), CODEC_RLE);
+        assert_eq!(get_codec(CODEC_RLE).unwrap().name(), "rle");
+    }
+
+    #[test]
     fn implemented_ids_are_ascending_and_consistent() {
         let ids = IMPLEMENTED_CODEC_IDS;
         assert!(ids.windows(2).all(|w| w[0] < w[1]), "ids must ascend");
@@ -159,7 +168,6 @@ mod tests {
     #[test]
     fn reserved_codecs_are_unsupported() {
         for id in [
-            CODEC_RLE,
             CODEC_PREDICTOR,
             CODEC_LZ77,
             CODEC_PREDICTOR_DICTIONARY,

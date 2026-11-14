@@ -51,13 +51,36 @@ Byte-level golden vectors for 1/2/3/16/256/>256 colors and the canonical-form
 rejections live in `vpng-codecs/src/palette.rs`; whole-file golden vectors and
 property tests live in `vpng-testkit/tests/palette.rs`.
 
+## v0.1: Run-length (id 2) — ADR-0010
+
+Runs are counted in **whole pixels (symbols)**, never bytes, so a run always
+repeats one exact pixel tuple and no channel or alpha byte can drift. The payload
+is a sequence of self-delimiting tokens, each starting with a 1-byte control:
+
+```text
+0x00..=0x7F   literal run, count = control + 1 (1..=128), then count symbols
+0x81..=0xFF   repeat run,  count = (control & 0x7F) + 1 (2..=128), then 1 symbol
+0x80          malformed (a repeat of one symbol)
+```
+
+The maximum run is 128 symbols; longer runs are split so that no chunk has length
+1. Because every token states its own exact count, a symbol can never be mistaken
+for a control and no escaping is needed. The encoder is deterministic greedy: one
+token per maximal run of length ≥ 2, adjacent singles grouped into literals. The
+decoder accepts any well-formed stream, not only the canonical one, and rejects a
+length-1 repeat, a truncated token, a run past the expected count, or a total that
+does not equal the tile's pixel count.
+
+Only an empty tile or a payload above the per-tile size limit is **not
+representable** (`UnsupportedFeature`); the selector falls back. Byte-level golden
+vectors live in `vpng-codecs/src/rle.rs`; whole-file conformance and golden tests
+live in `vpng-testkit/tests/rle.rs`.
+
 ## Planned codecs and their gates
 
 Each must land with its own golden vectors and property tests before any size
 claim is made.
 
-* **Run-length (id 2).** Exact repeated symbols or pixel tuples, bounded run
-  length, unambiguous escapes, no pathological expansion.
 * **Spatial predictor + entropy (id 3).** Left, up, upper-left, average, Paeth,
   gradient, and an adaptive choice by measured cost. Reversible modular residual
   arithmetic per channel depth; no floating point. Prediction resets at tile
@@ -88,4 +111,6 @@ a single codec and `with_auto_codec` restores selection.
 
 * Palette: 1, 2, 3, 16, 256, and >256 distinct colors, across all eight v0.1
   pixel formats, including forced-codec and auto-selection paths.
+* Run-length: flat tiles, mixed runs and literals, run splitting past 128,
+  multi-byte symbols (16-bit channels, alpha), and the canonical-form rejections.
 * Raw: every format and the incompressible-noise fallback.

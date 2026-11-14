@@ -92,6 +92,44 @@ The palette payload (5 bytes) is smaller than the tile's canonical bytes (8), so
 an auto-selecting encoder picks it. When the palette overhead does not pay for
 itself (very few or very many colors), selection falls back to Raw.
 
+## Worked example: 8 × 1 gray8, Run-length
+
+The same eight gray pixels all set to one value, `AA AA AA AA AA AA AA AA`, one
+256×256 nominal tile (clipped to 8×1), encoded as Run-length. One repeat token
+covers all eight pixels: control `0x80 | (8 - 1) = 0x87`, then the symbol `AA`.
+That is 2 payload bytes, beating Raw (8) and Palette (4), so an auto-selecting
+encoder chooses Run-length. Total file size: `64 + 40 + 4 + 2 = 110` bytes.
+
+```text
+offset  bytes                       meaning
+------  --------------------------  ---------------------------------------
+...     (header, as above, but)
+16      08 00 00 00                 width 8
+20      01 00 00 00                 height 1
+27      02                          default codec 2 (Run-length)
+40      6E 00 00 00 00 00 00 00     declared file size 110
+
+64      00 00 00 00                 tile x = 0
+68      00 00 00 00                 tile y = 0
+72      08 00                       tile width = 8
+74      01 00                       tile height = 1
+76      02                          codec id 2 (Run-length)
+77      00                          predictor id 0
+78      00 00                       flags 0
+80      6C 00 00 00 00 00 00 00     payload offset 108
+88      02 00 00 00 00 00 00 00     compressed length 2
+96      08 00 00 00                 uncompressed length 8 (= 8 * 1 * 1)
+100     ?? ?? ?? ??                 payload CRC32C
+104     ?? ?? ?? ??                 directory CRC32C over bytes [64..104)
+
+108     87                          repeat token, count = 7 + 1 = 8
+109     AA                          the repeated gray symbol
+```
+
+A literal token (`0x00..=0x7F`) would instead be followed by `control + 1` exact
+pixel tuples; because every token carries its own count, the two forms never
+need an escape byte.
+
 ## General assembly order
 
 1. Header (64 bytes, checksum computed last).
