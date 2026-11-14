@@ -70,9 +70,9 @@ set is pinned by `Cargo.lock`, so builds remain reproducible either way.
 
 ## 3. Workspace produced in this phase
 
-A Rust workspace with eight crates, plus docs, tests, a benchmark manifest, and
-a Python experiment skeleton. See `docs/ROADMAP_STATUS.md` for the phase mapping
-and `docs/VPNG_SPEC_0_1.md` for the format.
+A Rust workspace with eight crates, plus docs, tests, benchmark harnesses, the
+corpus manifest, and a Python experiment skeleton. See `docs/ROADMAP_STATUS.md`
+for the phase mapping and `docs/VPNG_SPEC_0_1.md` for the format.
 
 ```text
 vpng/ (root = E:\VPNG)
@@ -90,7 +90,12 @@ vpng/ (root = E:\VPNG)
 │   ├── vpng-testkit/              deterministic fixtures + conformance tests
 │   └── vpng-cli/                  encode/decode/info/check/verify/decode-region/extract-tile
 ├── docs/                          spec, audit, status, threat model, ADRs
-├── benchmarks/corpus_manifest.json
+├── benchmarks/
+│   ├── corpus_manifest.json       provenance, license, dimensions, SHA-256
+│   ├── stress/                    large-image stress harness (Python + PowerShell)
+│   ├── corpus/                    seed corpus assembler + benchmark runner
+│   └── results/                   git-ignored JSON/Markdown run output
+├── corpus-data/                   git-ignored image bytes (provenance in the manifest)
 └── python/                        experiment + corpus + tools skeleton
 ```
 
@@ -110,7 +115,7 @@ No dependency is used inside `vpng-core`, `vpng-codecs`, or `vpng-tiling`.
 
 Resolved during the build phase:
 
-1. ~~**Nothing is compiled.**~~ Resolved: the workspace builds and 144 tests pass.
+1. ~~**Nothing is compiled.**~~ Resolved: the workspace builds and 148 tests pass.
 2. ~~**`png` crate API surface.**~~ Resolved: `png` resolved to 0.17.16 and
    `crates/vpng-cli/src/convert.rs` compiled on the first attempt, including
    `Reader::output_buffer_size`.
@@ -119,13 +124,19 @@ Resolved during the build phase:
 
 Still open:
 
-4. **No corpus.** Compression behavior and the 10 MB target cannot be evaluated
-   without one; only overhead and per-codec round-trips on synthetic fixtures are
-   measurable today.
-5. **16K is unvalidated.** No 16K run has been recorded; `Limits` permits it,
-   but permission is not evidence.
+4. **Corpus coverage is thin.** A 9-image seed corpus with manifest provenance
+   exists (`benchmarks/corpus_manifest.json`, `docs/BENCHMARKS.md`), so codec
+   and baseline comparisons are measurable, but the 750-image target is unmet;
+   no distribution or per-category success-rate claim follows from nine images.
+5. **16K is partially validated.** A 16384×16384 gray8 gradient and a
+   15360×8640 rgb8 photo are recorded; the 16384×16384 RGBA8 case was skipped
+   because it needs about 3.4 GiB of live buffers and free physical memory never
+   exceeded 1,712 MB. Full 16K coverage waits on P6 streaming.
 6. **Registry reliability.** `static.rust-lang.org` served the toolchain while
    crates.io downloads from the same path were reset, which is why a mirror is
    configured. This affects developer onboarding, not the format.
-7. **No fuzzing yet.** The malformed-input sweeps are deterministic and broad
-   but are not a substitute for `cargo-fuzz` coverage (P10).
+7. **No coverage-guided fuzzing yet.** `malformed.rs` plus the deterministic
+   `mutation_sweep.rs` (all truncations and single-byte substitutions over
+   Raw/Palette/RLE files, 2,000 seeded multi-byte corruptions per file) exercise
+   the parsers broadly and never panic, but this is not a substitute for
+   `cargo-fuzz` coverage (P10).

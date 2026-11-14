@@ -8,7 +8,7 @@ separately as major.minor in the header.
 
 First implementation phase. The workspace **builds and passes its tests**:
 `cargo build --workspace` exits 0 and `cargo test --workspace` reports
-144 passed / 0 failed on `stable-x86_64-pc-windows-gnu` (rustc 1.100.0). See
+148 passed / 0 failed on `stable-x86_64-pc-windows-gnu` (rustc 1.100.0). See
 `docs/ROADMAP_STATUS.md` for the recorded evidence.
 
 ### Added
@@ -56,18 +56,35 @@ First implementation phase. The workspace **builds and passes its tests**:
 * Conformance tests: exhaustive round-trip over all v0.1 formats and sizes,
   region-vs-crop equality, tile-vs-image equality, determinism, transparent-RGB
   preservation, malformed-input mutation and truncation sweeps, golden files.
-* `benchmarks/corpus_manifest.json` and a Python experiment skeleton.
+* **Bounded mutation sweep** (`crates/vpng-testkit/tests/mutation_sweep.rs`):
+  every truncation and every single-byte substitution (three values per offset)
+  on one small Raw, Palette, and Run-length file, plus 2,000 seeded multi-byte
+  corruptions per file. Every outcome is a typed error or a valid decode; no
+  panic. This is a deterministic sweep, **not** coverage-guided fuzzing.
+* **Large-image stress harness** (`benchmarks/stress/run_stress.ps1`) and a
+  **seed-corpus runner** (`benchmarks/corpus/seed.py`,
+  `benchmarks/corpus/run_corpus.py`). Measured results, with host and corpus
+  named, are recorded in `docs/BENCHMARKS.md`.
+* `benchmarks/corpus_manifest.json`, now populated with a 9-image seed corpus
+  (photographs, digital paintings, procedural, noise, screenshots) carrying
+  provenance, license, and canonical SHA-256, and a Python experiment skeleton.
 
 ### Known limitations
 
 * Raw, Palette, and Run-length only; the remaining baseline codecs (ids 3–6) are
   reserved. Raw ratio is 1.0 by construction; Palette and Run-length shrink
-  friendly tiles but no corpus-based compression claim is made.
+  friendly tiles, but on the 9-image seed corpus VPNG still loses to PNG and
+  WebP lossless on photographs and paintings, because no predictor, dictionary,
+  or entropy coder exists yet.
 * Uniform fixed-size tiles only.
 * No tile cache, no parallel decode, no streaming reader.
 * No editing engine, previews, or Python bindings yet.
 * `vpng info` reads only the header and directory, so it is **not** an integrity
   check; use `vpng check` to validate a file on its own, and `vpng verify` to
   compare it against the original image.
-* No corpus has been assembled, so no compression or 10 MB claim is made.
-* No 16K run has been recorded.
+* The seed corpus is 9 images, **not** the 750-image target, so it supports no
+  distribution, per-resolution, or 10 MB success claim.
+* 16K is measured only for gray8 (16384×16384) and a 15360×8640 rgb8 photo; the
+  16384×16384 RGBA8 case (1 GiB of pixels) was skipped for insufficient free
+  physical memory and waits on streaming/allocation work.
+* No coverage-guided fuzzing yet; the mutation sweep is deterministic and bounded.

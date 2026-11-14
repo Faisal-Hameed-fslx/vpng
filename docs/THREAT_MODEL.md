@@ -31,7 +31,7 @@ treated as attacker-controlled.
 | T8 | Header tampered to change semantics | CRC32C over the whole header except its own field | container |
 | T9 | Unknown feature silently ignored | unknown feature-flag bits and unknown codec ids are hard errors | container, codecs |
 | T10 | Truncated or trailing bytes | `declared_file_size` must equal the real length | decoder |
-| T11 | Panic on malformed input | no indexing without prior length checks; no `unwrap` on untrusted data; sweep tests | all crates |
+| T11 | Panic on malformed input | no indexing without prior length checks; no `unwrap` on untrusted data; `malformed.rs` + `mutation_sweep.rs` sweeps | all crates |
 | T12 | Recursion / stack exhaustion | parsing is flat and iterative; no recursive descent | container, decoder |
 | T13 | Metadata code execution | v0.1 has no metadata chunks at all | spec section 1.1 |
 | T14 | Network access during decode | none exists; no network code in any crate | all crates |
@@ -57,6 +57,11 @@ scope and must be provided by the deployment (e.g. signed transport).
 * `malformed.rs`: targeted mutations of every header field, the directory, its
   CRC trailer, and payload bytes; truncation sweep; single-byte-flip sweep;
   unknown codec id. Each must yield a typed error and must not panic.
+* `mutation_sweep.rs`: every truncation and every single-byte substitution
+  (three values per offset) on one small Raw, Palette, and Run-length file, plus
+  2,000 seeded multi-byte corruptions per file. This is a deterministic sweep,
+  **not** coverage-guided fuzzing; it complements `malformed.rs` and is bounded
+  by construction.
 * Next phase: `cargo-fuzz` targets for the header parser, directory parser, and
   each codec, plus a `cargo test` run under the address sanitizer where the
   platform supports it.

@@ -458,7 +458,7 @@ EXIT CODES:
 
 `info` reads only the header and directory, so it is fast but is NOT an
 integrity check. Use `check` to validate a file on its own, and `verify` to
-compare a file against the original image.`
+compare a file against the original image.
 
 Pixels are reproduced exactly. The 10 MB ceiling is a measured target, never a
 promise: if no lossless file fits, encoding fails with exit code 6."

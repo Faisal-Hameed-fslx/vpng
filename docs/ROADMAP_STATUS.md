@@ -18,7 +18,7 @@
 | Default host | `x86_64-pc-windows-gnu` |
 | Active toolchain | overridden by `E:\VPNG\rust-toolchain.toml` |
 | `cargo build --workspace` | **exit 0**, `Finished dev profile ... in 3.29s` |
-| `cargo test --workspace` | **exit 0**, `144 passed; 0 failed` |
+| `cargo test --workspace` | **exit 0**, `148 passed; 0 failed` |
 | `cargo fmt --all --check` | **exit 0**, no diffs |
 | `cargo clippy --workspace --all-targets` | **exit 0**, zero warnings |
 
@@ -35,9 +35,9 @@ No Visual Studio is required: the GNU host ships `rust-lld` and a
 | P3 — adaptive tiling, region decode | region == crop; coverage validation; bounded cache; parallel decode | **PARTIAL** | Fixed-grid region decode and exact-coverage validation pass (`region_decode_equals_full_decode_crop`). Adaptive tiling, tile cache, and parallel decode are not started. |
 | P4 — editing engine | localized edit; payload reuse; crash safety; undo/redo | **NOT STARTED** | Design only (`docs/EDITING_MODEL.md`). |
 | P5 — preview and multiresolution | thumbnail, pyramid | **NOT STARTED** | |
-| P6 — 16K and memory engineering | 16K stress; streaming; budgets | **NOT STARTED** | Limits are implemented and unit-tested; no 16K run has been recorded. |
-| P7 — compression research | controlled experiments | **NOT STARTED** | |
-| P8 — 10 MB target evaluation | exact accounting; honest failure | **PARTIAL** | Exact size accounting passes (`size_accounting_is_exact`); refusal is honest and typed (`--max-size 1024` → exit 6 reporting the smallest lossless size 240,148). No corpus exists, so the success distribution is unmeasured. |
+| P6 — 16K and memory engineering | 16K stress; streaming; budgets | **NOT STARTED** | Limits are implemented and unit-tested, and a 16384×16384 gray8 run plus a 15360×8640 rgb8 run are recorded (§3.3, A19). 16K RGBA8 was skipped for insufficient free RAM; streaming, allocation budgets, cache eviction, and parallel limits are not started. |
+| P7 — compression research | controlled experiments | **NOT STARTED** | A 9-image seed corpus and the E2/E3 runner exist (`docs/BENCHMARKS.md`), but the 750-image corpus and statistical reporting do not. |
+| P8 — 10 MB target evaluation | exact accounting; honest failure | **PARTIAL** | Exact size accounting passes (`size_accounting_is_exact`); refusal is honest and typed (`--max-size 1024` → exit 6 reporting the smallest lossless size 240,148). A 9-image seed corpus exists, but the 750-image target is unmet, so the per-category success distribution is unmeasured. |
 | P9 — Python API | bindings around Rust | **NOT STARTED** | CLI-driver tooling only. |
 | P10 — hardening and v1.0 | fuzzing; freeze | **NOT STARTED** | |
 
@@ -105,7 +105,30 @@ The directory records `codec_id = 2` for all four tiles. The auto and
 forced-RLE files differ only in the informational header `default_codec` byte
 (auto writes 0, forced writes 2); the rest of the file is byte-identical.
 
-### 3.3 Finding: `info` is not an integrity check — resolved by `check`
+### 3.3 Large-image stress and mutation evidence (2026-11-14)
+
+Driver: `benchmarks/stress/run_stress.ps1` (release build, tile 256, 12 logical
+CPUs, 7,916 MB RAM). Full tables are in `docs/BENCHMARKS.md`; the key rows:
+
+| Image | Codec | Output bytes | Encode ms | Verify ms | Peak RSS MB |
+|---|---|---:|---:|---:|---:|
+| 15360×8640 rgb8 (`1006677.jpg`) | raw | 398,212,868 | 3,564 | 1,999 | 1,142.9 |
+| 15360×8640 rgb8 (`1006677.jpg`) | auto | 308,132,486 (0.774×) | 3,748 | 2,336 | 980.1 |
+| 16384×16384 gray8 | raw | 268,599,364 | 5,363 | 965 | 772.0 |
+| 8192×8192 rgba8 | auto | 268,476,484 | 1,408 | 841 | 773.0 |
+
+Every row: `verify` exit 0 (exact pixels) and `check` exit 0 (all payload CRCs).
+A 512×512 region decode took 180–402 ms. The 16K RGBA8 case was **skipped**, not
+failed: it needs roughly 3.4 GiB of live buffers and free physical memory never
+exceeded 1,712 MB. The harness records that reason in its JSON report.
+
+Mutation evidence: `crates/vpng-testkit/tests/mutation_sweep.rs` runs every
+truncation and every single-byte substitution (three values per offset) on one
+small Raw, Palette, and RLE file, plus 2,000 seeded multi-byte corruptions per
+file. All outcomes are typed errors or valid decodes; no panic occurred. This is
+a deterministic sweep, **not** coverage-guided fuzzing (see A22).
+
+### 3.4 Finding: `info` is not an integrity check — resolved by `check`
 
 Step 15 (`info` on a payload-corrupted file) returns **exit 0**. This is
 expected rather than a defect: `info` parses only the header and directory and
@@ -154,10 +177,10 @@ Integrity is therefore layered and each command states its own scope:
 | A16 | Undo/redo | exact hash tests | NOT STARTED | |
 | A17 | Crash-safe commit | fault injection | NOT STARTED | |
 | A18 | Preview separation | format and API tests | NOT STARTED | |
-| A19 | 16K stress | recorded run | NOT STARTED | |
+| A19 | 16K stress | recorded run | **PARTIAL** | 16384×16384 gray8 and 15360×8640 rgb8 recorded with times, peak RSS, exactness (§3.3). 16K RGBA8 skipped for insufficient free RAM (needs ≈3.4 GiB); deferred to P6 streaming. No general 16K claim is made. |
 | A20 | 10 MB enforcement | boundary tests | **PASS** | `size_limit_is_reported_not_violated`; CLI step 9 exit 6 |
 | A21 | Corruption detection | mutation tests | **PASS** | `malformed.rs` 12 tests; `vpng-decoder` integrity tests; CLI step 12 (`decode`) and step 14 (`check`) exit 4 |
-| A22 | Fuzz robustness | fuzz report | **PARTIAL** | truncation + byte-flip sweeps never panic; real `cargo-fuzz` targets are P10 |
+| A22 | Fuzz robustness | fuzz report | **PARTIAL** | `malformed.rs` 12 tests plus `mutation_sweep.rs` 4 tests: all truncations and every single-byte substitution on Raw/Palette/RLE files, and 2,000 seeded multi-byte corruptions per file, with no panic. Not coverage-guided; `cargo-fuzz` targets remain P10. |
 | A23 | Python API | integration tests | NOT STARTED | |
 | A24 | v1.0 compatibility | golden corpus | NOT STARTED | |
 
@@ -175,11 +198,12 @@ Integrity is therefore layered and each command states its own scope:
 | `vpng-testkit` unit | 2 | ok |
 | `tests/golden.rs` | 5 | ok |
 | `tests/malformed.rs` | 12 | ok |
+| `tests/mutation_sweep.rs` | 4 | ok |
 | `tests/palette.rs` | 5 | ok |
 | `tests/rle.rs` | 6 | ok |
 | `tests/roundtrip.rs` | 7 | ok |
 | Doc-tests | 0 | ok |
-| **Total** | **144** | **144 passed, 0 failed** |
+| **Total** | **148** | **148 passed, 0 failed** |
 
 ## 6. Defects found and fixed this phase
 
@@ -196,22 +220,31 @@ Integrity is therefore layered and each command states its own scope:
 | 9 | `error[E0432]: unresolved import vpng_testkit` in `vpng-codecs` tests | the palette unit test imported `V0_1_FORMATS` from `vpng-testkit`, which `vpng-codecs` must not depend on (dependency cycle) | inlined the eight formats in the test |
 | 10 | clippy MSRV warnings: `is_multiple_of` stable since 1.87, `is_none_or` since 1.82 | used std methods newer than the workspace `rust-version` (1.74) | replaced with `% == 0` and `map_or(true, ..)` |
 | 11 | `clippy::unnecessary_cast` warning | `x as u32` where `x` was already `u32` in an RLE test fixture | removed the cast |
+| 12 | stress harness recorded a blank exit code for successful encodes | `Start-Process -PassThru -RedirectStandardOutput` does not populate `ExitCode` in this PowerShell | switched the harness to `System.Diagnostics.Process` with redirected streams |
+| 13 | warm-up golden assertion failed on an in-test fixture | the seed was re-created with the *last* mutation value instead of the original when one offset was hit twice | restore recorded bytes in reverse order |
+| 14 | corpus report printed `â€”` instead of an unavailable marker | the Python source literal was double-encoded | replaced it with an ASCII dash; scripts are now ASCII-only |
 
 No defect was found in the container, encoder, or decoder logic itself. The three
 `integrity_check_*` tests were added with the `check` command (5 → 8 decoder
 tests); the palette phase added the codec, the selection logic, and 23 tests
 (99 → 122); the RLE phase added the codec, the registry/selector/CLI wiring, and
-22 tests (122 → 144).
+22 tests (122 → 144); the evidence batch added the mutation sweep and 4 tests
+(144 → 148).
 
 ## 7. Not yet measured (explicitly no claims)
 
-Corpus success rate under 10 MB, 16K performance, memory ceilings, edit latency,
-and streaming behavior. Palette demonstrably shrinks palette-friendly tiles (CLI
-§3.1: 7.148x on a synthetic two-colour image) and Run-length shrinks flat tiles
-(CLI §3.2: 33.851x on a synthetic flat image), but with no corpus there is no
-general compression claim; Raw stays ≈1.0x and remains the guaranteed fallback.
-These remain targets, not results. No "faster than X" or "fits in 10 MB" claim is
-made anywhere in this repository.
+Corpus success rate under 10 MB, general 16K performance, memory ceilings, edit
+latency, and streaming behavior. Palette demonstrably shrinks palette-friendly
+tiles (CLI §3.1: 7.148x on a synthetic two-colour image) and Run-length shrinks
+flat tiles (CLI §3.2: 33.851x on a synthetic flat image). The 9-image seed corpus
+(`docs/BENCHMARKS.md`) now gives measured auto/raw/PNG/WebP ratios per category
+and a stress table, but it is a seed, not the 750-image corpus, so **no
+distribution, per-resolution, or 10 MB success claim follows from it**; on
+photographs and paintings VPNG still loses to PNG and WebP because no predictor,
+dictionary, or entropy coder exists yet. Raw stays ≈1.0x and remains the
+guaranteed fallback. The 16384×16384 RGBA8 case was skipped for insufficient free
+physical memory. These remain targets, not results. No "faster than X" or "fits
+in 10 MB" claim is made anywhere in this repository.
 
 ## 8. Next phase
 

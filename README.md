@@ -5,8 +5,10 @@ A lossless, adaptive, tiled, random-access image format and editing engine.
 **Primary requirement:** exact pixel reconstruction.
 **Secondary target:** fit eligible images within 10 MB — measured, never promised.
 **Status:** v0.1 container implemented, compiled, and tested. `cargo build
---workspace` and `cargo test --workspace` both pass (144 tests, 0 failures) on
-`stable-x86_64-pc-windows-gnu` rustc 1.100.0. See `docs/ROADMAP_STATUS.md`.
+--workspace` and `cargo test --workspace` both pass (148 tests, 0 failures) on
+`stable-x86_64-pc-windows-gnu` rustc 1.100.0. Large-image stress runs and a
+seed-corpus measurement are recorded in `docs/BENCHMARKS.md`. See
+`docs/ROADMAP_STATUS.md`.
 
 ## What works today
 
@@ -19,15 +21,21 @@ A lossless, adaptive, tiled, random-access image format and editing engine.
 * A CLI: `encode`, `decode`, `info`, `check`, `verify`, `decode-region`,
   `extract-tile`.
 * Conformance tests: exhaustive round-trip, region-vs-crop, malformed-input
-  sweeps, golden files. 144 tests, all passing.
+  sweeps, a bounded mutation sweep, golden files. 148 tests, all passing.
 * Layered integrity: `info` (structure only), `check` (every payload CRC32C),
   `verify` (exact pixels against a reference).
+* Measured evidence: large-image stress (up to a 15360×8640 photo and
+  16384×16384 pixels) with sampled peak RSS and exactness checks, plus a 9-image
+  seed corpus compared against PNG and WebP lossless. See `docs/BENCHMARKS.md`.
 
 ## What is explicitly not here yet
 
 Predictor/dictionary/entropy codecs, adaptive tiling, the tile cache, parallel
-decode, the editing engine, previews, 16K stress, the Python bindings, and
-fuzzing. Each has a phase in the roadmap and a row in the status table.
+decode, streaming, the editing engine, previews, the Python bindings, and
+coverage-guided fuzzing. A deterministic mutation sweep
+(`crates/vpng-testkit/tests/mutation_sweep.rs`) covers truncations and
+single-byte substitutions over Raw, Palette, and Run-length files, but it is not
+a substitute for `cargo-fuzz`. Each phase has a row in the status table.
 
 ## Build
 
