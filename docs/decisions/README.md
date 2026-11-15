@@ -16,6 +16,7 @@ with a status, the question, the decision, the rationale, and the consequences.
 | [0008](ADR-0008-16bit.md) | 16-bit in the first release (§18.15) | accepted |
 | [0009](ADR-0009-palette-payload.md) | palette payload layout and canonical index packing (§6.2) | accepted |
 | [0010](ADR-0010-rle-tokens.md) | run-length token format, max run, ambiguity (§6.3) | accepted |
+| [0011](ADR-0011-predictor-entropy.md) | predictor set, residual folding, entropy coder, per-row selection (§6.4) | accepted |
 
 ### Still open
 

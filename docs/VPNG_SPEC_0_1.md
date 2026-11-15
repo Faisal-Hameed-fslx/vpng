@@ -180,7 +180,7 @@ A file whose entries cannot be explained by one uniform grid is corrupt.
 | 0  | Raw                       | implemented |
 | 1  | Palette                   | implemented |
 | 2  | Run-length                | implemented |
-| 3  | Spatial predictor + entropy | reserved |
+| 3  | Spatial predictor + entropy | implemented |
 | 4  | LZ77 dictionary           | reserved |
 | 5  | Predictor + dictionary    | reserved |
 | 6  | Context-adaptive entropy  | reserved |
@@ -238,6 +238,66 @@ control 0x80          malformed (a repeat run of length 1)
   truncated token, a run past the expected pixel count, or a stream whose total
   does not equal the tile's pixel count. The encoder's exact output (pinned by
   golden vectors) is not the only well-formed stream.
+* Only an empty tile or a payload above the per-tile size limit is **not
+  representable**; the encoder then falls back to another codec.
+
+### 5.4 Spatial predictor + entropy codec (id 3) — ADR-0011
+
+A tile is stored as a per-row predictor plan followed by an adaptive
+arithmetic-coded list of signed residuals. The payload is:
+
+```text
+offset 0   u8    version (must be 1)
+...        ..    tile width in pixels, unsigned LEB128
+...        ..    one predictor-mode byte per tile row
+...        ..    residual count, unsigned LEB128
+...        ..    entropy-coded residual data
+```
+
+* The width is in the payload so a tile is self-describing. The decoder
+  recomputes the row count from the width and the tile's expected length, and
+  rejects a width that does not divide it.
+* The residual count equals `pixel_count * channels`. Any other count is
+  corrupt.
+
+**Predictors** (whole samples only — a 16-bit channel is one value, never two
+bytes):
+
+| code | predictor  | prediction                                 |
+|------|------------|--------------------------------------------|
+| 0    | none       | `0`                                        |
+| 1    | left       | the previous pixel in the row, same channel |
+| 2    | up         | the pixel above, same channel              |
+| 3    | upper-left | the pixel above-left, same channel         |
+| 4    | average    | `(left + up) / 2`, rounded down            |
+| 5    | Paeth      | the Paeth choice of left/up/upper-left     |
+| 6    | gradient   | the LOCO-I choice of left/up               |
+
+A neighbour outside the tile — left of the first column, above the first row,
+upper-left of either — is `0`. Prediction resets at every tile boundary, so no
+tile depends on another. A predictor code above 6 is corrupt.
+
+**Residuals.** For a sample of `B` bytes, the residual is
+`(sample - prediction) mod 2^(8B)` folded to `[-2^(8B-1), 2^(8B-1) - 1]`.
+`prediction + residual mod 2^(8B)` reproduces the sample exactly. The predictors
+are integer functions of whole samples; no floating point is involved.
+
+**Entropy coder.** An adaptive binary arithmetic coder with 32-bit
+`low`/`range`, E1/E2/E3 renormalization and a byte flush. Each context holds
+an 11-bit probability that moves 1/32 of the way toward the symbol just seen.
+A residual is coded as one sign bit plus one decision per magnitude plane,
+most significant first; before the first 1-bit each plane uses its own "not
+started yet" context, and after it each plane uses its own plane context. The
+coder is a terminator on the residual count: exactly that many residuals are
+decoded and the decoder never has to detect end-of-stream. Bytes read past the
+end of the payload read as zero.
+
+* The encoder chooses a predictor per row by measuring each candidate with the
+  live coder's probability model and keeping the cheapest; ties go to the
+  lowest predictor code. The measurement uses a baked-in fixed-point `log2`
+  table, so the choice is identical on every host.
+* The payload is not canonical: any well-formed stream decodes to the same
+  pixels. The encoder's output is pinned by golden vectors.
 * Only an empty tile or a payload above the per-tile size limit is **not
   representable**; the encoder then falls back to another codec.
 

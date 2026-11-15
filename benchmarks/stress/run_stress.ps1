@@ -134,6 +134,7 @@ function Invoke-ImageCase {
     )
     $rawVpng = Join-Path $work "$Name-raw.vpng"
     $autoVpng = Join-Path $work "$Name-auto.vpng"
+    $predictorVpng = Join-Path $work "$Name-predictor.vpng"
     $regionPng = Join-Path $work "$Name-region.png"
     $freeBefore = Get-FreeMb
 
@@ -149,6 +150,16 @@ function Invoke-ImageCase {
     $verify = Invoke-Step "$Name`:verify-raw" (@("verify", $RawPath, $rawVpng) + $base)
     $region = Invoke-Step "$Name`:region-raw" @("decode-region", $rawVpng, $regionPng, "--x", "64", "--y", "64", "--width", "512", "--height", "512")
 
+    $encodePredictor = Invoke-Step "$Name`:encode-predictor" (@("encode", $RawPath, $predictorVpng) + $base + @("--codec", "predictor"))
+    $verifyPredictor = $null
+    $checkPredictor = $null
+    $predictorHistogram = @{}
+    if ($encodePredictor.exit -eq 0) {
+        $verifyPredictor = Invoke-Step "$Name`:verify-predictor" (@("verify", $RawPath, $predictorVpng) + $base)
+        $checkPredictor = Invoke-Step "$Name`:check-predictor" @("check", $predictorVpng)
+        $predictorHistogram = Get-CodecHistogram $predictorVpng
+    }
+
     $encodeAuto = Invoke-Step "$Name`:encode-auto" (@("encode", $RawPath, $autoVpng) + $base)
     $verifyAuto = $null
     $histogram = @{}
@@ -160,6 +171,7 @@ function Invoke-ImageCase {
 
     $rawSize = (Get-Item $rawVpng).Length
     $autoSize = if (Test-Path $autoVpng) { (Get-Item $autoVpng).Length } else { $null }
+    $predictorSize = if (Test-Path $predictorVpng) { (Get-Item $predictorVpng).Length } else { $null }
     $freeAfter = Get-FreeMb
 
     $case = [pscustomobject]@{
@@ -174,16 +186,21 @@ function Invoke-ImageCase {
         auto_vpng_bytes  = $autoSize
         auto_vs_raw      = if ($autoSize) { [math]::Round($autoSize / $rawSize, 4) } else { $null }
         auto_codecs      = $histogram
+        predictor_vpng_bytes = $predictorSize
+        predictor_vs_raw     = if ($predictorSize) { [math]::Round($predictorSize / $rawSize, 4) } else { $null }
+        predictor_codecs     = $predictorHistogram
         check_exit       = $check.exit
         verify_exit      = $verify.exit
         verify_auto_exit = if ($verifyAuto) { $verifyAuto.exit } else { $null }
+        verify_predictor_exit = if ($verifyPredictor) { $verifyPredictor.exit } else { $null }
+        check_predictor_exit  = if ($checkPredictor) { $checkPredictor.exit } else { $null }
         region_exit      = $region.exit
         free_mb_before   = $freeBefore
         free_mb_after    = $freeAfter
     }
     $cases.Add($case)
 
-    foreach ($file in @($RawPath, $rawVpng, $autoVpng, $regionPng)) {
+    foreach ($file in @($RawPath, $rawVpng, $autoVpng, $predictorVpng, $regionPng)) {
         Remove-Item $file -Force -ErrorAction SilentlyContinue
     }
 }

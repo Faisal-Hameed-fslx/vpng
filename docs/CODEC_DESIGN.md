@@ -76,15 +76,61 @@ representable** (`UnsupportedFeature`); the selector falls back. Byte-level gold
 vectors live in `vpng-codecs/src/rle.rs`; whole-file conformance and golden tests
 live in `vpng-testkit/tests/rle.rs`.
 
+## v0.1: Spatial predictor + entropy (id 3) — ADR-0011
+
+A tile is stored as a per-row predictor plan and an adaptive arithmetic-coded
+list of signed residuals.
+
+**Predictors**, all on whole samples (a 16-bit channel is one value, never two
+bytes): `none`, `left`, `up`, `upper-left`, `average` (`(left + up) / 2`),
+`Paeth`, and `gradient` (LOCO-I). A neighbour outside the tile — left of the
+first column, above the first row, upper-left of either — is `0`, so
+prediction resets at every tile boundary and no tile depends on another.
+
+**Residuals** are `(sample - prediction) mod 2^(8B)` folded to
+`[-2^(8B-1), 2^(8B-1) - 1]`, so `prediction + residual mod 2^(8B)` reproduces
+the sample exactly. Every predictor is an integer function of whole samples: no
+floating point, no rounding ambiguity, no quantization.
+
+**Entropy coder.** An adaptive binary arithmetic coder: 32-bit `low`/`range`,
+E1/E2/E3 renormalization, a byte flush, and one 11-bit probability per context
+that moves 1/32 of the way toward the symbol just seen. A residual is a sign
+bit plus one decision per magnitude plane, most significant first. Before the
+first 1-bit each plane uses its own "not started yet" context; after it each
+plane uses its own plane context. The per-plane leading contexts are what make
+a small residual nearly free — on a 64×64 gray8 tile of a constant-step ramp
+they changed the payload from 2400 bytes to 396 bytes.
+
+The coder is a terminator on the residual count: exactly that many residuals
+are decoded, so the decoder never has to detect end-of-stream and trailing
+bytes are tolerated.
+
+**Selection.** The encoder picks a predictor **per row** by measuring every
+candidate with the live coder's probability model and keeping the cheapest.
+The measurement is the coder's own information content (the sum of `-log2(p)`
+over the symbols), computed from a baked-in fixed-point `log2` table so the
+choice is identical on every host. Ties go to the lowest predictor code.
+
+An order-0 entropy estimate was tried first and rejected: it cannot see that
+the adaptive model has already adapted, so it mis-ranks predictors — it punishes
+a predictor for producing many tiny residuals even though the coder will code
+those nearly for free. Measuring with the live model avoids that; a probe that
+skips interval arithmetic and byte emission keeps it affordable.
+
+The cost of the selection is real: encoding takes roughly two to three times
+longer than the same coder would without it, because every candidate is
+measured before one is kept. The payload is not canonical — any well-formed
+stream decodes to the same pixels, and the encoder's output is pinned by golden
+vectors instead.
+
+Byte-level golden vectors live in `vpng-codecs/src/predictor.rs`; whole-file
+conformance and golden tests live in `vpng-testkit/tests/predictor.rs`.
+
 ## Planned codecs and their gates
 
 Each must land with its own golden vectors and property tests before any size
 claim is made.
 
-* **Spatial predictor + entropy (id 3).** Left, up, upper-left, average, Paeth,
-  gradient, and an adaptive choice by measured cost. Reversible modular residual
-  arithmetic per channel depth; no floating point. Prediction resets at tile
-  boundaries.
 * **LZ77 dictionary (id 4).** Bounded match length, distance, and memory; all
   references inside the tile; unambiguous literal/match tokens.
 * **Predictor + dictionary (id 5).** Predictor residuals fed to the dictionary.
@@ -113,4 +159,9 @@ a single codec and `with_auto_codec` restores selection.
   pixel formats, including forced-codec and auto-selection paths.
 * Run-length: flat tiles, mixed runs and literals, run splitting past 128,
   multi-byte symbols (16-bit channels, alpha), and the canonical-form rejections.
+* Predictor: every one of the seven predictors forced in turn, the extreme
+  sample values `0x00`, `0x01`, `0x7F`, `0x80`, `0xFE`, `0xFF` that exercise the
+  signed residual fold, edge tiles that are narrower or shorter than the grid,
+  and a property sweep over adversarial byte patterns and seeded noise across
+  all eight formats.
 * Raw: every format and the incompressible-noise fallback.

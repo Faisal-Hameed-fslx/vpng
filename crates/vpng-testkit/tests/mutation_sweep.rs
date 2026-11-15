@@ -2,12 +2,12 @@
 //!
 //! This is a deterministic, in-test corruption sweep, not coverage-guided
 //! fuzzing: every truncation and every single-byte substitution of a small
-//! Raw/Palette/RLE file, plus a seeded multi-byte corruption run. The contract
-//! under test is that parsing and decoding always return a typed `Result` and
-//! never panic, abort, or hang. `cargo fuzz` remains the P10 tool (see
-//! `docs/THREAT_MODEL.md`).
+//! Raw/Palette/RLE/Predictor file, plus a seeded multi-byte corruption run.
+//! The contract under test is that parsing and decoding always return a typed
+//! `Result` and never panic, abort, or hang. `cargo fuzz` remains the P10 tool
+//! (see `docs/THREAT_MODEL.md`).
 
-use vpng_codecs::{CODEC_PALETTE, CODEC_RAW, CODEC_RLE};
+use vpng_codecs::{CODEC_PALETTE, CODEC_PREDICTOR, CODEC_RAW, CODEC_RLE};
 use vpng_core::{CanonicalImage, Limits, PixelFormat};
 use vpng_decoder::Document;
 use vpng_encoder::{encode, EncodeOptions};
@@ -64,10 +64,18 @@ fn fixtures() -> Vec<(&'static str, u8, Vec<u8>)> {
     let raw = gradient(64, 64, PixelFormat::rgba8(), 3);
     let palette = checker(64, 64, PixelFormat::rgba8(), 8);
     let rle = rle_image();
+    // A smooth ramp, so the predictor codec actually applies and the file
+    // carries a real predictor plan and arithmetic-coded residuals.
+    let predictor = gradient(64, 64, PixelFormat::rgba8(), 1);
     vec![
         ("raw", CODEC_RAW, encoded(&raw, CODEC_RAW)),
         ("palette", CODEC_PALETTE, encoded(&palette, CODEC_PALETTE)),
         ("rle", CODEC_RLE, encoded(&rle, CODEC_RLE)),
+        (
+            "predictor",
+            CODEC_PREDICTOR,
+            encoded(&predictor, CODEC_PREDICTOR),
+        ),
     ]
 }
 

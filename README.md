@@ -5,7 +5,7 @@ A lossless, adaptive, tiled, random-access image format and editing engine.
 **Primary requirement:** exact pixel reconstruction.
 **Secondary target:** fit eligible images within 10 MB — measured, never promised.
 **Status:** v0.1 container implemented, compiled, and tested. `cargo build
---workspace` and `cargo test --workspace` both pass (148 tests, 0 failures) on
+--workspace` and `cargo test --workspace` both pass (181 tests, 0 failures) on
 `stable-x86_64-pc-windows-gnu` rustc 1.100.0. Large-image stress runs and a
 seed-corpus measurement are recorded in `docs/BENCHMARKS.md`. See
 `docs/ROADMAP_STATUS.md`.
@@ -16,12 +16,12 @@ seed-corpus measurement are recorded in `docs/BENCHMARKS.md`. See
 * All eight v0.1 pixel formats (Gray/GrayAlpha/RGB/RGBA at 8 and 16 bits).
 * A validated container: 64-byte header, 40-byte directory entries, CRC32C
   checksums, whole-image canonical SHA-256 digest.
-* Raw, Palette, and Run-length tile codecs, uniform tiling, per-tile codec
-  selection, tile decode, full decode, and region decode.
+* Raw, Palette, Run-length, and Predictor+entropy tile codecs, uniform tiling,
+  per-tile codec selection, tile decode, full decode, and region decode.
 * A CLI: `encode`, `decode`, `info`, `check`, `verify`, `decode-region`,
   `extract-tile`.
 * Conformance tests: exhaustive round-trip, region-vs-crop, malformed-input
-  sweeps, a bounded mutation sweep, golden files. 148 tests, all passing.
+  sweeps, a bounded mutation sweep, golden files. 181 tests, all passing.
 * Layered integrity: `info` (structure only), `check` (every payload CRC32C),
   `verify` (exact pixels against a reference).
 * Measured evidence: large-image stress (up to a 15360×8640 photo and
@@ -30,12 +30,13 @@ seed-corpus measurement are recorded in `docs/BENCHMARKS.md`. See
 
 ## What is explicitly not here yet
 
-Predictor/dictionary/entropy codecs, adaptive tiling, the tile cache, parallel
-decode, streaming, the editing engine, previews, the Python bindings, and
-coverage-guided fuzzing. A deterministic mutation sweep
+Dictionary and context-adaptive entropy codecs, adaptive tiling, the tile
+cache, parallel decode, streaming, the editing engine, previews, the Python
+bindings, and coverage-guided fuzzing. A deterministic mutation sweep
 (`crates/vpng-testkit/tests/mutation_sweep.rs`) covers truncations and
-single-byte substitutions over Raw, Palette, and Run-length files, but it is not
-a substitute for `cargo-fuzz`. Each phase has a row in the status table.
+single-byte substitutions over Raw, Palette, Run-length, and Predictor files,
+but it is not a substitute for `cargo-fuzz`. Each phase has a row in the status
+table.
 
 ## Build
 
@@ -68,7 +69,7 @@ vpng verify input.png output.vpng                  # exact pixels vs the origina
 vpng decode-region output.vpng crop.png --x 100 --y 200 --width 512 --height 512
 vpng extract-tile output.vpng --tile-x 0 --tile-y 1 --output tile.png
 vpng encode input.png out.vpng --max-size 10MB      # decimal ceiling (ADR-0006)
-vpng encode input.png out.vpng --codec rle         # raw | palette | rle | auto (default)
+vpng encode input.png out.vpng --codec predictor  # raw | palette | rle | predictor | auto (default)
 ```
 
 `info` reads only the header and directory, so it is O(1) in the tile count and
@@ -83,7 +84,7 @@ limit, `6` size limit, `7` verification failed, `8` I/O.
 ```text
 crates/vpng-core        formats, geometry, checked arithmetic, errors, limits
 crates/vpng-container   header, directory, checksums, canonical digest
-crates/vpng-codecs      TileCodec trait + Raw, Palette, Run-length (ids 0-2; 3-6 reserved)
+crates/vpng-codecs      TileCodec trait + Raw, Palette, Run-length, Predictor (ids 0-3; 4-6 reserved)
 crates/vpng-tiling      TileGrid and region-to-tile mapping
 crates/vpng-encoder     canonical pixels -> .vpng bytes
 crates/vpng-decoder     .vpng bytes -> full / tile / region pixels

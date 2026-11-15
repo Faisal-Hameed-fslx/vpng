@@ -58,10 +58,10 @@ scope and must be provided by the deployment (e.g. signed transport).
   CRC trailer, and payload bytes; truncation sweep; single-byte-flip sweep;
   unknown codec id. Each must yield a typed error and must not panic.
 * `mutation_sweep.rs`: every truncation and every single-byte substitution
-  (three values per offset) on one small Raw, Palette, and Run-length file, plus
-  2,000 seeded multi-byte corruptions per file. This is a deterministic sweep,
-  **not** coverage-guided fuzzing; it complements `malformed.rs` and is bounded
-  by construction.
+  (three values per offset) on one small Raw, Palette, Run-length, and Predictor
+  file, plus 2,000 seeded multi-byte corruptions per file. This is a
+  deterministic sweep, **not** coverage-guided fuzzing; it complements
+  `malformed.rs` and is bounded by construction.
 * Next phase: `cargo-fuzz` targets for the header parser, directory parser, and
   each codec, plus a `cargo test` run under the address sanitizer where the
   platform supports it.

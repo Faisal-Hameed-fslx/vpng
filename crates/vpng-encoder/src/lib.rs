@@ -143,13 +143,6 @@ pub fn encode(image: &CanonicalImage, options: &EncodeOptions) -> Result<EncodeR
         let _ = get_codec(options.codec_id)?;
     }
 
-    let enc_ctx = EncodeContext {
-        limits,
-        format,
-        tile_width: options.tile_width as u16,
-        tile_height: options.tile_height as u16,
-    };
-
     let directory_size = Directory::total_size(tile_count)?;
     let mut cursor = vpng_core::checked_add(HEADER_SIZE as u64, directory_size as u64)?;
 
@@ -168,6 +161,16 @@ pub fn encode(image: &CanonicalImage, options: &EncodeOptions) -> Result<EncodeR
         extract_tile(image, &geom, &mut tile_buffer)?;
         let uncompressed_len = u32::try_from(tile_buffer.len())
             .map_err(|_| Error::resource_limit("tile uncompressed size exceeds u32"))?;
+
+        // The context carries the tile's *actual* geometry: a tile in the last
+        // column or row is smaller than the nominal grid, and a codec that
+        // needs the pixel width (the predictor) must see the real one.
+        let enc_ctx = EncodeContext {
+            limits,
+            format,
+            tile_width: geom.width as u16,
+            tile_height: geom.height as u16,
+        };
 
         let (codec_id, payload) = select_payload(&tile_buffer, &enc_ctx, options)?;
         let checksum = crc32c(&payload);
@@ -391,7 +394,7 @@ mod tests {
     #[test]
     fn reserved_codec_is_rejected() {
         let image = gradient(64, 64, PixelFormat::rgba8());
-        let options = EncodeOptions::default().with_codec(vpng_codecs::CODEC_PREDICTOR);
+        let options = EncodeOptions::default().with_codec(vpng_codecs::CODEC_LZ77);
         assert_eq!(
             encode(&image, &options).unwrap_err().kind(),
             vpng_core::ErrorKind::UnsupportedFeature
@@ -453,8 +456,10 @@ mod tests {
 
     #[test]
     fn auto_selection_records_a_codec_per_tile() {
-        // A 4x2 grid where the top-left tile is flat and the rest are full-color
-        // noise, so a compressing codec and Raw must both appear.
+        // A 4x2 grid where the top-left tile is flat and the rest are
+        // full-color noise, so a compressing codec and Raw must both appear.
+        // Every channel of the noise tiles is random, so no predictor can
+        // predict them and Raw is the smallest representation.
         let width = 256u32;
         let height = 128u32;
         let mut data = vec![0u8; width as usize * height as usize * 4];
@@ -471,7 +476,7 @@ mod tests {
                 if flat { 0x20 } else { (noise >> 40) as u8 },
                 if flat { 0x20 } else { (noise >> 48) as u8 },
                 if flat { 0x20 } else { (noise >> 56) as u8 },
-                0xFF,
+                if flat { 0xFF } else { (noise >> 24) as u8 },
             ]);
         }
         let image = CanonicalImage::from_vec(width, height, PixelFormat::rgba8(), data).unwrap();

@@ -1,6 +1,6 @@
 # Roadmap status
 
-**Updated:** 2026-11-14
+**Updated:** 2026-11-15
 **Legend:**
 
 * `PASS` — the required test **exists and was executed**, and the observed result
@@ -17,8 +17,8 @@
 | `cargo --version` | `cargo 1.100.0 (3acc79c0c 2026-11-05)` |
 | Default host | `x86_64-pc-windows-gnu` |
 | Active toolchain | overridden by `E:\VPNG\rust-toolchain.toml` |
-| `cargo build --workspace` | **exit 0**, `Finished dev profile ... in 3.29s` |
-| `cargo test --workspace` | **exit 0**, `148 passed; 0 failed` |
+| `cargo build --workspace` | **exit 0**, `Finished dev profile ... in 3.85s` |
+| `cargo test --workspace` | **exit 0**, `181 passed; 0 failed` |
 | `cargo fmt --all --check` | **exit 0**, no diffs |
 | `cargo clippy --workspace --all-targets` | **exit 0**, zero warnings |
 
@@ -31,11 +31,11 @@ No Visual Studio is required: the GNU host ships `rust-lld` and a
 |-------|--------------|--------|----------|
 | P0 — repository audit and specification | unambiguous field sizes; executable serialization tests; reproducible build env | **PASS** | `vpng-container` 19 tests pass (header is exactly 64 bytes, directory entry exactly 40 bytes, round-trips exact, checksum detects a flipped byte). Build environment recorded in §1 and `docs/REPOSITORY_AUDIT.md`. |
 | P1 — minimal valid container | exact round-trip all formats; golden files; tile-only decode; malformed tests | **PASS** | `roundtrip.rs` 7 pass, `golden.rs` 5 pass, `malformed.rs` 12 pass, `vpng-decoder` 8 pass. Structural integrity checking (`vpng check`) is implemented and tested. See §3 for the CLI end-to-end run. |
-| P2 — baseline codecs | palette, RLE, predictor, LZ77, entropy | **PARTIAL** | Palette (id 1) implemented with byte-level golden vectors, whole-file golden fixture, and property tests (§3.1, A06); RLE (id 2) implemented with byte-level golden vectors, a whole-file golden fixture, and conformance tests (§3.2, A07). Predictor (id 3), LZ77 (id 4), predictor+dictionary (id 5), and entropy (id 6) remain reserved and are rejected on decode. Cost-based per-tile selection with a Raw fallback is implemented and tested. |
+| P2 — baseline codecs | palette, RLE, predictor, LZ77, entropy | **PARTIAL** | Palette (id 1) implemented with byte-level golden vectors, whole-file golden fixture, and property tests (§3.1, A06); RLE (id 2) implemented with byte-level golden vectors, a whole-file golden fixture, and conformance tests (§3.2, A07); Predictor+entropy (id 3) implemented with seven spatial predictors, per-row measured-cost selection, an adaptive arithmetic coder, byte-level golden vectors, a whole-file golden fixture, and conformance/property tests (§3.3, A08). LZ77 (id 4), predictor+dictionary (id 5), and context-adaptive entropy (id 6) remain reserved and are rejected on decode. Cost-based per-tile selection with a Raw fallback is implemented and tested. |
 | P3 — adaptive tiling, region decode | region == crop; coverage validation; bounded cache; parallel decode | **PARTIAL** | Fixed-grid region decode and exact-coverage validation pass (`region_decode_equals_full_decode_crop`). Adaptive tiling, tile cache, and parallel decode are not started. |
 | P4 — editing engine | localized edit; payload reuse; crash safety; undo/redo | **NOT STARTED** | Design only (`docs/EDITING_MODEL.md`). |
 | P5 — preview and multiresolution | thumbnail, pyramid | **NOT STARTED** | |
-| P6 — 16K and memory engineering | 16K stress; streaming; budgets | **NOT STARTED** | Limits are implemented and unit-tested, and a 16384×16384 gray8 run plus a 15360×8640 rgb8 run are recorded (§3.3, A19). 16K RGBA8 was skipped for insufficient free RAM; streaming, allocation budgets, cache eviction, and parallel limits are not started. |
+| P6 — 16K and memory engineering | 16K stress; streaming; budgets | **NOT STARTED** | Limits are implemented and unit-tested, and a 16384×16384 gray8 run plus a 15360×8640 rgb8 run are recorded (§3.4, A19). 16K RGBA8 was skipped for insufficient free RAM; streaming, allocation budgets, cache eviction, and parallel limits are not started. |
 | P7 — compression research | controlled experiments | **NOT STARTED** | A 9-image seed corpus and the E2/E3 runner exist (`docs/BENCHMARKS.md`), but the 750-image corpus and statistical reporting do not. |
 | P8 — 10 MB target evaluation | exact accounting; honest failure | **PARTIAL** | Exact size accounting passes (`size_accounting_is_exact`); refusal is honest and typed (`--max-size 1024` → exit 6 reporting the smallest lossless size 240,148). A 9-image seed corpus exists, but the 750-image target is unmet, so the per-category success distribution is unmeasured. |
 | P9 — Python API | bindings around Rust | **NOT STARTED** | CLI-driver tooling only. |
@@ -105,30 +105,67 @@ The directory records `codec_id = 2` for all four tiles. The auto and
 forced-RLE files differ only in the informational header `default_codec` byte
 (auto writes 0, forced writes 2); the rest of the file is byte-identical.
 
-### 3.3 Large-image stress and mutation evidence (2026-11-14)
+### 3.3 Predictor + entropy codec end-to-end evidence (diagonal ramp, gray8, tile 64)
+
+Fixture: a 256×256 gray8 image whose pixel value is `(x*2 + y*3) mod 256` — a
+smooth diagonal ramp, so the spatial predictors have something to predict and
+the entropy coder has a small, repetitive residual stream to code. Encoded via
+`--input-format raw` with the **release** build.
+
+| # | Command | Exit | Observed |
+|---|---------|-----:|----------|
+| 29 | `vpng encode src.raw auto.vpng --input-format raw --width 256 --height 256 --format gray8 --tile-size 64` | 0 | auto **picks Predictor**: 16 tiles, 5,176 bytes, ratio 12.662x, 0.079 B/px, canonical sha256 `2605a6c1…21075f5c` |
+| 30 | `vpng encode src.raw raw.vpng … --codec raw` | 0 | 16 tiles, 66,244 bytes; the auto file is **0.078x** of Raw |
+| 31 | `vpng encode src.raw pred.vpng … --codec predictor` | 0 | 16 tiles, 5,176 bytes; **byte-identical to the auto file from offset 64 to end of file** |
+| 32 | `vpng encode src.raw rle.vpng … --codec rle` | 0 | 16 tiles, 66,756 bytes; auto is **0.078x** of Run-length |
+| 33 | `vpng verify src.raw auto.vpng …` | 0 | `PASS` — decoded digest equals source digest |
+| 34 | `vpng decode auto.vpng restored.png` | 0 | writes 256×256 Gray8 PNG |
+| 35 | `vpng check auto.vpng` | 0 | `OK` — 16 tiles, 4,468 payload bytes verified with CRC32C |
+| 36 | `vpng info auto.vpng --json` | 0 | `default_codec 0`, `tile_count 16`, `tile 64x64`, `payloads_verified false` |
+| 37 | byte comparison, auto vs forced predictor | — | identical from offset 64; only header byte 27 (`default_codec`: 0 vs 3) differs, exactly as with Palette and RLE |
+| 38 | `vpng decode-region auto.vpng crop.png --x 100 --y 50 --width 40 --height 30` | 0 | 40x30 region, sha256 `d28c9e5c…eda4cc3b614` |
+| 39 | `vpng extract-tile auto.vpng --tile-x 1 --tile-y 0 --output tile.png` | 0 | tile at 64+0, 64x64 |
+
+The directory records `codec_id = 3` for all 16 tiles. The auto and
+forced-predictor files differ only in the informational header `default_codec`
+byte (auto writes 0, forced writes 3), the same relationship the Palette and
+Run-length phases recorded.
+
+### 3.4 Large-image stress and mutation evidence (2026-11-15, with Predictor)
 
 Driver: `benchmarks/stress/run_stress.ps1` (release build, tile 256, 12 logical
 CPUs, 7,916 MB RAM). Full tables are in `docs/BENCHMARKS.md`; the key rows:
 
 | Image | Codec | Output bytes | Encode ms | Verify ms | Peak RSS MB |
 |---|---|---:|---:|---:|---:|
-| 15360×8640 rgb8 (`1006677.jpg`) | raw | 398,212,868 | 3,564 | 1,999 | 1,142.9 |
-| 15360×8640 rgb8 (`1006677.jpg`) | auto | 308,132,486 (0.774×) | 3,748 | 2,336 | 980.1 |
-| 16384×16384 gray8 | raw | 268,599,364 | 5,363 | 965 | 772.0 |
-| 8192×8192 rgba8 | auto | 268,476,484 | 1,408 | 841 | 773.0 |
+| 15360×8640 rgb8 (`1006677.jpg`) | raw | 398,212,868 | 2,205 | 2,077 | 1,142.6 |
+| 15360×8640 rgb8 (`1006677.jpg`) | predictor | 124,199,623 (0.312×) | 54,823 | 14,906 | 882.0 |
+| 15360×8640 rgb8 (`1006677.jpg`) | auto | 124,197,035 (0.312×) | 56,789 | 14,998 | 882.0 |
+| 16384×16384 gray8 | raw | 268,599,364 | 1,512 | 1,090 | 772.0 |
+| 16384×16384 gray8 | auto | 8,024,132 (0.030×) | 26,078 | 10,779 | 523.3 |
+| 8192×8192 rgba8 | auto | 7,564,524 (0.028×) | 22,520 | 8,017 | 523.6 |
 
 Every row: `verify` exit 0 (exact pixels) and `check` exit 0 (all payload CRCs).
-A 512×512 region decode took 180–402 ms. The 16K RGBA8 case was **skipped**, not
+A 512×512 region decode took 416–553 ms. The 16K RGBA8 case was **skipped**, not
 failed: it needs roughly 3.4 GiB of live buffers and free physical memory never
-exceeded 1,712 MB. The harness records that reason in its JSON report.
+exceeded 1,445 MB. The harness records that reason in its JSON report.
+
+The predictor codec changes these numbers decisively. Before it landed (run of
+2026-11-14, same host and driver) the photo's auto file was 308,132,486 bytes
+(0.774×) and both synthetic cases fell back to Raw for every tile. The cost is
+visible in the encode column: every row is measured under all seven predictors
+before one is kept, so a predictor encode takes 20–55 s where Raw takes 1.4–2.2
+s. Decode and peak RSS are both *better* than the Raw path, because the payload
+is smaller.
 
 Mutation evidence: `crates/vpng-testkit/tests/mutation_sweep.rs` runs every
 truncation and every single-byte substitution (three values per offset) on one
-small Raw, Palette, and RLE file, plus 2,000 seeded multi-byte corruptions per
-file. All outcomes are typed errors or valid decodes; no panic occurred. This is
-a deterministic sweep, **not** coverage-guided fuzzing (see A22).
+small Raw, Palette, RLE, and Predictor file, plus 2,000 seeded multi-byte
+corruptions per file. All outcomes are typed errors or valid decodes; no panic
+occurred. This is a deterministic sweep, **not** coverage-guided fuzzing (see
+A22).
 
-### 3.4 Finding: `info` is not an integrity check — resolved by `check`
+### 3.5 Finding: `info` is not an integrity check — resolved by `check`
 
 Step 15 (`info` on a payload-corrupted file) returns **exit 0**. This is
 expected rather than a defect: `info` parses only the header and directory and
@@ -166,7 +203,7 @@ Integrity is therefore layered and each command states its own scope:
 | A05 | Raw fallback | incompressible test | **PASS** | `noise_roundtrips_exactly_everywhere` (uniform random) and `incompressible_noise_falls_back_to_raw` / `auto_selection_falls_back_to_raw_for_noise` |
 | A06 | Palette codec | golden vectors | **PASS** | byte-level vectors in `vpng-codecs/src/palette.rs` (1/2/3/16/256/>256 colours); golden fixture `palette_checker_64x64_rgba8_tile32.vpng`; property tests `vpng-testkit/tests/palette.rs` 5 pass; CLI §3.1 |
 | A07 | RLE codec | golden vectors | **PASS** | byte-level vectors in `vpng-codecs/src/rle.rs` (literal/repeat boundaries, run splitting, multi-byte symbols, malformed streams); golden fixture `rle_mixed_64x64_gray8_tile64.vpng`; conformance tests `vpng-testkit/tests/rle.rs` 6 pass; CLI §3.2 |
-| A08 | Prediction codec | property tests | NOT STARTED | |
+| A08 | Prediction codec | property tests | **PASS** | seven predictors (none/left/up/upper-left/average/Paeth/gradient) forced in turn, reversible modular residual folding, per-row measured-cost selection; byte-level vectors in `vpng-codecs/src/predictor.rs`; golden fixture `predictor_ramp_64x64_gray8_tile64.vpng`; conformance and property tests `vpng-testkit/tests/predictor.rs` 10 pass; CLI §3.3 |
 | A09 | Dictionary codec | property tests | NOT STARTED | |
 | A10 | Entropy coder | golden vectors | NOT STARTED | |
 | A11 | Tile-only decode | instrumented test | **PASS** | `single_tile_decode_matches_full_image`, `region_does_not_decode_unrelated_tiles` |
@@ -177,10 +214,10 @@ Integrity is therefore layered and each command states its own scope:
 | A16 | Undo/redo | exact hash tests | NOT STARTED | |
 | A17 | Crash-safe commit | fault injection | NOT STARTED | |
 | A18 | Preview separation | format and API tests | NOT STARTED | |
-| A19 | 16K stress | recorded run | **PARTIAL** | 16384×16384 gray8 and 15360×8640 rgb8 recorded with times, peak RSS, exactness (§3.3). 16K RGBA8 skipped for insufficient free RAM (needs ≈3.4 GiB); deferred to P6 streaming. No general 16K claim is made. |
+| A19 | 16K stress | recorded run | **PARTIAL** | 16384×16384 gray8 and 15360×8640 rgb8 recorded with times, peak RSS, exactness (§3.4). 16K RGBA8 skipped for insufficient free RAM (needs ≈3.4 GiB); deferred to P6 streaming. No general 16K claim is made. |
 | A20 | 10 MB enforcement | boundary tests | **PASS** | `size_limit_is_reported_not_violated`; CLI step 9 exit 6 |
 | A21 | Corruption detection | mutation tests | **PASS** | `malformed.rs` 12 tests; `vpng-decoder` integrity tests; CLI step 12 (`decode`) and step 14 (`check`) exit 4 |
-| A22 | Fuzz robustness | fuzz report | **PARTIAL** | `malformed.rs` 12 tests plus `mutation_sweep.rs` 4 tests: all truncations and every single-byte substitution on Raw/Palette/RLE files, and 2,000 seeded multi-byte corruptions per file, with no panic. Not coverage-guided; `cargo-fuzz` targets remain P10. |
+| A22 | Fuzz robustness | fuzz report | **PARTIAL** | `malformed.rs` 12 tests plus `mutation_sweep.rs` 4 tests: all truncations and every single-byte substitution on Raw/Palette/RLE/Predictor files, and 2,000 seeded multi-byte corruptions per file, with no panic. Not coverage-guided; `cargo-fuzz` targets remain P10. |
 | A23 | Python API | integration tests | NOT STARTED | |
 | A24 | v1.0 compatibility | golden corpus | NOT STARTED | |
 
@@ -189,7 +226,7 @@ Integrity is therefore layered and each command states its own scope:
 | Suite | Tests | Result |
 |-------|------:|--------|
 | `vpng-cli` unit | 11 | ok |
-| `vpng-codecs` unit | 35 | ok |
+| `vpng-codecs` unit | 58 | ok |
 | `vpng-container` unit | 19 | ok |
 | `vpng-core` unit | 19 | ok |
 | `vpng-decoder` unit | 8 | ok |
@@ -200,10 +237,11 @@ Integrity is therefore layered and each command states its own scope:
 | `tests/malformed.rs` | 12 | ok |
 | `tests/mutation_sweep.rs` | 4 | ok |
 | `tests/palette.rs` | 5 | ok |
+| `tests/predictor.rs` | 10 | ok |
 | `tests/rle.rs` | 6 | ok |
 | `tests/roundtrip.rs` | 7 | ok |
 | Doc-tests | 0 | ok |
-| **Total** | **148** | **148 passed, 0 failed** |
+| **Total** | **181** | **181 passed, 0 failed** |
 
 ## 6. Defects found and fixed this phase
 
@@ -223,32 +261,41 @@ Integrity is therefore layered and each command states its own scope:
 | 12 | stress harness recorded a blank exit code for successful encodes | `Start-Process -PassThru -RedirectStandardOutput` does not populate `ExitCode` in this PowerShell | switched the harness to `System.Diagnostics.Process` with redirected streams |
 | 13 | warm-up golden assertion failed on an in-test fixture | the seed was re-created with the *last* mutation value instead of the original when one offset was hit twice | restore recorded bytes in reverse order |
 | 14 | corpus report printed `â€”` instead of an unavailable marker | the Python source literal was double-encoded | replaced it with an ASCII dash; scripts are now ASCII-only |
+| 15 | predictor selection picked `none` for a flat tile and `up` for a horizontal ramp | the cost proxy summed each residual's significant-bit count, which cannot see that the adaptive model prices a repeated small residual at nearly zero bits | replaced the proxy with a measurement against the live coder's probability model (`Probe`), using a baked-in fixed-point `log2` table |
+| 16 | predictor encoding took 221 ns/sample in release | the selector re-encoded every candidate through the **full** arithmetic encoder, then rolled the state back | split the coder into a `BitSink` trait with an output-producing `Encoder` and a cost-only `Probe`; the probe skips interval arithmetic and byte emission. 221 ns → 81 ns/sample |
+| 17 | `cargo clippy --workspace --all-targets` reported 6 warnings in the new codec | `RangeInclusive::contains` hand-rolled, a loop variable used to index a vector, and `extend(drain(..))` where `append` fits | rewrote each site; clippy is warning-free |
+| 18 | `auto_selection_records_a_codec_per_tile` failed after the predictor landed | the fixture's alpha channel was a constant `0xFF`, so the predictor could predict alpha exactly and legitimately beat Raw on the "noise" tiles | made every channel of the noise tiles random, so no predictor can predict them and Raw is genuinely the smallest representation |
 
 No defect was found in the container, encoder, or decoder logic itself. The three
 `integrity_check_*` tests were added with the `check` command (5 → 8 decoder
 tests); the palette phase added the codec, the selection logic, and 23 tests
 (99 → 122); the RLE phase added the codec, the registry/selector/CLI wiring, and
 22 tests (122 → 144); the evidence batch added the mutation sweep and 4 tests
-(144 → 148).
+(144 → 148); the predictor phase added the codec, the registry/selector/CLI
+wiring, and 33 tests (148 → 181).
 
 ## 7. Not yet measured (explicitly no claims)
 
 Corpus success rate under 10 MB, general 16K performance, memory ceilings, edit
 latency, and streaming behavior. Palette demonstrably shrinks palette-friendly
 tiles (CLI §3.1: 7.148x on a synthetic two-colour image) and Run-length shrinks
-flat tiles (CLI §3.2: 33.851x on a synthetic flat image). The 9-image seed corpus
-(`docs/BENCHMARKS.md`) now gives measured auto/raw/PNG/WebP ratios per category
-and a stress table, but it is a seed, not the 750-image corpus, so **no
+flat tiles (CLI §3.2: 33.851x on a synthetic flat image). The predictor codec
+now shrinks smooth and photographic content (seed corpus: the 15360×8640 photo
+went from 0.774x to **0.312x** of its canonical bytes). The 9-image seed corpus
+(`docs/BENCHMARKS.md`) gives measured auto/raw/PNG/WebP ratios per category and
+a stress table, but it is a seed, not the 750-image corpus, so **no
 distribution, per-resolution, or 10 MB success claim follows from it**; on
-photographs and paintings VPNG still loses to PNG and WebP because no predictor,
-dictionary, or entropy coder exists yet. Raw stays ≈1.0x and remains the
-guaranteed fallback. The 16384×16384 RGBA8 case was skipped for insufficient free
-physical memory. These remain targets, not results. No "faster than X" or "fits
-in 10 MB" claim is made anywhere in this repository.
+photographs and paintings VPNG still loses to PNG and WebP because the
+dictionary and context-adaptive entropy codecs do not exist yet. Raw stays
+≈1.0x and remains the guaranteed fallback. The 16384×16384 RGBA8 case was
+skipped for insufficient free physical memory. These remain targets, not
+results. No "faster than X" or "fits in 10 MB" claim is made anywhere in this
+repository.
 
 ## 8. Next phase
 
-P2 continues: palette (id 1) and RLE (id 2) have landed; implement the remaining
-baseline codecs (ids 3–6) one at a time — next is the spatial predictor (id 3) —
-each with golden vectors and property tests before any size claim, keeping Raw as
-the guaranteed fallback and never sacrificing exactness.
+P2 continues: palette (id 1), RLE (id 2), and predictor+entropy (id 3) have
+landed; implement the remaining baseline codecs (ids 4–6) one at a time — next
+is the LZ77 dictionary (id 4) — each with golden vectors and property tests
+before any size claim, keeping Raw as the guaranteed fallback and never
+sacrificing exactness.

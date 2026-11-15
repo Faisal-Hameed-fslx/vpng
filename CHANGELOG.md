@@ -4,6 +4,58 @@ All notable changes to VPNG are recorded here. The format follows Keep a
 Changelog; versions follow semantic versioning, with the format version tracked
 separately as major.minor in the header.
 
+## [Unreleased]
+
+### Added
+
+* **Spatial predictor + entropy codec (id 3, ADR-0011).** A tile is stored as a
+  per-row predictor plan plus an adaptive arithmetic-coded list of signed
+  residuals. Seven predictors on whole samples — none, left, up, upper-left,
+  average, Paeth, and gradient (LOCO-I) — with out-of-tile neighbours treated
+  as `0`, so prediction resets at every tile boundary and no tile depends on
+  another. Residuals are `(sample - prediction) mod 2^(8B)` folded to
+  `[-2^(8B-1), 2^(8B-1) - 1]`, so reconstruction is exact and no floating
+  point is involved. The entropy coder is an adaptive binary arithmetic coder
+  (11-bit probabilities, shift-5 adaptation) whose contexts are per sign and
+  per magnitude plane. The encoder picks a predictor **per row** by measuring
+  each candidate with the live coder's probability model, using a baked-in
+  fixed-point `log2` table so the choice is identical on every host. Byte-level
+  golden vectors, a whole-file golden fixture, and conformance/property tests,
+  with `--codec predictor` added to the CLI.
+* ADR-0011 (`docs/decisions/ADR-0011-predictor-entropy.md`) records the
+  predictor set, the residual folding, the entropy coder, and the per-row
+  selection.
+* The seed-corpus runner now measures the predictor codec alongside Raw,
+  Palette, and Run-length, and the large-image stress harness now encodes a
+  forced-predictor file next to the Raw and auto files.
+* The bounded mutation sweep now covers a Predictor file as well, so every
+  implemented codec is swept for truncations, single-byte substitutions, and
+  seeded multi-byte corruptions.
+
+### Measured
+
+Re-measured on the 9-image seed corpus (2026-11-15, same host and corpus as
+the 2026-11-14 run; see `docs/BENCHMARKS.md` for the full table):
+
+* The large photo (15360×8640 rgb8) drops from **0.774×** to **0.312×** of its
+  canonical bytes, and the cat photograph from 0.830× to 0.509×.
+* Auto selection was again no worse than the best forced codec on all 9
+  images, and it now beats forced predictor on the large photo by 2,588 bytes
+  by mixing in Palette for two tiles.
+* The noise image still falls back to Raw at 1.000× even though a forced
+  predictor run expands to 1.016×.
+
+### Known limitations
+
+* VPNG still loses to PNG and WebP lossless on photographs and paintings: the
+  dictionary (id 4), predictor+dictionary (id 5), and context-adaptive entropy
+  (id 6) codecs do not exist yet.
+* The predictor payload is **not canonical**: any well-formed stream decodes to
+  the same pixels, and the encoder's particular per-row choice is pinned by
+  golden vectors rather than by the format.
+* Predictor selection is greedy per row, and encoding costs roughly two to
+  three times what the same coder would cost without the per-row measurement.
+
 ## [0.1.0] — 2026-11-13
 
 First implementation phase. The workspace **builds and passes its tests**:

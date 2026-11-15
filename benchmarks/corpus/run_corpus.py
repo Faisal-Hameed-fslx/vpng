@@ -27,7 +27,7 @@ REPO = HERE.parents[1]
 sys.path.insert(0, str(REPO / "benchmarks" / "stress"))
 from canonicalize import convert_image  # noqa: E402
 
-CODECS = ["raw", "palette", "rle", "auto"]
+CODECS = ["raw", "palette", "rle", "predictor", "auto"]
 PIL_MODES = {"gray8": "L", "graya8": "LA", "rgb8": "RGB", "rgba8": "RGBA"}
 
 
@@ -149,7 +149,11 @@ def measure_entry(entry: dict, root: Path, work: Path, vpng: Path, max_baseline_
     record["baselines"]["jxl"] = {"error": "no JPEG XL encoder installed"}
     record["baselines"]["flif"] = {"error": "no FLIF encoder installed"}
 
-    forced = [record["vpng"][codec]["bytes"] for codec in ("raw", "palette", "rle") if "bytes" in record["vpng"][codec]]
+    forced = [
+        record["vpng"][codec]["bytes"]
+        for codec in ("raw", "palette", "rle", "predictor")
+        if "bytes" in record["vpng"][codec]
+    ]
     if forced and "bytes" in record["vpng"]["auto"]:
         best = min(forced)
         auto = record["vpng"]["auto"]["bytes"]
@@ -188,6 +192,7 @@ def summarise(records: list[dict]) -> dict:
             "median_raw": median_ratio(["vpng", "raw"]),
             "median_palette": median_ratio(["vpng", "palette"]),
             "median_rle": median_ratio(["vpng", "rle"]),
+            "median_predictor": median_ratio(["vpng", "predictor"]),
             "median_png": median_ratio(["baselines", "png"]),
             "median_webp": median_ratio(["baselines", "webp"]),
             "auto_no_worse_than_best": sum(1 for item in items if item.get("auto_no_worse_than_best")),
@@ -206,8 +211,8 @@ def markdown(records: list[dict], summary: dict, context: dict) -> str:
         "Ratios are encoded size divided by canonical pixel bytes on the same pixels.",
         "The seed subset is not the 750-image target; claims apply to these images only.",
         "",
-        "| id | category | dimensions | format | canonical | vpng raw | vpng palette | vpng rle | vpng auto | PNG | WebP |",
-        "|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|",
+        "| id | category | dimensions | format | canonical | vpng raw | vpng palette | vpng rle | vpng predictor | vpng auto | PNG | WebP |",
+        "|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
 
     def cell(node: dict) -> str:
@@ -217,7 +222,7 @@ def markdown(records: list[dict], summary: dict, context: dict) -> str:
 
     for record in records:
         lines.append(
-            "| {id} | {category} | {width}x{height} | {pixel_format} | {canonical:,} | {raw} | {palette} | {rle} | {auto} | {png} | {webp} |".format(
+            "| {id} | {category} | {width}x{height} | {pixel_format} | {canonical:,} | {raw} | {palette} | {rle} | {predictor} | {auto} | {png} | {webp} |".format(
                 id=record["id"],
                 category=record["category"],
                 width=record["width"],
@@ -227,6 +232,7 @@ def markdown(records: list[dict], summary: dict, context: dict) -> str:
                 raw=cell(record["vpng"].get("raw", {})),
                 palette=cell(record["vpng"].get("palette", {})),
                 rle=cell(record["vpng"].get("rle", {})),
+                predictor=cell(record["vpng"].get("predictor", {})),
                 auto=cell(record["vpng"].get("auto", {})),
                 png=cell(record["baselines"].get("png", {})),
                 webp=cell(record["baselines"].get("webp", {})),
@@ -237,8 +243,8 @@ def markdown(records: list[dict], summary: dict, context: dict) -> str:
         "",
         "## Category medians",
         "",
-        "| category | images | auto | raw | palette | rle | PNG | WebP | auto <= best forced |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "| category | images | auto | raw | palette | rle | predictor | PNG | WebP | auto <= best forced |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for category, row in summary.items():
         def fmt(value):
@@ -246,8 +252,8 @@ def markdown(records: list[dict], summary: dict, context: dict) -> str:
 
         lines.append(
             f"| {category} | {row['count']} | {fmt(row['median_auto'])} | {fmt(row['median_raw'])} | "
-            f"{fmt(row['median_palette'])} | {fmt(row['median_rle'])} | {fmt(row['median_png'])} | "
-            f"{fmt(row['median_webp'])} | {row['auto_no_worse_than_best']}/{row['count']} |"
+            f"{fmt(row['median_palette'])} | {fmt(row['median_rle'])} | {fmt(row['median_predictor'])} | "
+            f"{fmt(row['median_png'])} | {fmt(row['median_webp'])} | {row['auto_no_worse_than_best']}/{row['count']} |"
         )
     lines += [
         "",

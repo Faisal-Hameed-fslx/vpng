@@ -1,12 +1,14 @@
 //! `vpng-codecs` — tile codecs behind a single trait.
 //!
-//! Implemented: Raw (id 0), Palette (id 1) and Run-length (id 2). Every other id
-//! is reserved and rejected with [`vpng_core::ErrorKind::UnsupportedFeature`]
-//! rather than silently mis-decoded. See ADR-0004 for the id table.
+//! Implemented: Raw (id 0), Palette (id 1), Run-length (id 2) and the spatial
+//! predictor with an arithmetic entropy coder (id 3). Every other id is reserved
+//! and rejected with [`vpng_core::ErrorKind::UnsupportedFeature`] rather than
+//! silently mis-decoded. See ADR-0004 for the id table.
 
 #![forbid(unsafe_code)]
 
 pub mod palette;
+pub mod predictor;
 pub mod raw;
 pub mod rle;
 
@@ -18,7 +20,7 @@ pub const CODEC_RAW: u8 = 0;
 pub const CODEC_PALETTE: u8 = 1;
 /// Codec id 2: run-length.
 pub const CODEC_RLE: u8 = 2;
-/// Codec id 3: spatial prediction plus entropy. Reserved in v0.1.
+/// Codec id 3: spatial prediction plus an adaptive arithmetic entropy coder.
 pub const CODEC_PREDICTOR: u8 = 3;
 /// Codec id 4: LZ77-style dictionary. Reserved in v0.1.
 pub const CODEC_LZ77: u8 = 4;
@@ -38,16 +40,19 @@ pub const CODEC_AUTO: u8 = u8::MAX;
 /// A cost-based selector iterates this in order, so when two codecs produce
 /// payloads of equal size the lowest id wins (a defined, deterministic
 /// tie-break).
-pub const IMPLEMENTED_CODEC_IDS: &[u8] = &[CODEC_RAW, CODEC_PALETTE, CODEC_RLE];
+pub const IMPLEMENTED_CODEC_IDS: &[u8] = &[CODEC_RAW, CODEC_PALETTE, CODEC_RLE, CODEC_PREDICTOR];
 
 /// Everything a codec needs to encode one tile.
 #[derive(Debug, Clone, Copy)]
 pub struct EncodeContext {
     pub limits: Limits,
     pub format: PixelFormat,
-    /// Nominal tile width (edge tiles may be narrower).
+    /// The tile's pixel width. A tile in the last column of an image is
+    /// narrower than the nominal grid, so this is the *actual* width of the
+    /// tile being encoded, not the grid's nominal size.
     pub tile_width: u16,
-    /// Nominal tile height (edge tiles may be shorter).
+    /// The tile's pixel height. A tile in the last row is shorter than the
+    /// nominal grid, so this is the actual height.
     pub tile_height: u16,
 }
 
@@ -115,6 +120,7 @@ pub fn get_codec(id: u8) -> Result<&'static dyn TileCodec> {
         CODEC_RAW => Ok(&raw::RAW_CODEC),
         CODEC_PALETTE => Ok(&palette::PALETTE_CODEC),
         CODEC_RLE => Ok(&rle::RLE_CODEC),
+        CODEC_PREDICTOR => Ok(&predictor::PREDICTOR_CODEC),
         other => {
             let name = codec_name(other).unwrap_or("unknown");
             if codec_name(other).is_some() {
@@ -166,9 +172,18 @@ mod tests {
     }
 
     #[test]
+    fn predictor_is_available() {
+        assert!(is_implemented(CODEC_PREDICTOR));
+        assert_eq!(
+            get_codec(CODEC_PREDICTOR).unwrap().codec_id(),
+            CODEC_PREDICTOR
+        );
+        assert_eq!(get_codec(CODEC_PREDICTOR).unwrap().name(), "predictor");
+    }
+
+    #[test]
     fn reserved_codecs_are_unsupported() {
         for id in [
-            CODEC_PREDICTOR,
             CODEC_LZ77,
             CODEC_PREDICTOR_DICTIONARY,
             CODEC_CONTEXT_ENTROPY,
