@@ -5,6 +5,13 @@
 **Byte order:** little-endian throughout
 **Magic:** `56 50 4E 47 0D 0A 1A 0A` (`VPNG\r\n\x1a\n`)
 
+> **Clarification (2026-11-18).** Header byte 27 (`default codec id`) is
+> resolved as **informational** — see section 2.3 and
+> `docs/decisions/ADR-0003-directory-authority.md`. The byte, its offset, its
+> size and the format version are unchanged; only the description was wrong.
+> A conforming test for the clarified behaviour is
+> `crates/vpng-testkit/tests/default_codec.rs`.
+
 This document is normative for the v0.1 implementation. Where a design question
 was open, the resolved answer is recorded in `docs/decisions/`. If code and this
 document disagree, that is a bug in one of them; file it, do not paper over it.
@@ -61,7 +68,7 @@ the header's feature flags. Readers of v0.1 files never encounter them.
 | 24     | 1    | channel count     | must equal color model's channel count |
 | 25     | 1    | bits per channel  | 8 or 16 |
 | 26     | 1    | color model id    | see section 3 |
-| 27     | 1    | default codec id  | codec used for all tiles in v0.1 |
+| 27     | 1    | default codec id  | informational hint; see 2.3 |
 | 28     | 4    | tile count        | number of directory entries |
 | 32     | 8    | directory offset  | byte offset from file start |
 | 40     | 8    | declared file size| exact total file length |
@@ -84,6 +91,40 @@ independent of its own value and covers every other byte of the header.
 A parser must check, in order: total length, magic, major version, minor
 version, header size, color model and bits, channel-count agreement, header
 checksum, reserved-is-zero, and feature flags. The first failure is reported.
+
+### 2.3 The default codec id is informational — ADR-0003
+
+Header byte 27 (`default codec id`) is **informational**. It is a hint about
+the file as a whole. It is **not** the authority for how any tile is decoded.
+
+* A reader **must not** use it to decode a tile, and **must not** reject a
+  file because of its value. The byte is not validated: it may name a codec
+  the file does not use, a reserved id, or an id that does not exist at all.
+* The **`codec id` in the tile's own directory entry** is the authority for
+  that tile (section 4.1). It is the only field that decides how a payload is
+  decoded.
+* A writer records the codec it used for the whole file when one codec
+  applies to every tile, and records **Raw (0)** when the tiles were selected
+  individually, because there is then no single file codec to name. Such a
+  file's header byte therefore does not describe most of its own tiles. That
+  is expected, and it is not an error.
+
+This closes the question the first draft of this section left open: the
+earlier wording, "codec used for all tiles in v0.1", was wrong, because v0.1
+writers select a codec **per tile** (section 5). The correction changes only
+the description. The byte keeps its offset, its size and its meaning as a
+hint; the format version stays 0.1; and no conforming file changes meaning,
+because the directory has always been the authority (ADR-0003, accepted
+2026-11-12).
+
+A conforming implementation behaves as follows:
+
+| Situation | Required behaviour |
+|---|---|
+| The header names a codec the file does not use | Decode from the directory; the pixels are unaffected |
+| The header names a reserved id (4, 5, 6) | Accept the file; the byte is ignored |
+| The header names an unknown id (for example 0xFE) | Accept the file; the byte is ignored |
+| A **directory entry** names a reserved or unknown id | Reject the file with `UnsupportedFeature` (section 5) |
 
 ---
 
@@ -130,7 +171,7 @@ canonical order, followed by a 4-byte CRC32C over the entry bytes.
 | 4      | 4    | tile y              | pixel origin |
 | 8      | 2    | tile width          | pixels, non-zero |
 | 10     | 2    | tile height         | pixels, non-zero |
-| 12     | 1    | codec id            | section 5 |
+| 12     | 1    | codec id            | section 5; **authoritative** for this tile |
 | 13     | 1    | predictor id        | 0 when the codec needs no predictor |
 | 14     | 2    | flags               | 0 in v0.1 |
 | 16     | 8    | payload offset      | byte offset from file start |
@@ -187,6 +228,10 @@ A file whose entries cannot be explained by one uniform grid is corrupt.
 
 A decoder that meets a reserved or unknown codec id must fail with
 `UnsupportedFeature`. It must not attempt a best-effort decode.
+
+A tile is decoded with the codec named in **its own directory entry**
+(section 4.1). The header's `default codec id` is informational and plays no
+part in decoding a tile (section 2.3).
 
 ### 5.1 Raw codec (id 0)
 

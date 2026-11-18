@@ -74,6 +74,14 @@ separately as major.minor in the header.
 * Four milestone reports: `docs/P3_5_COMPRESSION_RESEARCH_REPORT.md`,
   `docs/P4_EDITING_ENGINE_REPORT.md`, `docs/P4_MEMORY_VALIDATION.md`,
   `docs/P4_COMPATIBILITY_REPORT.md`.
+* **The `default_codec` wording is resolved.** Header byte 27 is
+  **informational**: a reader must not use it to decode a tile and must not
+  reject a file because of its value; the per-tile directory entry's `codec
+  id` is the authority (ADR-0003). Specification §2.3 states it, §4.1 marks
+  the directory entry as authoritative, and §5 repeats it. The byte, its
+  offset, its size and the format version are unchanged, so no conforming
+  file changes meaning and the golden fixtures are untouched. 7 new
+  conformance tests in `crates/vpng-testkit/tests/default_codec.rs`.
 
 ### Measured
 
@@ -94,7 +102,7 @@ separately as major.minor in the header.
   reaches 0.2995× against PNG's 0.3384× and WebP's 0.2549×.
 * **Fuzzing: 200,000 iterations × 7 targets = 1,400,000 executions, 0
   findings**, 3.9 s in the release profile. No library defect was found.
-* The test suite is **283 passed / 0 failed** (was 181).
+* The test suite is **296 passed / 0 failed** (was 181).
 
 ### Known limitations
 
@@ -132,11 +140,14 @@ separately as major.minor in the header.
 * **No graphical editor.** The engine is a library and a benchmark.
 * The editing history is in memory only, temporary files left by a killed
   process are not swept, and there is no file locking.
-* The spec's wording for header byte 27 (`default_codec`) says "codec used
+* The spec's wording for header byte 27 (`default_codec`) said "codec used
   for all tiles in v0.1", while the implementation treats it as informational
-  and the per-tile directory entry as authoritative. The wording needs a
-  specification pass; the behaviour is already the one ADR-0003 establishes.
-  Recorded in `docs/P4_COMPATIBILITY_REPORT.md`.
+  and the per-tile directory entry as authoritative. **Resolved on
+  2026-11-18**: specification §2.3 now states that the byte is
+  informational, §4.1 marks the directory entry's `codec id` as
+  authoritative, and §5 repeats it. The byte, its offset, its size and the
+  format version are unchanged, so no file changes meaning; the behaviour is
+  pinned by `crates/vpng-testkit/tests/default_codec.rs`.
 * VPNG still loses to PNG, WebP lossless and JPEG XL lossless on photographs and
   paintings: the dictionary (id 4), predictor+dictionary (id 5), and
   context-adaptive entropy (id 6) codecs do not exist yet.

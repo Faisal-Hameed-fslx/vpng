@@ -18,7 +18,7 @@
 | Default host | `x86_64-pc-windows-gnu` |
 | Active toolchain | overridden by `E:\VPNG\rust-toolchain.toml` |
 | `cargo build --workspace` | **exit 0**, `Finished dev profile ... in 3.85s` |
-| `cargo test --workspace --all-targets` | **exit 0**, `289 passed; 0 failed` |
+| `cargo test --workspace --all-targets` | **exit 0**, `296 passed; 0 failed` |
 | `cargo fmt --all --check` | **exit 0**, no diffs |
 | `cargo clippy --workspace --all-targets` | **exit 0**, zero warnings |
 
@@ -240,6 +240,7 @@ profiles, `x86_64-pc-windows-gnu`.
 | `vpng-fuzzing` `tests/fuzz_smoke.rs` | 3 | ok |
 | `vpng-research` bin | 0 | ok |
 | `vpng-testkit` unit | 2 | ok |
+| `tests/default_codec.rs` | 7 | ok |
 | `tests/golden.rs` | 5 | ok |
 | `tests/malformed.rs` | 12 | ok |
 | `tests/mutation_sweep.rs` | 4 | ok |
@@ -251,11 +252,11 @@ profiles, `x86_64-pc-windows-gnu`.
 | `vpng-validation` unit | 2 | ok |
 | `vpng-validation` bins | 0 | ok |
 | Doc-tests | 0 | ok |
-| **Total** | **289** | **289 passed, 0 failed** |
+| **Total** | **296** | **296 passed, 0 failed** |
 
-The 108 new tests are: 52 codec tests (22 LZ77, 14 CARC, 12 hybrids, plus
-the registry and entropy-stage tests), 51 editing tests, 3 fuzzing tests
-and 2 memory-accounting tests.
+The 115 new tests are: 52 codec tests (22 LZ77, 14 CARC, 12 hybrids, plus
+the registry and entropy-stage tests), 51 editing tests, 3 fuzzing tests,
+2 memory-accounting tests and 7 `default_codec` conformance tests.
 
 ## 6. Defects found and fixed this phase
 
@@ -303,7 +304,8 @@ tests); the palette phase added the codec, the selection logic, and 23 tests
 wiring, and 33 tests (148 → 181); the P3.5 + P4 milestone added the research
 codecs, the editing engine, the fuzzing harness, the validation tools and 102
 tests (181 → 283); the pre-commit correction pass added 6 editing tests
-(283 → 289).
+(283 → 289); the `default_codec` specification clarification added 7
+conformance tests (289 → 296).
 
 ## 7. Not yet measured (explicitly no claims)
 
@@ -360,20 +362,25 @@ P3 and P6 continue in parallel, and neither blocks the other:
   evidence; a promotion needs a specification update, a version bump, a
   migration policy and compatibility tests, in that order.
 
-Two housekeeping items are carried forward from this milestone and are not
-code defects:
+Two housekeeping items were carried forward from this milestone. One is now
+closed and one is still open:
 
-1. `docs/VPNG_SPEC_0_1.md` line 64 describes header byte 27 as the
-   "codec used for all tiles in v0.1", while the implementation treats it
-   as informational and the per-tile directory entry as authoritative. The
-   wording needs a specification pass; the behaviour is already the one
-   ADR-0003 and the conformance matrix establish. Recorded in
-   `docs/P4_COMPATIBILITY_REPORT.md`.
-2. The `cargo-fuzz` targets could not be exercised locally — not for want of
-   a toolchain (the nightly toolchain and `cargo-fuzz` v0.13.2 both install
-   and run, and the seven targets are correctly wired) but because the
-   Windows-GNU target cannot support coverage-guided fuzzing: ASan is
-   unsupported for it, LLVM's libFuzzer Windows build is MSVC-only, and
-   rustc's sanitizer-coverage module is ELF-only. They run in CI's nightly
-   job on Linux, where all three limits disappear. The evidence for each
-   limit is in `docs/P4_COMPATIBILITY_REPORT.md`.
+1. **Closed (2026-11-18).** `docs/VPNG_SPEC_0_1.md` described header byte 27
+   as the "codec used for all tiles in v0.1", while the implementation treats
+   it as informational and the per-tile directory entry as authoritative. The
+   specification now says so: §2.3 resolves the byte as **informational**,
+   §4.1 marks the directory entry's `codec id` as authoritative, and §5
+   repeats that the header byte plays no part in decoding. The clarification
+   is dated at the top of the document and cross-references ADR-0003. The
+   byte, its offset, its size and the format version are unchanged, so no
+   file changes meaning and the golden fixtures are untouched. The behaviour
+   is pinned by `crates/vpng-testkit/tests/default_codec.rs` (7 tests).
+2. **Open.** The `cargo-fuzz` targets could not be exercised locally — not
+   for want of a toolchain (the nightly toolchain and `cargo-fuzz` v0.13.2
+   both install and run, and the seven targets are correctly wired) but
+   because the Windows-GNU target cannot support coverage-guided fuzzing:
+   ASan is unsupported for it, LLVM's libFuzzer Windows build is MSVC-only,
+   and rustc's sanitizer-coverage module is ELF-only. They run in CI's
+   nightly job on Linux, where all three limits disappear. The evidence for
+   each limit is in `docs/P4_COMPATIBILITY_REPORT.md`. **That CI job still
+   needs one successful run to confirm the Linux path end to end.**

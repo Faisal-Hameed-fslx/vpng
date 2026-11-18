@@ -28,8 +28,9 @@ are recorded in `docs/BENCHMARKS.md`. See `docs/ROADMAP_STATUS.md`.
 * A CLI: `encode`, `decode`, `info`, `check`, `verify`, `decode-region`,
   `extract-tile`.
 * Conformance tests: exhaustive round-trip, region-vs-crop, malformed-input
-  sweeps, a bounded mutation sweep, golden files, and a deterministic fuzzing
-  harness over seven targets. 289 tests, all passing.
+  sweeps, a bounded mutation sweep, golden files, the `default_codec`
+  clarification, and a deterministic fuzzing harness over seven targets.
+  296 tests, all passing.
 * Layered integrity: `info` (structure only), `check` (every payload CRC32C),
   `verify` (exact pixels against a reference).
 * Measured evidence: large-image stress (up to a 15360×8640 photo and

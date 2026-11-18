@@ -271,19 +271,20 @@ manual dispatch. The `fuzz` job is the one that could not run on this
 host; it is configured and will run in CI.
 
 **Q10 — Is there a known wording discrepancy in the specification?**
-**Yes, and it is recorded rather than silently decided.**
+**It was recorded rather than silently decided, and it has now been resolved
+in the specification.**
 
-`docs/VPNG_SPEC_0_1.md` line 64 describes header byte 27 as:
+`docs/VPNG_SPEC_0_1.md` described header byte 27 as:
 
 > `default codec id` — *codec used for all tiles in v0.1*
 
-The implementation treats the field as **informational**. The
-authoritative codec for a tile is the directory entry's own `codec_id`,
-and that is what the decoder uses (`get_codec(entry.codec_id)`) and what
-the encoder writes per tile. The header's `default_codec` is carried over
-unchanged by the editing engine, because it does not affect decoding.
+The implementation treats the field as **informational**. The authoritative
+codec for a tile is the directory entry's own `codec_id`, and that is what
+the decoder uses (`get_codec(entry.codec_id)`) and what the encoder writes
+per tile. The header's `default_codec` is carried over unchanged by the
+editing engine, because it does not affect decoding.
 
-The discrepancy is visible in the repository's own conformance matrix:
+The discrepancy was visible in the repository's own conformance matrix:
 `docs/ROADMAP_STATUS.md` records that a file forced to `--codec palette`
 differs from the auto-encoded file **only** in header byte 27, while the
 directory and every payload are identical. A file whose tiles use mixed
@@ -291,15 +292,23 @@ codecs — which the encoder produces by default, since it selects the
 smallest payload per tile — has no single "codec used for all tiles" at
 all.
 
-**This report does not change the specification.** The wording is a
-documentation defect that should be corrected by a specification update
-(`default codec id` → *default codec id for new files; informational; the
-per-tile directory entry is authoritative*), with a version note. Until
-that update is made, the implementation follows the behaviour that
-ADR-0003 (directory authority) and the existing conformance matrix
-already establish: **the per-tile entry is authoritative.** Per the
-roadmap's rule, a format-level question must not be silently decided in
-implementation code, so it is flagged here for a specification pass.
+**The specification pass has now been made** (2026-11-18). Byte 27 is
+**informational**: §2.3 of the specification states that a reader must not
+use it to decode a tile and must not reject a file because of its value, that
+the per-tile directory entry is the authority, and that a writer records Raw
+when it selected the tiles individually. §4.1 marks the directory entry's
+`codec id` as authoritative, and §5 says so explicitly. The clarification is
+dated at the top of the document and cross-references ADR-0003.
+
+**The binary layout is unchanged**: the byte keeps its offset, its size and
+its meaning as a hint, the format version stays 0.1, and no conforming file
+changes meaning — the directory has always been the authority (ADR-0003,
+accepted 2026-11-12). The behaviour is pinned by a new conformance test,
+`crates/vpng-testkit/tests/default_codec.rs` (7 tests), which shows that the
+decoded pixels are identical whatever byte 27 says — including a codec the
+file does not use, a reserved id, and ids that do not exist — and that the
+encoder records the forced codec when one codec applies and Raw when the
+tiles were selected individually.
 
 **Q11 — Are the existing test vectors and conformance rows still valid?**
 **Yes.** `docs/ROADMAP_STATUS.md`'s conformance matrix is unchanged in its
@@ -354,8 +363,8 @@ either a new module or a pure addition of visibility.
 | 13 | Coverage-guided fuzzing runs in CI | PASS (configured) |
 | 14 | Coverage-guided fuzzing ran on this host | **BLOCKED** (platform: ASan, MSVC-only libFuzzer, ELF-only rustc coverage module) |
 | 15 | The CI workflow runs on push, pull request and dispatch | PASS |
-| 16 | The specification's `default_codec` wording is consistent with the code | **DEFECT** (recorded, not fixed) |
+| 16 | The specification's `default_codec` wording is consistent with the code | **PASS** (resolved 2026-11-18: the byte is informational; §2.3, with a conformance test) |
 
-Two items are not a clean pass, and both are stated plainly rather than
-glossed: item 14 is a host limitation, and item 16 is a documentation
-defect that needs a specification pass.
+One item is not a clean pass, and it is stated plainly rather than glossed:
+item 14 is a host limitation — coverage-guided fuzzing cannot run on
+Windows-GNU, for the three platform reasons set out in §3.
