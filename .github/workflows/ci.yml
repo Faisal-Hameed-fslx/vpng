@@ -124,17 +124,41 @@ jobs:
           # `--fuzz-dir` is cargo-fuzz's fuzz *project* directory (the one
           # holding fuzz/Cargo.toml). The corpus and the crash artifacts live
           # under fuzz/corpus/<target> and fuzz/artifacts/<target>.
+          #
+          # A target that finds something must not stop the others: the job
+          # runs all seven, records the failures, and fails at the end. One
+          # run therefore covers the whole target set, and the summary says
+          # exactly which targets found something.
+          failures=""
           for target in header directory container tile_payload experimental_codec region editing; do
             echo "::group::fuzz $target"
-            cargo +nightly fuzz run "$target" --fuzz-dir fuzz -- -max_total_time=120 -rss_limit_mb=4096
+            status=0
+            cargo +nightly fuzz run "$target" --fuzz-dir fuzz -- -max_total_time=120 -rss_limit_mb=4096 || status=$?
             echo "::endgroup::"
+            if [ "$status" -ne 0 ]; then
+              echo "::error title=Fuzzing found something::target $target exited with $status"
+              failures="$failures $target"
+            fi
           done
+          if [ -n "$failures" ]; then
+            echo "targets with findings:$failures"
+            exit 1
+          fi
       - name: Publish the corpus
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: fuzz-corpus
           path: fuzz/corpus
+          if-no-files-found: ignore
+      - name: Publish the crash artifacts
+        # The crash input libFuzzer wrote is the only way to reproduce a
+        # finding locally, so it is uploaded even when the job fails.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-artifacts
+          path: fuzz/artifacts
           if-no-files-found: ignore
 
   release:

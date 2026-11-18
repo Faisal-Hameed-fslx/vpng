@@ -18,7 +18,7 @@
 | Default host | `x86_64-pc-windows-gnu` |
 | Active toolchain | overridden by `E:\VPNG\rust-toolchain.toml` |
 | `cargo build --workspace` | **exit 0**, `Finished dev profile ... in 3.85s` |
-| `cargo test --workspace --all-targets` | **exit 0**, `296 passed; 0 failed` |
+| `cargo test --workspace --all-targets` | **exit 0**, `301 passed; 0 failed` |
 | `cargo fmt --all --check` | **exit 0**, no diffs |
 | `cargo clippy --workspace --all-targets` | **exit 0**, zero warnings |
 
@@ -39,7 +39,7 @@ No Visual Studio is required: the GNU host ships `rust-lld` and a
 | P7 — compression research | controlled experiments | **PARTIAL** | Eleven codecs were measured on identical pixels and identical tile layouts: the four stable codecs, four context-adaptive residual models (CARC A–D), an LZ77 dictionary codec and three hybrids, with pinned golden vectors for each. Every image was also measured against PNG, WebP lossless and JPEG XL lossless, so every column of the comparison shares one denominator. The results are in `benchmarks/p3_5_raw_results.json` (per-image, per-tile, per-category, per-resolution, aggregate and worst-case) and `benchmarks/p3_5_comparison.csv`. The **750-image corpus and statistical reporting do not exist**; the study is a 9-image seed. Evidence: `docs/P3_5_COMPRESSION_RESEARCH_REPORT.md`. |
 | P8 — 10 MB target evaluation | exact accounting; honest failure | **PARTIAL** | Exact size accounting passes (`size_accounting_is_exact`); refusal is honest and typed (`--max-size 1024` → exit 6 reporting the smallest lossless size 240,148). A 9-image seed corpus exists, but the 750-image target is unmet, so the per-category success distribution is unmeasured. |
 | P9 — Python API | bindings around Rust | **NOT STARTED** | CLI-driver tooling only. |
-| P10 — hardening and v1.0 | fuzzing; freeze | **PARTIAL** | A deterministic mutation harness over 7 targets runs in CI (200,000 iterations × 7 targets = 1,400,000 executions, 0 findings), and 7 `cargo-fuzz` targets are wired into a nightly CI job. The coverage-guided fuzzer cannot run on this Windows-GNU host — the toolchain and `cargo-fuzz` install and run, but the AddressSanitizer runtime, LLVM's MSVC-only libFuzzer Windows build and rustc's ELF-only coverage module each stop it there — and the format is not frozen. |
+| P10 — hardening and v1.0 | fuzzing; freeze | **PARTIAL** | A deterministic mutation harness over 7 targets runs in CI (200,000 iterations × 7 targets = 1,400,000 executions, 0 findings), and the 7 `cargo-fuzz` targets ran **coverage-guided in CI on Linux** (run 44264162940: 132,429,711 executions, 0 findings). A second run (44266490454) **found a real defect** — `Header::parse` accepted a zero-dimension header that `Header::to_bytes` refused to serialize — which is fixed and pinned by a regression test. The coverage-guided fuzzer cannot run on this Windows-GNU host — the toolchain and `cargo-fuzz` install and run, but the AddressSanitizer runtime, LLVM's MSVC-only libFuzzer Windows build and rustc's ELF-only coverage module each stop it there — and the format is not frozen. |
 
 ### 2.1 The forward plan (2026-11-18) and how it maps onto the phases above
 
@@ -51,7 +51,7 @@ already been done.
 | Forward plan | Objective | Existing phases it draws on | State |
 |---|---|---|---|
 | P3.5 + P4 — compression and editing | the two gates just closed | P3.5 (recorded as P7) and P4 | **verified; committed** (`c821f25`) |
-| P4.1 — specification and compatibility closure | resolve `default_codec`; verify the Linux fuzzing CI path | P10 | **in progress**: the specification clarification is done (`b692227`); the Linux CI verification is running |
+| P4.1 — specification and compatibility closure | resolve `default_codec`; verify the Linux fuzzing CI path | P10 | **CLOSED** (2026-11-18): the specification clarification is committed (`b692227`) and the Linux coverage-guided fuzz job ran (runs 44264162940 and 44266490454 — the second found the header defect, which is fixed and pinned) |
 | P5 — streaming and parallel decoding | open a 16K image and navigate it without a full-image allocation | P6 (streaming, parallel limits) and the parallel-decode part of P3 | **NOT STARTED** — design in `docs/P5_DESIGN.md` |
 | P6 — multiresolution preview pyramid | fast zooming, progressive presentation | P5 | NOT STARTED |
 | P7 — adaptive tiling | variable tile dimensions and spatially adaptive layouts | P3 | NOT STARTED |
@@ -240,7 +240,7 @@ Integrity is therefore layered and each command states its own scope:
 | A19 | 16K stress | recorded run | **PASS** | A 12-case matrix — 4096², 8192², 16384² × {gray8, rgb8, rgba8, rgba16} — **12 PASS / 0 FAIL / 0 BLOCKED** (`benchmarks/p4_memory_results.json`). Every case writes the file, verifies it, edits it, commits it and verifies the result. The 16384×16384 RGBA16 case (2,147,483,648 canonical bytes) writes with an 8.83 MB heap peak and edits with an 11.69 MB resident-set growth and a 12.52 MB heap peak, against the 64 MB target. A general 16K **performance** claim is not made; the write times are 2–461 s and are dominated by the predictor codec's arithmetic coding. |
 | A20 | 10 MB enforcement | boundary tests | **PASS** | `size_limit_is_reported_not_violated`; CLI step 9 exit 6 |
 | A21 | Corruption detection | mutation tests | **PASS** | `malformed.rs` 12 tests; `vpng-decoder` integrity tests; CLI step 12 (`decode`) and step 14 (`check`) exit 4 |
-| A22 | Fuzz robustness | fuzz report | **PARTIAL** | `malformed.rs` 12 tests, `mutation_sweep.rs` 4 tests (every truncation and every single-byte substitution, plus 2,000 seeded multi-byte corruptions per file, with no panic), and a deterministic mutation harness over 7 targets: **200,000 iterations × 7 targets = 1,400,000 executions, 0 findings** (`benchmarks/results/fuzz-mutation-report.json`). 7 `cargo-fuzz` targets are provided and wired into a nightly CI job. **Coverage-guided fuzzing cannot run on this host** — the toolchain and `cargo-fuzz` v0.13.2 install and run, and `cargo fuzz list` sees all seven targets, but three platform limits stop the local run on `x86_64-pc-windows-gnu` (ASan is unsupported for the target, LLVM's libFuzzer Windows build is MSVC-only, and rustc's sanitizer-coverage module is ELF-only) — so the local evidence is the deterministic harness only. |
+| A22 | Fuzz robustness | fuzz report | **PARTIAL** | `malformed.rs` 12 tests, `mutation_sweep.rs` 4 tests (every truncation and every single-byte substitution, plus 2,000 seeded multi-byte corruptions per file, with no panic), and a deterministic mutation harness over 7 targets: **200,000 iterations × 7 targets = 1,400,000 executions, 0 findings** (`benchmarks/results/fuzz-mutation-report.json`). The 7 `cargo-fuzz` targets ran **coverage-guided in CI on Linux** (run 44264162940, 2026-11-18): **132,429,711 executions across the seven targets, 0 findings**, with AddressSanitizer and libFuzzer's coverage feedback. **A second run found a real defect** (run 44266490454): `Header::parse` accepted a zero-dimension header that `Header::to_bytes` refused to serialize — the parser and the serializer disagreed about the same 74 bytes. It is **fixed** (`Header::parse` now applies the same non-zero dimension rule as `Header::new` and `Header::to_bytes`) and **pinned**: the exact crash artifact is replayed on every test run in `crates/vpng-fuzzing/tests/fuzz_regressions.rs`. **Coverage-guided fuzzing cannot run on this Windows-GNU host** — the toolchain and `cargo-fuzz` v0.13.2 install and run, and `cargo fuzz list` sees all seven targets, but three platform limits stop the local run on `x86_64-pc-windows-gnu` (ASan is unsupported for the target, LLVM's libFuzzer Windows build is MSVC-only, and rustc's sanitizer-coverage module is ELF-only) — so the local evidence is the deterministic harness only. |
 | A23 | Python API | integration tests | NOT STARTED | |
 | A24 | v1.0 compatibility | golden corpus | NOT STARTED | |
 
@@ -253,7 +253,7 @@ profiles, `x86_64-pc-windows-gnu`.
 |-------|------:|--------|
 | `vpng-cli` unit | 11 | ok |
 | `vpng-codecs` unit | 110 | ok |
-| `vpng-container` unit | 19 | ok |
+| `vpng-container` unit | 21 | ok |
 | `vpng-core` unit | 19 | ok |
 | `vpng-decoder` unit | 8 | ok |
 | `vpng-editing` unit | 51 | ok |
@@ -261,6 +261,7 @@ profiles, `x86_64-pc-windows-gnu`.
 | `vpng-fuzzing` unit | 0 | ok |
 | `vpng-fuzzing` bin `vpng-fuzz-mutate` | 0 | ok |
 | `vpng-fuzzing` `tests/fuzz_smoke.rs` | 3 | ok |
+| `vpng-fuzzing` `tests/fuzz_regressions.rs` | 3 | ok |
 | `vpng-research` bin | 0 | ok |
 | `vpng-testkit` unit | 2 | ok |
 | `tests/default_codec.rs` | 7 | ok |
@@ -275,7 +276,7 @@ profiles, `x86_64-pc-windows-gnu`.
 | `vpng-validation` unit | 2 | ok |
 | `vpng-validation` bins | 0 | ok |
 | Doc-tests | 0 | ok |
-| **Total** | **296** | **296 passed, 0 failed** |
+| **Total** | **301** | **301 passed, 0 failed** |
 
 The 115 new tests are: 52 codec tests (22 LZ77, 14 CARC, 12 hybrids, plus
 the registry and entropy-stage tests), 51 editing tests, 3 fuzzing tests,
@@ -328,7 +329,9 @@ wiring, and 33 tests (148 → 181); the P3.5 + P4 milestone added the research
 codecs, the editing engine, the fuzzing harness, the validation tools and 102
 tests (181 → 283); the pre-commit correction pass added 6 editing tests
 (283 → 289); the `default_codec` specification clarification added 7
-conformance tests (289 → 296).
+conformance tests (289 → 296); the coverage-guided fuzzing fix added 2 header
+unit tests and 3 regression tests that replay the fuzzer's crash artifact
+(296 → 301).
 
 ## 7. Not yet measured (explicitly no claims)
 
@@ -360,8 +363,13 @@ What is **still** not claimed:
   by the predictor codec's arithmetic coding.
 * **No edit-latency claim against another editor.** The editing timings
   are measurements on this host with no baseline to compare against.
-* **No coverage-guided fuzzing result.** The deterministic harness ran;
-  `cargo-fuzz` cannot run on this host's target triple.
+* **No coverage-guided fuzzing result *on this host*.** The deterministic
+  harness ran here; the coverage-guided fuzzer ran in CI on Linux (132,429,711
+  executions in the first run, and a second run that found the header
+  defect), not on this Windows-GNU machine.
+* **No claim that the fuzzing found everything.** It found one real defect
+  (§A22). That is a statement about the inputs that were tried, not a proof
+  that the library has no others.
 
 Raw stays ≈1.0x and remains the guaranteed fallback. The 16384×16384 RGBA8
 case that was skipped in §3.4 for insufficient free memory has since been
@@ -398,12 +406,17 @@ closed and one is still open:
    byte, its offset, its size and the format version are unchanged, so no
    file changes meaning and the golden fixtures are untouched. The behaviour
    is pinned by `crates/vpng-testkit/tests/default_codec.rs` (7 tests).
-2. **Open.** The `cargo-fuzz` targets could not be exercised locally — not
-   for want of a toolchain (the nightly toolchain and `cargo-fuzz` v0.13.2
-   both install and run, and the seven targets are correctly wired) but
-   because the Windows-GNU target cannot support coverage-guided fuzzing:
-   ASan is unsupported for it, LLVM's libFuzzer Windows build is MSVC-only,
-   and rustc's sanitizer-coverage module is ELF-only. They run in CI's
-   nightly job on Linux, where all three limits disappear. The evidence for
-   each limit is in `docs/P4_COMPATIBILITY_REPORT.md`. **That CI job still
-   needs one successful run to confirm the Linux path end to end.**
+2. **Closed (2026-11-18).** The `cargo-fuzz` targets could not be exercised
+   locally — not for want of a toolchain (the nightly toolchain and
+   `cargo-fuzz` v0.13.2 both install and run, and the seven targets are
+   correctly wired) but because the Windows-GNU target cannot support
+   coverage-guided fuzzing: ASan is unsupported for it, LLVM's libFuzzer
+   Windows build is MSVC-only, and rustc's sanitizer-coverage module is
+   ELF-only. **The Linux path has now been verified**: the first GitHub
+   Actions run executed all seven coverage-guided targets under
+   AddressSanitizer — 132,429,711 executions, 0 findings (run
+   44264162940). **The second run found a real defect** (run 44266490454):
+   `Header::parse` accepted a zero-dimension header that `Header::to_bytes`
+   refused to serialize. It is fixed and pinned by a regression test that
+   replays the exact crash artifact. The evidence for each local limit is in
+   `docs/P4_COMPATIBILITY_REPORT.md`.

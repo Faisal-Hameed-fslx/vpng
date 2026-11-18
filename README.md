@@ -30,7 +30,7 @@ are recorded in `docs/BENCHMARKS.md`. See `docs/ROADMAP_STATUS.md`.
 * Conformance tests: exhaustive round-trip, region-vs-crop, malformed-input
   sweeps, a bounded mutation sweep, golden files, the `default_codec`
   clarification, and a deterministic fuzzing harness over seven targets.
-  296 tests, all passing.
+  301 tests, all passing.
 * Layered integrity: `info` (structure only), `check` (every payload CRC32C),
   `verify` (exact pixels against a reference).
 * Measured evidence: large-image stress (up to a 15360×8640 photo and
@@ -54,13 +54,16 @@ the preview/multiresolution surface, the Python bindings, and a frozen v1.0
 format. The stable codec ids 4–6 are still reserved; the LZ77, CARC and hybrid
 codecs that were measured in the P3.5 study are **research-only** — their ids
 live in `0x80..=0xFF`, they cannot reach a file, and the decoder rejects a file
-that names one. Coverage-guided fuzzing runs in CI's nightly job but cannot be
-run on the Windows-GNU development host: the AddressSanitizer runtime, LLVM's
-MSVC-only libFuzzer Windows build and rustc's ELF-only coverage module all
-stop it there (the toolchain and `cargo-fuzz` themselves install and run); the
-local evidence is the deterministic mutation harness
-(`crates/vpng-fuzzing`). There is **no graphical editor** yet. Each phase has a
-row in the status table.
+that names one. Coverage-guided fuzzing runs in CI's nightly job on Linux —
+132,429,711 executions across seven targets in the first run, and a second run
+that found a real defect (`Header::parse` accepted a zero-dimension header
+that `Header::to_bytes` refused to serialize; it is fixed and the exact crash
+input is replayed by the test suite) — but it cannot be run on the Windows-GNU
+development host: the AddressSanitizer runtime, LLVM's MSVC-only libFuzzer
+Windows build and rustc's ELF-only coverage module all stop it there (the
+toolchain and `cargo-fuzz` themselves install and run); the local evidence is
+the deterministic mutation harness (`crates/vpng-fuzzing`). There is **no
+graphical editor** yet. Each phase has a row in the status table.
 
 ## Build
 

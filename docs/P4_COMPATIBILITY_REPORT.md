@@ -21,8 +21,8 @@ and a CI workflow. **None of it changes the VPNG file format.**
 | The experimental codec ids | **unreachable from any file** |
 | The decoder's public API | **unchanged** (two pure additions: `derive_grid`, `select_payload`) |
 | The test suite | **green** |
-| Fuzzing | **clean**: 200,000 iterations × 7 targets = 1,400,000 executions |
-| CI | **9 jobs**, including a nightly coverage-guided fuzz job |
+| Fuzzing | **clean locally, and it found one real defect in CI**: the deterministic harness ran 200,000 iterations × 7 targets = 1,400,000 executions with 0 findings; the coverage-guided fuzzer in CI on Linux found one genuine bug — `Header::parse` accepted a zero-dimension header that `Header::to_bytes` refused to serialize — which is fixed and pinned by a regression test (§3.1) |
+| CI | **9 jobs**, including a nightly coverage-guided fuzz job — **exercised on Linux**: the first run was clean, the second found the defect in §3.1, the third re-verifies the fix |
 | `cargo-fuzz` on this host | **BLOCKED** — the toolchain installs and the targets are correctly wired, but three platform limits stop the local run on `x86_64-pc-windows-gnu` (ASan unsupported, libFuzzer's Windows build is MSVC-only, rustc's coverage module is ELF-only); the deterministic harness is the local evidence |
 
 ---
@@ -176,7 +176,79 @@ full decode; a decoder that reports success produces exactly the number of
 bytes it was asked for; a rectangle outside the image is rejected; a write
 reads back exactly; an abort leaves the document clean.
 
-**BLOCKED on this host:** `cargo-fuzz` itself — but not for the reason
+**Also ran: the coverage-guided fuzzer, in CI on Linux (2026-11-18).**
+The first GitHub Actions run on `ubuntu-latest` executed all seven
+`cargo-fuzz` targets under AddressSanitizer with libFuzzer's coverage
+feedback, 120 s each, **0 findings**:
+
+| Target | Executions | Coverage (edges) | Features | Corpus | Exec/s | Peak RSS |
+|---|---:|---:|---:|---:|---:|---:|
+| `header` | 37,048,660 | 130 | 134 | 17 | 306,187 | 477 MB |
+| `directory` | 50,265,597 | 258 | 329 | 18 | 415,418 | 462 MB |
+| `container` | 31,085,678 | 175 | 179 | 22 | 256,906 | 486 MB |
+| `tile_payload` | 1,585,021 | 340 | 753 | 240 | 13,099 | 475 MB |
+| `experimental_codec` | 4,683,306 | 755 | 1,545 | 454 | 38,705 | 514 MB |
+| `region` | 3,896,993 | 126 | 434 | 37 | 32,206 | 534 MB |
+| `editing` | 3,864,456 | 487 | 557 | 19 | 31,937 | 431 MB |
+| **Total** | **132,429,711** | | | | | |
+
+The corpus figures are libFuzzer's own (`corp: 17/1046b` means 17 inputs in
+the corpus, 1,046 bytes), not a VPNG measurement. The run is
+<https://github.com/Faisal-Hameed-fslx/vpng/actions/runs/44264162940>, and
+the job log carries every `Done <n> runs in <t> second(s)` line and every
+`cov:`/`ft:`/`rss:` line quoted above. No crash artifact was produced and no
+`ERROR: libFuzzer` line appears in that log.
+
+### 3.1 The coverage-guided fuzzer found a real defect
+
+**The second CI run found a bug that the entire test suite had missed.**
+Run 44266490454 crashed the `header` target after 2,328 executions:
+
+```
+thread '<unnamed>' panicked at fuzz_targets/header.rs:16:9:
+accepted header failed to re-encode: invalid argument: image dimensions must be non-zero
+```
+
+The input is a 74-byte header that is well formed in every respect except
+that its **width is zero**: correct magic, version, header size and channel
+count, a valid CRC32C, and zeroed reserved bytes.
+
+**The defect was in the library, not in the harness.** `Header::parse` never
+checked the dimensions, while `Header::new` and `Header::to_bytes` both
+required them to be non-zero. The parser therefore accepted a header that
+the serializer refused to produce: two implementations of the same format
+disagreed about the same 74 bytes, and a file that one of them accepted
+could not be written by the other. That is exactly the invariant the `header`
+target asserts — "an accepted header re-encodes to its own bytes" — and it
+was the only one of the seven invariants that the deterministic harness
+could not reach, because a seeded mutation almost never produces a
+correctly-checksummed header with a zero dimension.
+
+The full-file path was never affected: `Document::parse` called
+`header.dimensions()` itself and rejected the file, which is why the defect
+survived every test. It was reachable through the header API alone.
+
+**The fix** is in `crates/vpng-container/src/header.rs`: `Header::parse` now
+applies the same non-zero dimension rule as the other two entry points. The
+check is placed *after* every other header rule, so the error a caller sees
+for a malformed file does not change — a zero dimension is still
+`InvalidArgument` with the message "image dimensions must be non-zero",
+exactly as it was through `Document::parse`. The binary format is untouched:
+no byte, offset or size changed, and the golden fixtures are byte-identical.
+
+**The regression is pinned.** The exact crash artifact libFuzzer wrote
+(`crash-32233a96f431ba8ee472ae5d927905192ef267aa`) is stored as a literal
+in `crates/vpng-fuzzing/tests/fuzz_regressions.rs` and replayed on every
+`cargo test` run, together with the assertion that the fuzz target no longer
+reports it.
+
+**The CI job is hardened.** A target that finds something no longer stops
+the others: the job runs all seven, records the failures, and fails at the
+end. One run therefore covers the whole target set instead of stopping at
+the first finding, and the crash artifacts are uploaded as an artefact so a
+finding can be reproduced locally.
+
+**Still BLOCKED on this host:** `cargo-fuzz` itself — not for the reason
 recorded before. The earlier blocker was the toolchain: `rustup toolchain
 install nightly` failed with a network timeout (`os error 10060`). **That is
 no longer true.** The nightly toolchain downloads and installs, `cargo-fuzz`
@@ -221,9 +293,10 @@ x86_64-pc-windows-gnu    : no such sections; __start/__stop___sancov_*
 **The coverage-guided fuzzing therefore cannot run on this machine**, and
 this is a platform limit rather than a missing tool. The `cargo-fuzz`
 targets are provided and wired into CI's nightly job, which runs on
-`ubuntu-latest` where all three limits disappear; the deterministic harness
-is the executable local evidence. Two wiring bugs *were* found and fixed
-while getting this far, and both would have made the CI job fail:
+`ubuntu-latest` where all three limits disappear — and where they have now
+**run successfully**, with the figures in the table above. The deterministic
+harness remains the executable local evidence. Two wiring bugs *were* found
+and fixed while getting this far, and both would have made the CI job fail:
 
 * the fuzz crate's `Cargo.toml` had no `[[bin]]` sections, and cargo-fuzz
   discovers its targets from the manifest rather than from the files in
@@ -249,7 +322,12 @@ were **harness** bugs, not library defects:
   the target was asserting a promise the decoder does not make.
 
 Both were corrected, and the invariants now reflect the decoder's actual
-contract. **No library defect was found by fuzzing.**
+contract. **At that point no library defect had been found by fuzzing — but
+that was a statement about the harness's own development runs, not about the
+library.** The coverage-guided fuzzer then found a genuine library defect
+in CI (§3.1): `Header::parse` accepted a zero-dimension header that
+`Header::to_bytes` refused to serialize. It is fixed, and the exact crash
+input is replayed by the test suite.
 
 **Q9 — Does CI enforce the gates?**
 **Yes.** `.github/workflows/ci.yml` defines 9 jobs:
@@ -262,13 +340,17 @@ contract. **No library defect was found by fuzzing.**
 | `test` | `cargo test --workspace --all-targets` |
 | `golden` | `cargo test -p vpng-testkit --test golden` — the binary format's fixtures, on their own |
 | `fuzz-smoke` | the deterministic mutation harness, 50,000 iterations, with the JSON report uploaded as an artefact |
-| `fuzz` | the 7 `cargo-fuzz` targets on **nightly**, 120 s per target, with the corpus uploaded |
+| `fuzz` | the 7 `cargo-fuzz` targets on **nightly**, 120 s per target; all seven run even if one finds something, and the corpus and the crash artifacts are uploaded |
 | `release` | `cargo build --workspace --release` |
 | `python` | `python -m compileall benchmarks python`, the research runner's `--help`, and `python benchmarks/verify_reports.py` — which re-reads the deliverable JSON and asserts that every figure quoted in the milestone reports is the figure the data actually holds |
 
-The workflow runs on every push to `main`, on every pull request, and on
-manual dispatch. The `fuzz` job is the one that could not run on this
-host; it is configured and will run in CI.
+The workflow runs on every push to `main` or `master`, on every pull
+request, and on manual dispatch. The `fuzz` job is the one that cannot run
+on this host; it **has** run in CI on Linux. The first run (44264162940)
+executed all seven coverage-guided targets with 0 findings, and the
+`python` job's missing dependencies (Pillow and numpy) were found by that
+same run and fixed. The second run (44266490454) found the library defect
+in §3.1.
 
 **Q10 — Is there a known wording discrepancy in the specification?**
 **It was recorded rather than silently decided, and it has now been resolved
@@ -319,19 +401,28 @@ expectation. Where the new work touches an existing crate, the change is
 either a new module or a pure addition of visibility.
 
 **Q12 — What is explicitly not claimed?**
-* **No claim that coverage-guided fuzzing was run.** It was **BLOCKED** on
-  this host — not because a tool was missing, but because the Windows-GNU
-  target cannot support it (ASan, libFuzzer's MSVC-only Windows build and
-  rustc's ELF-only coverage module). The deterministic harness ran; the
-  `cargo-fuzz` targets did not.
-* **No claim that fuzzing found no bugs in the library.** It found no bugs
-  in 1,400,000 executions of the deterministic harness. That is a
-  statement about those executions, not a proof.
+* **No claim that coverage-guided fuzzing ran *on this host*.** It was
+  **BLOCKED** here — not because a tool was missing, but because the
+  Windows-GNU target cannot support it (ASan, libFuzzer's MSVC-only
+  Windows build and rustc's ELF-only coverage module). It **did** run in CI
+  on Linux: 132,429,711 executions across the seven targets in the first
+  run, and a second run that found the defect in §3.1. That is a statement
+  about a Linux runner, not about this machine.
+* **No claim that fuzzing found no bugs in the library.** It found one — the
+  header parse/serialize asymmetry in §3.1 — and fixed it. The
+  deterministic harness (1,400,000 executions) and the coverage-guided runs
+  (132,429,711 executions in the first CI run) say nothing about the inputs
+  nobody has tried yet.
+* **No claim that the fix is complete.** The fix makes `parse` and
+  `to_bytes` agree about the dimensions. It does not claim that the two
+  functions can never disagree about anything else; that is what the fuzz
+  target is for, and it is still running.
 * **No claim of backwards compatibility with a future format.** The format
   did not change, so v0.1 files remain v0.1 files. No forward
   compatibility is claimed.
-* **No claim that the specification is defect-free.** §Q10 records one
-  wording defect that is not fixed here.
+* **No claim that the specification is defect-free.** The one wording defect
+  this milestone recorded has been fixed (§Q10); that is not a claim that no
+  other defect exists.
 * **No claim that the research codecs are production-ready.** They are
   research-only, unreachable from any file, and the recommendation is not
   to promote them.
@@ -360,10 +451,11 @@ either a new module or a pure addition of visibility.
 | 10 | The decoder's public API is unchanged | PASS |
 | 11 | The encoder's public API is unchanged | PASS |
 | 12 | The deterministic fuzzing harness is clean | PASS |
-| 13 | Coverage-guided fuzzing runs in CI | PASS (configured) |
+| 13 | Coverage-guided fuzzing runs in CI | **PASS** — verified on Linux: run 44264162940 executed all seven targets (132,429,711 executions, 0 findings); run 44266490454 found a real defect (§3.1), which is fixed and pinned by a regression test |
 | 14 | Coverage-guided fuzzing ran on this host | **BLOCKED** (platform: ASan, MSVC-only libFuzzer, ELF-only rustc coverage module) |
 | 15 | The CI workflow runs on push, pull request and dispatch | PASS |
 | 16 | The specification's `default_codec` wording is consistent with the code | **PASS** (resolved 2026-11-18: the byte is informational; §2.3, with a conformance test) |
+| 17 | A defect found by the fuzzer is fixed and pinned by a test | **PASS** (the header parse/serialize asymmetry of §3.1; `crates/vpng-fuzzing/tests/fuzz_regressions.rs` replays the exact crash artifact) |
 
 One item is not a clean pass, and it is stated plainly rather than glossed:
 item 14 is a host limitation — coverage-guided fuzzing cannot run on

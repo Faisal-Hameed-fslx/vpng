@@ -214,6 +214,15 @@ impl Header {
             )));
         }
 
+        // The dimensions must be non-zero, exactly as `Header::new` and
+        // `Header::to_bytes` require. A parser that accepted a zero
+        // dimension would hand back a header that cannot be serialized
+        // again, so `parse` and `to_bytes` would disagree about the same
+        // bytes: one implementation would accept a file the other refuses
+        // to write. The check comes after every other header rule so that
+        // the error a caller sees for a malformed file does not change.
+        Dimensions::new(width, height)?;
+
         Ok(Header {
             major,
             minor,
@@ -308,5 +317,59 @@ mod tests {
         header.default_codec = 200;
         let bytes = header.to_bytes().unwrap();
         assert_eq!(Header::parse(&bytes).unwrap().default_codec, 200);
+    }
+
+    /// Build a header's bytes with one dimension forced to zero and the
+    /// checksum recomputed, so that only the dimension rule can fire.
+    fn zero_dimension_bytes(offset: usize) -> [u8; HEADER_SIZE] {
+        let mut bytes = sample().to_bytes().unwrap();
+        bytes[offset..offset + 4].copy_from_slice(&0u32.to_le_bytes());
+        let sum = checksum::crc32c_parts(&[
+            &bytes[0..HEADER_CHECKSUM_OFFSET],
+            &bytes[RESERVED_OFFSET..HEADER_SIZE],
+        ]);
+        bytes[HEADER_CHECKSUM_OFFSET..HEADER_CHECKSUM_OFFSET + 4]
+            .copy_from_slice(&sum.to_le_bytes());
+        bytes
+    }
+
+    #[test]
+    fn rejects_a_zero_dimension() {
+        // Found by the coverage-guided fuzzer in CI (2026-11-18): `parse`
+        // used to accept a header with a zero width or height, while
+        // `to_bytes` refused to serialize one. The two disagreed about the
+        // same bytes.
+        for (offset, name) in [(16, "width"), (20, "height")] {
+            let bytes = zero_dimension_bytes(offset);
+            let err = Header::parse(&bytes).unwrap_err();
+            assert_eq!(
+                err.kind(),
+                vpng_core::ErrorKind::InvalidArgument,
+                "a zero {name} must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn an_accepted_header_can_always_be_re_encoded() {
+        // The invariant the `header` fuzz target asserts: whatever `parse`
+        // accepts, `to_bytes` must be able to serialize back to the same
+        // bytes. It is checked here over a small grid of dimensions rather
+        // than only over random bytes.
+        for &(width, height) in &[(1u32, 1u32), (2, 3), (640, 480), (16_384, 1)] {
+            let header = Header::new(
+                width,
+                height,
+                PixelFormat::rgba8(),
+                0,
+                1,
+                HEADER_SIZE as u64,
+                4096,
+            )
+            .unwrap();
+            let bytes = header.to_bytes().unwrap();
+            let parsed = Header::parse(&bytes).unwrap();
+            assert_eq!(parsed.to_bytes().unwrap(), bytes, "{width}x{height}");
+        }
     }
 }

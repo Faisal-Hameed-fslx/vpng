@@ -6,6 +6,34 @@ separately as major.minor in the header.
 
 ## [Unreleased]
 
+### Fixed
+
+* **`Header::parse` accepted a header that `Header::to_bytes` refused to
+  serialize.** The parser did not check the image dimensions, while
+  `Header::new` and `Header::to_bytes` both required them to be non-zero.
+  The parser and the serializer therefore disagreed about the same bytes: one
+  implementation would accept a file the other refused to write.
+  * Found by the **coverage-guided** fuzzer in CI on Linux (2026-11-18, run
+    44266490454) after 2,328 executions of the `header` target. The input is a
+    74-byte header that is well formed in every respect except that its width
+    is zero — correct magic, version, header size and channel count, a valid
+    CRC32C, and zeroed reserved bytes.
+  * The full-file path was never affected: `Document::parse` called
+    `header.dimensions()` itself and rejected the file, which is why the
+    defect survived the entire test suite and only the fuzzer reached it.
+  * **The fix:** `Header::parse` now applies the same non-zero dimension rule
+    as the other two entry points, with the check placed *after* every other
+    header rule so that the error a caller sees for a malformed file does not
+    change — a zero dimension is still `InvalidArgument` with the message
+    "image dimensions must be non-zero", exactly as it was through
+    `Document::parse`.
+  * **The binary format is unchanged.** No byte, offset, size or version
+    moved, and the golden fixtures are byte-identical.
+  * **The regression is pinned:** the exact crash artifact libFuzzer wrote
+    (`crash-32233a96f431ba8ee472ae5d927905192ef267aa`) is stored as a
+    literal in `crates/vpng-fuzzing/tests/fuzz_regressions.rs` and replayed on
+    every `cargo test` run.
+
 ### Added
 
 * **Editing engine (`crates/vpng-editing`).** A tile-backed editing session
@@ -101,8 +129,10 @@ separately as major.minor in the header.
   0.4350×, LZ77 0.8009×, Raw 1.0002×. On the 15360×8640 photograph, CARC C
   reaches 0.2995× against PNG's 0.3384× and WebP's 0.2549×.
 * **Fuzzing: 200,000 iterations × 7 targets = 1,400,000 executions, 0
-  findings**, 3.9 s in the release profile. No library defect was found.
-* The test suite is **296 passed / 0 failed** (was 181).
+  findings**, 3.9 s in the release profile. The *deterministic* harness found
+  no library defect; the *coverage-guided* fuzzer, run in CI on Linux, found
+  one (see **Fixed** below).
+* The test suite is **301 passed / 0 failed** (was 181).
 
 ### Known limitations
 
@@ -134,9 +164,11 @@ separately as major.minor in the header.
   sanitizer-coverage module is ELF-only (it emits the `__sancov_cntrs` /
   `__sancov_pcs` sections and the weak `__start___sancov_*` anchors on ELF
   targets only, so a COFF target cannot link the fuzz target at all). The
-  `cargo-fuzz` targets run in CI's nightly job on Linux; the deterministic
-  harness — 200,000 iterations × 7 targets = 1,400,000 executions — is the
-  local evidence.
+  coverage-guided fuzzer **did** run in CI on Linux — 132,429,711 executions
+  across the seven targets, 0 findings in the first run (44264162940), and a
+  second run (44266490454) that found the header defect recorded under
+  **Fixed** above. The deterministic harness — 200,000 iterations × 7 targets
+  = 1,400,000 executions — is the local evidence.
 * **No graphical editor.** The engine is a library and a benchmark.
 * The editing history is in memory only, temporary files left by a killed
   process are not swept, and there is no file locking.
