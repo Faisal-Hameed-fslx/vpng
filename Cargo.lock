@@ -326,6 +326,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "vpng-view"
+version = "0.1.0"
+dependencies = [
+ "vpng-codecs",
+ "vpng-container",
+ "vpng-core",
+ "vpng-decoder",
+ "vpng-encoder",
+ "vpng-source",
+ "vpng-testkit",
+ "vpng-tiling",
+]
+
+[[package]]
 name = "zlib-rs"
 version = "0.6.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"

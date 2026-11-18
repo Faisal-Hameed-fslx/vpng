@@ -31,6 +31,33 @@ separately as major.minor in the header.
   components, the acceptance test as measurable criteria, and the open
   decisions that had to be answered first.
 
+* **Interactive scheduler (`crates/vpng-view`).** The bounded request queue
+  that decides *which* tiles to decode and *when*.
+  * **Priority.** A request is dispatched in the order `(class, distance,
+    sequence)`: a visible tile before a prefetched one, a prefetched one
+    before a background one; then the nearer tile; then the arrival order,
+    so nothing is starved.
+  * **A bounded queue.** The queue holds at most *N* requests. A full queue
+    refuses a prefetch or background request and does not block the caller.
+    A *visible* request is never refused: it displaces the least urgent
+    request in the queue, because the tile the user is looking at matters
+    more than the tile we guessed they might want.
+  * **Cancellation by viewport generation.** Every request carries the
+    viewport generation it was issued under. A pan advances the generation
+    and every queued request from an older generation is dropped before
+    anything else is dispatched. A request already running is allowed to
+    finish — stopping a decode half-way would throw the work away — but its
+    result is discarded if its generation is stale, and that is counted
+    separately from a failure.
+  * **One request per tile.** A tile that is already queued is not queued
+    again; if the new request is more urgent, the queued one is *promoted*
+    rather than duplicated.
+  * **Counters, not estimates.** Every submission, promotion, refusal,
+    dispatch, cancellation and discarded result is counted, so a report can
+    state what happened.
+  * 17 tests, including the ordering and cancellation rules checked
+    exactly.
+
 ### Fixed
 
 * **The file-backed source now validates a file exactly the way the
@@ -174,7 +201,7 @@ separately as major.minor in the header.
   findings**, 3.9 s in the release profile. The *deterministic* harness found
   no library defect; the *coverage-guided* fuzzer, run in CI on Linux, found
   one (see **Fixed** below).
-* The test suite is **312 passed / 0 failed** (was 181).
+* The test suite is **329 passed / 0 failed** (was 181).
 
 ### Known limitations
 

@@ -8,6 +8,7 @@ members = [
     "crates/vpng-encoder",
     "crates/vpng-decoder",
     "crates/vpng-source",
+    "crates/vpng-view",
     "crates/vpng-editing",
     "crates/vpng-fuzzing",
     "crates/vpng-testkit",
@@ -33,6 +34,7 @@ vpng-tiling = { path = "crates/vpng-tiling" }
 vpng-encoder = { path = "crates/vpng-encoder" }
 vpng-decoder = { path = "crates/vpng-decoder" }
 vpng-source = { path = "crates/vpng-source" }
+vpng-view = { path = "crates/vpng-view" }
 vpng-editing = { path = "crates/vpng-editing" }
 vpng-fuzzing = { path = "crates/vpng-fuzzing" }
 vpng-testkit = { path = "crates/vpng-testkit" }

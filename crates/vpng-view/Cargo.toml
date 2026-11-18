@@ -1,0 +1,20 @@
+[package]
+name = "vpng-view"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors = ["VPNG contributors"]
+description = "VPNG interactive viewer: bounded request scheduling, parallel tile decoding, and predictive prefetch."
+
+[dependencies]
+vpng-core.workspace = true
+vpng-container.workspace = true
+vpng-decoder.workspace = true
+vpng-source.workspace = true
+vpng-tiling.workspace = true
+
+[dev-dependencies]
+vpng-codecs.workspace = true
+vpng-encoder.workspace = true
+vpng-testkit.workspace = true

@@ -18,7 +18,7 @@
 | Default host | `x86_64-pc-windows-gnu` |
 | Active toolchain | overridden by `E:\VPNG\rust-toolchain.toml` |
 | `cargo build --workspace` | **exit 0**, `Finished dev profile ... in 3.85s` |
-| `cargo test --workspace --all-targets` | **exit 0**, `312 passed; 0 failed` |
+| `cargo test --workspace --all-targets` | **exit 0**, `329 passed; 0 failed` |
 | `cargo fmt --all --check` | **exit 0**, no diffs |
 | `cargo clippy --workspace --all-targets` | **exit 0**, zero warnings |
 
@@ -52,7 +52,7 @@ already been done.
 |---|---|---|---|
 | P3.5 + P4 — compression and editing | the two gates just closed | P3.5 (recorded as P7) and P4 | **verified; committed** (`c821f25`) |
 | P4.1 — specification and compatibility closure | resolve `default_codec`; verify the Linux fuzzing CI path | P10 | **CLOSED** (2026-11-18): the specification clarification is committed (`b692227`) and the Linux coverage-guided fuzz job ran three times — clean, then a real defect that is fixed and pinned, then a clean re-verification (runs 44264162940, 44266490454, 44274770109) |
-| P5 — streaming and parallel decoding | open a 16K image and navigate it without a full-image allocation | P6 (streaming, parallel limits) and the parallel-decode part of P3 | **IN PROGRESS** — design in `docs/P5_DESIGN.md`; stage 1 (the streaming reader) is done: `crates/vpng-source` |
+| P5 — streaming and parallel decoding | open a 16K image and navigate it without a full-image allocation | P6 (streaming, parallel limits) and the parallel-decode part of P3 | **IN PROGRESS** — design in `docs/P5_DESIGN.md`; stage 1 (the streaming reader, `crates/vpng-source`) and stage 2 (the bounded scheduler with viewport priority and cancellation, `crates/vpng-view`) are done |
 | P6 — multiresolution preview pyramid | fast zooming, progressive presentation | P5 | NOT STARTED |
 | P7 — adaptive tiling | variable tile dimensions and spatially adaptive layouts | P3 | NOT STARTED |
 | P8 — production validation | the 750-image corpus, multiple platforms, 16K workloads | P8 | PARTIAL (seed corpus only) |
@@ -263,6 +263,7 @@ profiles, `x86_64-pc-windows-gnu`.
 | `vpng-fuzzing` `tests/fuzz_smoke.rs` | 3 | ok |
 | `vpng-fuzzing` `tests/fuzz_regressions.rs` | 3 | ok |
 | `vpng-source` unit | 11 | ok |
+| `vpng-view` unit | 17 | ok |
 | `vpng-research` bin | 0 | ok |
 | `vpng-testkit` unit | 2 | ok |
 | `tests/default_codec.rs` | 7 | ok |
@@ -277,7 +278,7 @@ profiles, `x86_64-pc-windows-gnu`.
 | `vpng-validation` unit | 2 | ok |
 | `vpng-validation` bins | 0 | ok |
 | Doc-tests | 0 | ok |
-| **Total** | **312** | **312 passed, 0 failed** |
+| **Total** | **329** | **329 passed, 0 failed** |
 
 The 115 new tests are: 52 codec tests (22 LZ77, 14 CARC, 12 hybrids, plus
 the registry and entropy-stage tests), 51 editing tests, 3 fuzzing tests,
@@ -332,7 +333,8 @@ tests (181 → 283); the pre-commit correction pass added 6 editing tests
 (283 → 289); the `default_codec` specification clarification added 7
 conformance tests (289 → 296); the coverage-guided fuzzing fix added 2 header
 unit tests and 3 regression tests that replay the fuzzer's crash artifact
-(296 → 301); the P5 streaming reader added 11 tests (301 → 312).
+(296 → 301); the P5 streaming reader added 11 tests (301 → 312); the P5
+scheduler added 17 (312 → 329).
 
 ## 7. Not yet measured (explicitly no claims)
 
