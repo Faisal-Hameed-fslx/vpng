@@ -1,0 +1,19 @@
+[package]
+name = "vpng-source"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors = ["VPNG contributors"]
+description = "VPNG file sources: random access to a container on disk, one tile at a time."
+
+[dependencies]
+vpng-core.workspace = true
+vpng-container.workspace = true
+vpng-codecs.workspace = true
+vpng-decoder.workspace = true
+vpng-tiling.workspace = true
+
+[dev-dependencies]
+vpng-encoder.workspace = true
+vpng-testkit.workspace = true

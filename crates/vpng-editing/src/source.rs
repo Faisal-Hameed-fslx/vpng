@@ -2,7 +2,7 @@
 //!
 //! A source answers three questions about a file: what its tiles are, how to
 //! decode one tile, and how to fetch one tile's compressed payload. The
-//! editing engine is written against that interface, so the same editing
+//! editing engine is written against this interface, so the same editing
 //! code serves both a file that is already in memory and a file that is far
 //! too large to hold in memory.
 //!
@@ -18,15 +18,17 @@
 //! Both sources validate the file exactly the way [`vpng_decoder::Document::parse`]
 //! does — same header rules, same directory checksum, same coverage and
 //! payload-range checks, same codec-availability check — so a file that one
-//! source accepts is accepted by the other.
+//! source accepts is accepted by the other. The file-backed source does not
+//! implement those rules itself: it uses [`vpng_source::TileReader`], which
+//! the interactive viewer shares, so there is one implementation of them
+//! rather than two.
 
-use std::fs::File;
-use std::io::{Read, Seek, SeekFrom};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use vpng_container::{Directory, DirectoryEntry, Header, HEADER_SIZE};
-use vpng_core::{Dimensions, Error, Limits, PixelFormat, Result};
-use vpng_decoder::{derive_grid, Document};
+use vpng_container::{Directory, DirectoryEntry, Header};
+use vpng_core::{Dimensions, Limits, PixelFormat, Result};
+use vpng_decoder::Document;
+use vpng_source::TileReader;
 use vpng_tiling::TileGrid;
 
 /// Everything an editing session needs to know about a file's tiles.
@@ -147,17 +149,13 @@ impl TileSource for DocumentSource<'_> {
 /// read into memory when the source is opened; everything else — the tile
 /// payloads — is read on demand, so the source's memory is the directory
 /// plus one payload.
+///
+/// The file access itself lives in [`vpng_source::TileReader`], which the
+/// interactive viewer shares: there is one implementation of the rules that
+/// decide which files are acceptable, not two.
 #[derive(Debug)]
 pub struct FileSource {
-    path: PathBuf,
-    file: File,
-    header: Header,
-    directory: Directory,
-    grid: TileGrid,
-    format: PixelFormat,
-    /// The limits the file was opened with, kept so that the source can
-    /// re-open itself after a commit.
-    limits: Limits,
+    reader: TileReader,
 }
 
 impl FileSource {
@@ -167,93 +165,19 @@ impl FileSource {
     /// [`vpng_decoder::Document::parse`] performs, so a file this source
     /// accepts is a file the decoder accepts.
     pub fn open(path: &Path, limits: &Limits) -> Result<Self> {
-        let mut file = File::open(path)?;
-        let file_size = file.metadata()?.len();
-        limits.validate_file_size(file_size)?;
-
-        // The header.
-        let mut header_bytes = vec![0u8; HEADER_SIZE];
-        file.seek(SeekFrom::Start(0))?;
-        file.read_exact(&mut header_bytes)?;
-        let header = Header::parse(&header_bytes)?;
-
-        let dims = header.dimensions()?;
-        limits.validate_dimensions(dims, "file")?;
-        let format = header.format()?;
-
-        if header.declared_file_size != file_size {
-            return Err(Error::corrupt(format!(
-                "declared file size {} does not match the {file_size} bytes actually present",
-                header.declared_file_size
-            )));
-        }
-
-        limits.validate_tile_count(header.tile_count)?;
-
-        if header.directory_offset < HEADER_SIZE as u64 {
-            return Err(Error::corrupt(
-                "directory offset points inside the fixed header",
-            ));
-        }
-
-        // The directory.
-        let directory_size = Directory::total_size(header.tile_count)?;
-        let mut directory_bytes = vec![0u8; directory_size];
-        file.seek(SeekFrom::Start(header.directory_offset))?;
-        file.read_exact(&mut directory_bytes)?;
-        let directory = Directory::decode(&directory_bytes, header.tile_count)?;
-
-        if directory.len() != header.tile_count as usize {
-            return Err(Error::corrupt(
-                "directory entry count disagrees with the header",
-            ));
-        }
-
-        for (index, entry) in directory.entries.iter().enumerate() {
-            limits
-                .validate_tile_payload(entry.compressed_length, entry.uncompressed_length as u64)?;
-            if !vpng_codecs::is_implemented(entry.codec_id) {
-                return Err(Error::unsupported(format!(
-                    "tile {index} uses codec id {} ({}), which this build does not implement",
-                    entry.codec_id,
-                    vpng_codecs::codec_name(entry.codec_id).unwrap_or("unknown")
-                )));
-            }
-        }
-
-        directory.validate_payload_ranges(file_size)?;
-        directory.validate_tile_sizes(format.bytes_per_pixel())?;
-
-        let grid = derive_grid(&header, &directory, dims)?;
-
         Ok(FileSource {
-            path: path.to_path_buf(),
-            file,
-            header,
-            directory,
-            grid,
-            format,
-            limits: *limits,
+            reader: TileReader::open(path, limits)?,
         })
     }
 
     /// The file's path.
     pub fn path(&self) -> &Path {
-        &self.path
+        self.reader.path()
     }
 
     /// The file's directory.
     pub fn directory(&self) -> &Directory {
-        &self.directory
-    }
-
-    /// Read `len` bytes at `offset` from the file.
-    fn read_at(&mut self, offset: u64, len: u64) -> Result<Vec<u8>> {
-        let len = vpng_core::checked_usize(len)?;
-        let mut buffer = vec![0u8; len];
-        self.file.seek(SeekFrom::Start(offset))?;
-        self.file.read_exact(&mut buffer)?;
-        Ok(buffer)
+        self.reader.meta().directory()
     }
 
     /// Whether two paths name the same file.
@@ -274,100 +198,57 @@ impl FileSource {
 
 impl TileSource for FileSource {
     fn format(&self) -> PixelFormat {
-        self.format
+        self.reader.meta().format()
     }
 
     fn width(&self) -> u32 {
-        self.header.width
+        self.reader.meta().width()
     }
 
     fn height(&self) -> u32 {
-        self.header.height
+        self.reader.meta().height()
     }
 
     fn dimensions(&self) -> Dimensions {
-        Dimensions {
-            width: self.header.width,
-            height: self.header.height,
-        }
+        self.reader.meta().dimensions()
     }
 
     fn tile_count(&self) -> u32 {
-        self.header.tile_count
+        self.reader.meta().tile_count()
     }
 
     fn grid(&self) -> &TileGrid {
-        &self.grid
+        self.reader.meta().grid()
     }
 
     fn tile_entry(&self, index: usize) -> Option<&DirectoryEntry> {
-        self.directory.entries.get(index)
+        self.reader.meta().tile_entry(index)
     }
 
     fn header(&self) -> &Header {
-        &self.header
+        self.reader.meta().header()
     }
 
     fn decode_tile(&mut self, index: usize, limits: &Limits) -> Result<Vec<u8>> {
-        let entry = *self
-            .directory
-            .entries
-            .get(index)
-            .ok_or_else(|| Error::invalid(format!("tile index {index} is out of range")))?;
-        let payload = self.read_at(entry.payload_offset, entry.compressed_length)?;
-
-        let computed = vpng_container::crc32c(&payload);
-        if computed != entry.payload_checksum {
-            return Err(Error::corrupt(format!(
-                "tile {index} payload checksum mismatch: stored {:#010x}, computed {computed:#010x}",
-                entry.payload_checksum
-            )));
-        }
-
-        let codec = vpng_codecs::get_codec(entry.codec_id)?;
-        let ctx = vpng_codecs::DecodeContext {
-            limits: *limits,
-            format: self.format,
-        };
-        let mut out = Vec::new();
-        codec.decode(&payload, entry.uncompressed_length as usize, &ctx, &mut out)?;
-
-        if out.len() != entry.uncompressed_length as usize {
-            return Err(Error::corrupt(format!(
-                "tile {index} decoded to {} bytes, directory declares {}",
-                out.len(),
-                entry.uncompressed_length
-            )));
-        }
-        Ok(out)
+        self.reader.decode_tile(index, limits)
     }
 
     fn tile_payload(&mut self, index: usize) -> Result<Vec<u8>> {
-        let entry = *self
-            .directory
-            .entries
-            .get(index)
-            .ok_or_else(|| Error::invalid(format!("tile index {index} is out of range")))?;
-        self.read_at(entry.payload_offset, entry.compressed_length)
+        self.reader.tile_payload(index)
     }
 
     fn advance_baseline(&mut self, target: &Path) -> Result<bool> {
         // The baseline only moves when the commit replaced *this* source's
         // own file. A commit to some other path leaves this file alone, so
         // the source keeps its baseline.
-        if !Self::same_file(&self.path, target) {
+        if !Self::same_file(self.reader.path(), target) {
             return Ok(false);
         }
 
         // The open handle still refers to the file the commit replaced, so
-        // the source re-opens the path and re-reads the header, the
+        // the reader re-opens the path and re-reads the header, the
         // directory and the grid.
-        let refreshed = FileSource::open(&self.path, &self.limits)?;
-        self.file = refreshed.file;
-        self.header = refreshed.header;
-        self.directory = refreshed.directory;
-        self.grid = refreshed.grid;
-        self.format = refreshed.format;
+        self.reader.reopen()?;
         Ok(true)
     }
 }

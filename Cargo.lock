@@ -242,6 +242,7 @@ dependencies = [
  "vpng-core",
  "vpng-decoder",
  "vpng-encoder",
+ "vpng-source",
  "vpng-tiling",
 ]
 
@@ -275,6 +276,19 @@ version = "0.1.0"
 dependencies = [
  "vpng-codecs",
  "vpng-core",
+ "vpng-tiling",
+]
+
+[[package]]
+name = "vpng-source"
+version = "0.1.0"
+dependencies = [
+ "vpng-codecs",
+ "vpng-container",
+ "vpng-core",
+ "vpng-decoder",
+ "vpng-encoder",
+ "vpng-testkit",
  "vpng-tiling",
 ]
 

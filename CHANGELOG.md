@@ -6,7 +6,44 @@ separately as major.minor in the header.
 
 ## [Unreleased]
 
+### Added
+
+* **Streaming reader (`crates/vpng-source`).** The file half of the editing
+  engine's `FileSource`, extracted into its own crate so that the
+  interactive viewer and the editor share one implementation of the rules
+  that decide which files are acceptable. `TileReader` opens a file, parses
+  the container once, and reads a tile's payload only when one is asked for.
+  * **It counts what it reads.** `bytes_read` and `payloads_read` report the
+    I/O volume exactly, so a benchmark can state it rather than estimate it.
+  * **The metadata is separate from the handle.** `ContainerMeta` is what
+    the header and the directory say: immutable, cheap to share. `fork()`
+    opens a second handle on the same file with the metadata already parsed
+    — the arrangement a parallel decoder needs, because a file position is
+    mutable state and a shared position would serialise the workers.
+  * `FileSource` now delegates to it, so there is one implementation of the
+    file-access rules rather than two. The editing engine's behaviour is
+    unchanged: its 51 tests pass untouched.
+  * 11 tests, including one that runs the reader and the in-memory decoder
+    over 700 truncations and single-byte corruptions and asserts that they
+    accept and reject exactly the same files.
+* **P5 design (`docs/P5_DESIGN.md`).** The design for the streaming and
+  parallel decoding milestone, written before any of the code: the seven
+  components, the acceptance test as measurable criteria, and the open
+  decisions that had to be answered first.
+
 ### Fixed
+
+* **The file-backed source now validates a file exactly the way the
+  in-memory decoder does.** Two checks were missing from `FileSource`:
+  * a file too short to hold a header was reported as an **I/O error**
+    (a short read) rather than as a corrupt file — the in-memory decoder
+    says "corrupt file", and the two now agree;
+  * the directory was not checked against the file's length, and a tile's
+    payload was not checked to begin after the end of the directory. Both
+    are the decoder's rules, and both are now the file-backed source's too.
+  * The rule that made this visible is pinned by a test: the reader and the
+    in-memory decoder are run over 700 truncations and single-byte
+    corruptions of the same file and must agree on every one of them.
 
 * **`Header::parse` accepted a header that `Header::to_bytes` refused to
   serialize.** The parser did not check the image dimensions, while
@@ -132,7 +169,7 @@ separately as major.minor in the header.
   findings**, 3.9 s in the release profile. The *deterministic* harness found
   no library defect; the *coverage-guided* fuzzer, run in CI on Linux, found
   one (see **Fixed** below).
-* The test suite is **301 passed / 0 failed** (was 181).
+* The test suite is **312 passed / 0 failed** (was 181).
 
 ### Known limitations
 

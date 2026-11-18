@@ -13,6 +13,7 @@ vpng-container.workspace = true
 vpng-codecs.workspace = true
 vpng-decoder.workspace = true
 vpng-encoder.workspace = true
+vpng-source.workspace = true
 vpng-tiling.workspace = true
 
 [dev-dependencies]
