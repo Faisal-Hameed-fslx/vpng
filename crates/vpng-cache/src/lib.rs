@@ -7,6 +7,12 @@
 //! pixel memory the session may hold, and the cache evicts the least recently
 //! used tiles until the next insert fits.
 //!
+//! The cache lives in its own crate because two engines need it: the editor
+//! holds the tiles a session has touched, and the interactive viewer holds
+//! the tiles a viewport has shown. Both must be able to say exactly how much
+//! decoded memory they are using, and there is one implementation of the
+//! bound.
+//!
 //! # Why bytes and not tiles
 //!
 //! Tiles are not the same size. A 256x256 RGBA tile is 256 KiB; a 16x16
@@ -30,6 +36,8 @@
 //! byte total it ever reached, and the time spent decoding. The byte totals
 //! count the decoded pixel buffers only; the decoded tile's own payload is
 //! not part of the cache.
+
+#![forbid(unsafe_code)]
 
 use std::collections::{HashMap, VecDeque};
 use std::time::Duration;

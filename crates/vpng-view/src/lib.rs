@@ -16,6 +16,11 @@
 //! * [`Driver`] — the scheduler with a decoder attached. It is the
 //!   single-threaded reference implementation: the order in which tiles
 //!   should be decoded, made explicit.
+//! * [`Pool`] — the parallel engine. A fixed set of worker threads take
+//!   requests from the scheduler, decode them with their own reader, and
+//!   publish the results into the bounded cache. The lock is never held
+//!   across a decode, and a result that lands after the viewport has moved
+//!   on is discarded rather than shown.
 //!
 //! # What it does not change
 //!
@@ -28,11 +33,17 @@
 #![forbid(unsafe_code)]
 
 mod driver;
+mod file_decoder;
+mod pool;
+#[cfg(test)]
+mod pool_tests;
 mod scheduler;
 #[cfg(test)]
 mod tests;
 
 pub use driver::{DecodedTile, Driver, Step, TileDecoder};
+pub use file_decoder::{FileDecoder, FileDecoderFactory};
+pub use pool::{DecoderFactory, Pool, PoolOutcome, PoolStats};
 pub use scheduler::{
     Counters, Generation, Request, RequestClass, RequestSpec, Scheduler, SubmitOutcome,
 };

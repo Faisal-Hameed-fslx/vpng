@@ -190,6 +190,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
+name = "vpng-cache"
+version = "0.1.0"
+dependencies = [
+ "vpng-core",
+]
+
+[[package]]
 name = "vpng-cli"
 version = "0.1.0"
 dependencies = [
@@ -237,6 +244,7 @@ dependencies = [
 name = "vpng-editing"
 version = "0.1.0"
 dependencies = [
+ "vpng-cache",
  "vpng-codecs",
  "vpng-container",
  "vpng-core",
@@ -329,6 +337,7 @@ dependencies = [
 name = "vpng-view"
 version = "0.1.0"
 dependencies = [
+ "vpng-cache",
  "vpng-codecs",
  "vpng-container",
  "vpng-core",

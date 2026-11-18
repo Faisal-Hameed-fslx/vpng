@@ -43,10 +43,10 @@ use std::time::Instant;
 
 use vpng_core::{CanonicalImage, Error, Limits, PixelFormat, Rect, Result};
 
-use crate::cache::{CacheStats, TileCache};
 use crate::commit::{write_document, CommitOptions, CommitReport};
 use crate::history::{History, HistoryEntry, HistoryStats, TileSnapshot};
 use crate::source::{DocumentSource, FileSource, TileSource};
+use vpng_cache::{CacheStats, TileCache};
 
 /// The default byte budget of the decoded-tile cache: 32 MiB.
 pub const DEFAULT_CACHE_BYTES: u64 = 32 * 1024 * 1024;

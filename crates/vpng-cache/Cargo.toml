@@ -1,0 +1,11 @@
+[package]
+name = "vpng-cache"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors = ["VPNG contributors"]
+description = "VPNG tile cache: a bounded, byte-budgeted LRU cache of decoded tiles."
+
+[dependencies]
+vpng-core.workspace = true

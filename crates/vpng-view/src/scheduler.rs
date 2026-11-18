@@ -307,6 +307,13 @@ impl Scheduler {
         while let Some(Reverse(entry)) = self.heap.pop() {
             match self.pending.get(&entry.tile) {
                 Some(request) if request.sequence == entry.sequence => {
+                    if request.generation != self.generation() {
+                        // The viewport moved on since this request was
+                        // queued. It is dropped rather than dispatched.
+                        self.pending.remove(&entry.tile);
+                        self.counters.cancelled += 1;
+                        continue;
+                    }
                     let request = request.clone();
                     self.pending.remove(&entry.tile);
                     self.counters.dispatched += 1;
@@ -327,6 +334,12 @@ impl Scheduler {
         while let Some(Reverse(entry)) = self.heap.pop() {
             match self.pending.get(&entry.tile) {
                 Some(request) if request.sequence == entry.sequence => {
+                    if request.generation != self.generation() {
+                        // Stale: the viewport moved on.
+                        self.pending.remove(&entry.tile);
+                        self.counters.cancelled += 1;
+                        continue;
+                    }
                     found = Some(request.clone());
                     held.push(entry);
                     break;

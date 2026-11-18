@@ -8,6 +8,7 @@ authors = ["VPNG contributors"]
 description = "VPNG interactive viewer: bounded request scheduling, parallel tile decoding, and predictive prefetch."
 
 [dependencies]
+vpng-cache.workspace = true
 vpng-core.workspace = true
 vpng-container.workspace = true
 vpng-decoder.workspace = true

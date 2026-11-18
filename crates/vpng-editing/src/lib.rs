@@ -52,7 +52,6 @@
 
 #![forbid(unsafe_code)]
 
-pub mod cache;
 pub mod commit;
 pub mod engine;
 pub mod history;
@@ -61,10 +60,10 @@ pub mod source;
 #[cfg(test)]
 mod tests;
 
-pub use cache::{CacheStats, TileCache};
 pub use commit::{CommitOptions, CommitReport, FailurePoint};
 pub use engine::{
     EditableDocument, Editor, FileEditor, DEFAULT_CACHE_BYTES, DEFAULT_HISTORY_BYTES,
 };
 pub use history::{History, HistoryEntry, HistoryStats, TileSnapshot};
 pub use source::{DocumentSource, FileSource, TileSource};
+pub use vpng_cache::{CacheStats, TileCache};

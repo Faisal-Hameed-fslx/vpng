@@ -8,6 +8,7 @@ authors = ["VPNG contributors"]
 description = "VPNG editing engine: bounded tile cache, transactional copy-on-write editing, and tile-level undo/redo."
 
 [dependencies]
+vpng-cache.workspace = true
 vpng-core.workspace = true
 vpng-container.workspace = true
 vpng-codecs.workspace = true
