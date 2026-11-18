@@ -208,18 +208,34 @@ are listed because each one changes the design, not because they are hard.
 1. **Worker count.** `min(available_parallelism, 8)`, or fixed? A fixed
    count is reproducible; the host-dependent one is faster on big machines
    and noisier in benchmarks.
+   **Decided (stage 3):** the pool takes the count from its caller and
+   never guesses. The benchmark chooses it, records it in the raw data and
+   reports it; the recommendation for a caller is
+   `min(available_parallelism, 8)`. A benchmark that does not state its
+   worker count is not reproducible, so the number is part of the result,
+   not part of the environment.
 2. **Prefetch policy.** Ring radius and direction weighting. The first
    implementation should expose them as parameters and measure them.
+   **Still open** — this is stage 4.
 3. **The cache budget for viewing.** P4's cache budget is an editing
    budget. A viewing cache may want a different one, and the two may
    coexist (the editing engine's dirty tiles must never be evicted by a
    prefetch).
+   **Decided (stage 3):** the cache moved out of `vpng-editing` into
+   `crates/vpng-cache`, so there is one implementation of the bound and
+   each engine holds its **own instance** with its own budget. The
+   editing engine's dirty tiles cannot be evicted by the viewer's
+   prefetch, because they are in different caches.
 4. **Where the engine lives.** A new crate (`vpng-view`) beside
    `vpng-editing`, or a module inside `vpng-editing`. A separate crate keeps
    the editing engine's API stable and lets the viewer be tested on its own.
+   **Decided (stage 2):** `crates/vpng-view`.
 5. **Threading library.** `std::thread` only, or a small dependency. The
    workspace currently has no async runtime and no thread-pool dependency;
    adding one is a real decision for a format library.
+   **Decided (stage 3):** `std::thread` only, with a `Mutex` and a
+   `Condvar`. A format library should not drag an async runtime into its
+   dependency graph, and the work here is CPU-bound and short.
 
 ## 6. A build order
 
@@ -229,17 +245,26 @@ check between each, and one heavy job at a time on this host.
 1. **The reader.** Extract the file half of `FileSource` into a `TileReader`
    with an explicit "bytes read" counter. Test: the reader reads exactly the
    payloads it is asked for.
+   **Done** — `crates/vpng-source`, 11 tests.
 2. **The scheduler.** The priority queue and cancellation, with no threads
    yet — a single-threaded driver that consumes the queue in order. Test:
    ordering and cancellation are exact.
+   **Done** — `crates/vpng-view/src/scheduler.rs` and `driver.rs`, 17 tests.
 3. **The parallel decoder.** The worker pool on top of the scheduler. Test:
    the decoded bytes are identical to the sequential decoder's, for every
    format and tile geometry.
+   **Done** — `crates/vpng-view/src/pool.rs` and `file_decoder.rs`, 8 tests.
+   The byte-identity test covers a 512×384 RGBA8 file with 48 tiles; the
+   *every* format and tile geometry part is not yet covered and is
+   recorded as such.
 4. **Prefetch.** The policy, the parameters, the measurement.
+   **Not started.**
 5. **The benchmark.** The acceptance test as a runnable program, producing
    the raw JSON, with the sequential baseline measured in the same run.
+   **Not started.**
 6. **The report.** `docs/P5_REPORT.md`, with every figure bound to the raw
    data by a check in `benchmarks/verify_reports.py`, exactly as P3.5 and
    P4 did.
+   **Not started.**
 
 Each step ends with a compile check and a test run before the next begins.

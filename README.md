@@ -6,7 +6,7 @@ A lossless, adaptive, tiled, random-access image format and editing engine.
 **Secondary target:** fit eligible images within 10 MB — measured, never promised.
 **Status:** v0.1 container implemented, compiled, and tested; the editing engine
 (P4) and the compression research (P3.5) have landed. `cargo build
---workspace` and `cargo test --workspace --all-targets` both pass (283 tests,
+--workspace` and `cargo test --workspace --all-targets` both pass (337 tests,
 0 failures) on `stable-x86_64-pc-windows-gnu` rustc 1.100.0. Large-image stress
 runs, a 16K memory matrix, an editing benchmark, and a seed-corpus measurement
 are recorded in `docs/BENCHMARKS.md`. See `docs/ROADMAP_STATUS.md`.
@@ -30,7 +30,7 @@ are recorded in `docs/BENCHMARKS.md`. See `docs/ROADMAP_STATUS.md`.
 * Conformance tests: exhaustive round-trip, region-vs-crop, malformed-input
   sweeps, a bounded mutation sweep, golden files, the `default_codec`
   clarification, and a deterministic fuzzing harness over seven targets.
-  329 tests, all passing.
+  337 tests, all passing.
 * Layered integrity: `info` (structure only), `check` (every payload CRC32C),
   `verify` (exact pixels against a reference).
 * Measured evidence: large-image stress (up to a 15360×8640 photo and
@@ -49,12 +49,12 @@ are recorded in `docs/BENCHMARKS.md`. See `docs/ROADMAP_STATUS.md`.
 
 ## What is explicitly not here yet
 
-Adaptive (variable-size) tiling, parallel decode, the streaming *reader* and
-the preview/multiresolution surface, the Python bindings, and a frozen v1.0
-format. The stable codec ids 4–6 are still reserved; the LZ77, CARC and hybrid
-codecs that were measured in the P3.5 study are **research-only** — their ids
-live in `0x80..=0xFF`, they cannot reach a file, and the decoder rejects a file
-that names one. Coverage-guided fuzzing runs in CI's nightly job on Linux —
+Adaptive (variable-size) tiling, the preview/multiresolution surface, the
+Python bindings, and a frozen v1.0 format. The stable codec ids 4–6 are still
+reserved; the LZ77, CARC and hybrid codecs that were measured in the P3.5 study
+are **research-only** — their ids live in `0x80..=0xFF`, they cannot reach a
+file, and the decoder rejects a file that names one. Coverage-guided fuzzing runs
+in CI's nightly job on Linux —
 132,429,711 executions across seven targets in the first run, a second run
 that found a real defect (`Header::parse` accepted a zero-dimension header
 that `Header::to_bytes` refused to serialize; it is fixed, the exact crash
@@ -65,6 +65,20 @@ Windows build and rustc's ELF-only coverage module all stop it there (the
 toolchain and `cargo-fuzz` themselves install and run); the local evidence is
 the deterministic mutation harness (`crates/vpng-fuzzing`). There is **no
 graphical editor** yet. Each phase has a row in the status table.
+
+## What is being built next
+
+The interactive engine (P5) is in its third stage: a streaming reader
+(`crates/vpng-source`), a bounded scheduler with viewport priority and
+cancellation, and a parallel worker pool whose output is byte-identical to the
+sequential decoder's. The prefetch policy and the acceptance benchmark are left.
+
+The roadmap also carries a **feature backlog** — a preview pyramid, Python
+bindings, a graphical editor, a WebAssembly package, HTTP Range streaming,
+layers and masks, GPU texture blocks — each attached to a phase in
+`docs/ROADMAP_STATUS.md` §2.2, and a **release plan from v0.2 to v0.23**
+(§9) in which compression work appears in every release. Both are plans, not
+promises: no date is claimed and no version exists until its gate passes.
 
 ## Build
 
@@ -117,6 +131,9 @@ crates/vpng-codecs      TileCodec trait + Raw, Palette, Run-length, Predictor (i
 crates/vpng-tiling      TileGrid and region-to-tile mapping
 crates/vpng-encoder     canonical pixels -> .vpng bytes
 crates/vpng-decoder     .vpng bytes -> full / tile / region pixels
+crates/vpng-source      the streaming reader: container metadata + per-tile payload reads
+crates/vpng-cache       the bounded, byte-budgeted LRU cache of decoded tiles
+crates/vpng-view        the interactive engine: scheduler, worker pool, prefetch
 crates/vpng-editing     the editing engine: regions, transactions, undo/redo, atomic save
 crates/vpng-research    the P3.5 codec benchmark binary
 crates/vpng-fuzzing     fuzz targets + the deterministic mutation harness

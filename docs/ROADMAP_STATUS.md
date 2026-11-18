@@ -1,6 +1,6 @@
 # Roadmap status
 
-**Updated:** 2026-11-16
+**Updated:** 2026-11-18
 **Legend:**
 
 * `PASS` — the required test **exists and was executed**, and the observed result
@@ -18,7 +18,7 @@
 | Default host | `x86_64-pc-windows-gnu` |
 | Active toolchain | overridden by `E:\VPNG\rust-toolchain.toml` |
 | `cargo build --workspace` | **exit 0**, `Finished dev profile ... in 3.85s` |
-| `cargo test --workspace --all-targets` | **exit 0**, `329 passed; 0 failed` |
+| `cargo test --workspace --all-targets` | **exit 0**, `337 passed; 0 failed` |
 | `cargo fmt --all --check` | **exit 0**, no diffs |
 | `cargo clippy --workspace --all-targets` | **exit 0**, zero warnings |
 
@@ -32,10 +32,10 @@ No Visual Studio is required: the GNU host ships `rust-lld` and a
 | P0 — repository audit and specification | unambiguous field sizes; executable serialization tests; reproducible build env | **PASS** | `vpng-container` 19 tests pass (header is exactly 64 bytes, directory entry exactly 40 bytes, round-trips exact, checksum detects a flipped byte). Build environment recorded in §1 and `docs/REPOSITORY_AUDIT.md`. |
 | P1 — minimal valid container | exact round-trip all formats; golden files; tile-only decode; malformed tests | **PASS** | `roundtrip.rs` 7 pass, `golden.rs` 5 pass, `malformed.rs` 12 pass, `vpng-decoder` 8 pass. Structural integrity checking (`vpng check`) is implemented and tested. See §3 for the CLI end-to-end run. |
 | P2 — baseline codecs | palette, RLE, predictor, LZ77, entropy | **PARTIAL** | Palette (id 1) implemented with byte-level golden vectors, whole-file golden fixture, and property tests (§3.1, A06); RLE (id 2) implemented with byte-level golden vectors, a whole-file golden fixture, and conformance tests (§3.2, A07); Predictor+entropy (id 3) implemented with seven spatial predictors, per-row measured-cost selection, an adaptive arithmetic coder, byte-level golden vectors, a whole-file golden fixture, and conformance/property tests (§3.3, A08). LZ77 (id 4), predictor+dictionary (id 5), and context-adaptive entropy (id 6) remain reserved and are rejected on decode. Cost-based per-tile selection with a Raw fallback is implemented and tested. |
-| P3 — adaptive tiling, region decode | region == crop; coverage validation; bounded cache; parallel decode | **PARTIAL** | Fixed-grid region decode and exact-coverage validation pass (`region_decode_equals_full_decode_crop`). A **bounded byte-budget LRU tile cache** now exists and is tested (`the_cache_evicts_when_the_budget_is_exceeded`; A14). Adaptive (variable-size) tiling and parallel decode are still not started. |
+| P3 — adaptive tiling, region decode | region == crop; coverage validation; bounded cache; parallel decode | **PARTIAL** | Fixed-grid region decode and exact-coverage validation pass (`region_decode_equals_full_decode_crop`). A **bounded byte-budget LRU tile cache** now exists and is tested (`the_cache_evicts_when_the_budget_is_exceeded`; A14). The **parallel decode engine** now exists too (`crates/vpng-view`: a bounded scheduler and a worker pool that produces byte-identical tiles to the sequential decoder), but its throughput has not been measured, so the parallel half of this gate is not yet closed. Adaptive (variable-size) tiling is still not started. |
 | P4 — editing engine | localized edit; payload reuse; crash safety; undo/redo | **PASS** | The engine is implemented in `crates/vpng-editing` (51 tests). A localized edit decodes 1 tile of 64 and modifies 1; 63 of 64 payloads are preserved byte for byte and 1 is rewritten; BEGIN/COMMIT/ABORT, atomic copy-on-write save, and two injected failure points all preserve the original; undo/redo restore the pixels exactly. A successful commit is a **new baseline**: undo and redo cannot cross it, while a failed commit preserves the whole editing state. The design decisions it resolved are ADR-0012 (atomic replacement, §18.9/§18.10) and ADR-0013 (cache eviction, §18.13). Evidence: `docs/P4_EDITING_ENGINE_REPORT.md`, `benchmarks/p4_editing_results.json`. |
 | P5 — preview and multiresolution | thumbnail, pyramid | **NOT STARTED** | |
-| P6 — 16K and memory engineering | 16K stress; streaming; budgets | **PARTIAL** | A tile-by-tile streaming writer and a 12-case memory matrix now exist: 4096², 8192² and 16384² × {gray8, rgb8, rgba8, rgba16}, **12 PASS / 0 FAIL / 0 BLOCKED**. The 16384×16384 RGBA16 case (2 GiB of canonical pixels) writes in an 8.8 MB heap peak and edits with a 13.2 MB resident-set growth, against a 64 MB target. A bounded cache and a bounded history are implemented. Parallel limits and parallel decode are still not started. Evidence: `docs/P4_MEMORY_VALIDATION.md`, `benchmarks/p4_memory_results.json`. |
+| P6 — 16K and memory engineering | 16K stress; streaming; budgets | **PARTIAL** | A tile-by-tile streaming writer and a 12-case memory matrix now exist: 4096², 8192² and 16384² × {gray8, rgb8, rgba8, rgba16}, **12 PASS / 0 FAIL / 0 BLOCKED**. The 16384×16384 RGBA16 case (2 GiB of canonical pixels) writes in an 8.8 MB heap peak and edits with a 13.2 MB resident-set growth, against a 64 MB target. A bounded cache and a bounded history are implemented. The parallel engine (`crates/vpng-view`) exists but has not yet been measured on a 16K workload, so the parallel limits this gate asks for are not closed. Evidence: `docs/P4_MEMORY_VALIDATION.md`, `benchmarks/p4_memory_results.json`. |
 | P7 — compression research | controlled experiments | **PARTIAL** | Eleven codecs were measured on identical pixels and identical tile layouts: the four stable codecs, four context-adaptive residual models (CARC A–D), an LZ77 dictionary codec and three hybrids, with pinned golden vectors for each. Every image was also measured against PNG, WebP lossless and JPEG XL lossless, so every column of the comparison shares one denominator. The results are in `benchmarks/p3_5_raw_results.json` (per-image, per-tile, per-category, per-resolution, aggregate and worst-case) and `benchmarks/p3_5_comparison.csv`. The **750-image corpus and statistical reporting do not exist**; the study is a 9-image seed. Evidence: `docs/P3_5_COMPRESSION_RESEARCH_REPORT.md`. |
 | P8 — 10 MB target evaluation | exact accounting; honest failure | **PARTIAL** | Exact size accounting passes (`size_accounting_is_exact`); refusal is honest and typed (`--max-size 1024` → exit 6 reporting the smallest lossless size 240,148). A 9-image seed corpus exists, but the 750-image target is unmet, so the per-category success distribution is unmeasured. |
 | P9 — Python API | bindings around Rust | **NOT STARTED** | CLI-driver tooling only. |
@@ -52,12 +52,48 @@ already been done.
 |---|---|---|---|
 | P3.5 + P4 — compression and editing | the two gates just closed | P3.5 (recorded as P7) and P4 | **verified; committed** (`c821f25`) |
 | P4.1 — specification and compatibility closure | resolve `default_codec`; verify the Linux fuzzing CI path | P10 | **CLOSED** (2026-11-18): the specification clarification is committed (`b692227`) and the Linux coverage-guided fuzz job ran three times — clean, then a real defect that is fixed and pinned, then a clean re-verification (runs 44264162940, 44266490454, 44274770109) |
-| P5 — streaming and parallel decoding | open a 16K image and navigate it without a full-image allocation | P6 (streaming, parallel limits) and the parallel-decode part of P3 | **IN PROGRESS** — design in `docs/P5_DESIGN.md`; stage 1 (the streaming reader, `crates/vpng-source`) and stage 2 (the bounded scheduler with viewport priority and cancellation, `crates/vpng-view`) are done |
+| P5 — streaming and parallel decoding | open a 16K image and navigate it without a full-image allocation | P6 (streaming, parallel limits) and the parallel-decode part of P3 | **IN PROGRESS** — design in `docs/P5_DESIGN.md`; stage 1 (the streaming reader, `crates/vpng-source`), stage 2 (the bounded scheduler with viewport priority and cancellation, `crates/vpng-view`) and stage 3 (the parallel worker pool, `crates/vpng-view`) are done; the prefetch policy and the acceptance benchmark are left |
 | P6 — multiresolution preview pyramid | fast zooming, progressive presentation | P5 | NOT STARTED |
 | P7 — adaptive tiling | variable tile dimensions and spatially adaptive layouts | P3 | NOT STARTED |
 | P8 — production validation | the 750-image corpus, multiple platforms, 16K workloads | P8 | PARTIAL (seed corpus only) |
 | P9 — Python bindings and integration | expose the stable engine to other applications | P9 | NOT STARTED |
 | P10 — format freeze and release | compatibility guarantees, security audit, v1.0 | P10 | PARTIAL (the format is not frozen) |
+| P11 — graphical viewer and editor | a desktop UI over `vpng-view` and `vpng-editing` | P9 (the binding surface) and P5 | NOT STARTED |
+| P12 — WebAssembly package | the decoder, the viewer and the editor in a browser | P9 | NOT STARTED |
+| P13 — network streaming | read the header, the directory and the tiles over HTTP Range requests | P5 | NOT STARTED |
+| P14 — layers and masks | several named tile grids in one file | P7 (the partition representation) | NOT STARTED — needs a container format revision |
+| P15 — GPU-ready payloads | BC7/ASTC tile payloads for game-engine asset pipelines | P2 (the codec table) | NOT STARTED — needs a container format revision |
+
+### 2.2 The feature backlog (the capabilities proposed for the project)
+
+This table is the roadmap's answer to the capabilities proposed in the
+project's feature list. Every one of them is now attached to a phase, so
+that none of them is a wish that lives outside the plan. The "source"
+column records where the proposal came from, so the origin of each item is
+not lost.
+
+| Capability | Source of the proposal | Phase | State | What it needs |
+|---|---|---|---|---|
+| Multiresolution preview pyramid (mipmaps) | already in the roadmap | **P6** | NOT STARTED | A pyramid layout in the container: more than one grid of tiles, plus the rule that lets a reader pick a level. A format revision, with the thumbnail level written by the encoder and verified by the decoder. |
+| Parallel tile decoding | already in the roadmap | **P5** | IN PROGRESS | Stage 1 (the streaming reader), stage 2 (the bounded scheduler) and stage 3 (the worker pool) are done. What is left is the prefetch policy and the acceptance benchmark. |
+| Streaming reader and viewport priority | already in the roadmap | **P5** | DONE for local files | `crates/vpng-source` and the scheduler in `crates/vpng-view`. The proposal also suggested HTTP Range streaming, which is tracked separately as **P13**. |
+| Python bindings | already in the roadmap | **P9** | NOT STARTED | Native bindings returning NumPy arrays over the same engine, not a re-implementation of it. |
+| Adaptive tiling and advanced codecs | already in the roadmap | **P7** and **P2** | NOT STARTED | Variable tile sizes, and the reserved stable codec ids 4–6. A research codec is promoted to a stable id only after a specification update, a version bump, a migration policy and compatibility tests — in that order. The research ids `0x80..=0xFF` cannot reach a file; a decoder rejects one with `UnsupportedFeature`. |
+| Graphical UI editor | proposed; not previously in the roadmap | **P11** | NOT STARTED | A desktop front end over `vpng-view` and `vpng-editing`. The engines exist; the window does not. No graphical editor exists in this repository today. |
+| WebAssembly (WASM) package | proposed; not previously in the roadmap | **P12** | NOT STARTED | A `wasm32` build of the decoder, the viewer and the editing engine. The constraint is the same as everywhere else: the browser must produce the same pixels, and the file format must not change to suit the browser. |
+| HTTP Range-request cloud streaming | proposed; not previously in the roadmap | **P13** | NOT STARTED | A reader that fetches the 64-byte header, the directory, and then tile payloads by byte range from an object store. The format already supports it: every tile payload has its own offset and length, so no format change is needed. |
+| Multi-layer / mask compositing | proposed; not previously in the roadmap | **P14** | NOT STARTED | Several named tile grids in one file. This **changes the container layout** and needs a format revision: a version bump, a migration policy and compatibility tests, with the v0.1 files still readable unchanged. |
+| GPU texture block support (BC7/ASTC) | proposed; not previously in the roadmap | **P15** | NOT STARTED | Optional GPU-ready tile payloads. This **changes the codec table** and needs a format revision on the same terms as P14. It is also the one item on this list that is not lossless in the same sense as the rest — a BC7 payload is a lossy GPU block format — so it must be a separate, explicitly named payload kind and never a silent substitute for a lossless tile. |
+
+Two rules govern every row above:
+
+* **A format-changing item is never a silent change.** P14 and P15 change
+  what a file contains. Each requires a documented format revision — a
+  version bump, a migration policy, and compatibility tests that prove the
+  older files still read — before it may reach a file.
+* **An item may not be claimed before it is measured.** Every row stays
+  NOT STARTED until it has a test that executes, in the same way the phase
+  gates do.
 
 The guiding objective for P5 is **interactive performance**, not raw
 throughput: opening an enormous image, navigating it smoothly, editing a
@@ -263,7 +299,7 @@ profiles, `x86_64-pc-windows-gnu`.
 | `vpng-fuzzing` `tests/fuzz_smoke.rs` | 3 | ok |
 | `vpng-fuzzing` `tests/fuzz_regressions.rs` | 3 | ok |
 | `vpng-source` unit | 11 | ok |
-| `vpng-view` unit | 17 | ok |
+| `vpng-view` unit | 25 | ok |
 | `vpng-research` bin | 0 | ok |
 | `vpng-testkit` unit | 2 | ok |
 | `tests/default_codec.rs` | 7 | ok |
@@ -278,7 +314,7 @@ profiles, `x86_64-pc-windows-gnu`.
 | `vpng-validation` unit | 2 | ok |
 | `vpng-validation` bins | 0 | ok |
 | Doc-tests | 0 | ok |
-| **Total** | **329** | **329 passed, 0 failed** |
+| **Total** | **337** | **337 passed, 0 failed** |
 
 The 115 new tests are: 52 codec tests (22 LZ77, 14 CARC, 12 hybrids, plus
 the registry and entropy-stage tests), 51 editing tests, 3 fuzzing tests,
@@ -334,7 +370,7 @@ tests (181 → 283); the pre-commit correction pass added 6 editing tests
 conformance tests (289 → 296); the coverage-guided fuzzing fix added 2 header
 unit tests and 3 regression tests that replay the fuzzer's crash artifact
 (296 → 301); the P5 streaming reader added 11 tests (301 → 312); the P5
-scheduler added 17 (312 → 329).
+scheduler added 17 (312 → 329); the P5 worker pool added 8 (329 → 337).
 
 ## 7. Not yet measured (explicitly no claims)
 
@@ -425,3 +461,76 @@ closed and one is still open:
    replays the exact crash artifact, and **the third run re-verified the
    fix** (44274770109): 78,850,985 executions, 0 findings. The evidence for
    each local limit is in `docs/P4_COMPATIBILITY_REPORT.md`.
+
+---
+
+## 9. The future release plan (v0.2 → v0.23)
+
+The phase gates in §2 say *what* is being built. This section says *when*
+it is meant to ship, release by release, so that the work has an order and
+not just a list.
+
+**How to read it.**
+
+* **A version is a product release, not automatically a format change.**
+  The container's own version lives in the header (bytes 8–9: major and
+  minor), and that minor version moves **only** when the layout changes.
+  The "format revision?" column says which releases move it; the rest are
+  engine, tooling and interface releases that leave every existing file
+  readable and byte-identical.
+* **Compression is a standing line of work, not one project at the end.**
+  Every release from v0.2 to v0.23 carries compression work: a codec, a
+  measurement, a tuning pass, or a format revision that opens a new
+  compression axis. A release that ships without touching compression
+  would be a release that leaves the main reason to use the format
+  untouched.
+* **No dates are promised, and no version is claimed.** Every row is a
+  plan. A version ships when its gate passes and the evidence is recorded
+  here; until then its state is NOT STARTED. The only versions that are
+  more than a plan are the ones in §2, and those say what was executed.
+* **The invariants hold in every row.** Lossless reconstruction, exact
+  round-trips, deterministic output, compatibility with the existing
+  golden fixtures, no silent binary-layout change, and no lossy fallback.
+  A research codec never reaches a file: the research ids `0x80..=0xFF`
+  are rejected by the decoder with `UnsupportedFeature`, and promoting one
+  to a stable id requires a specification update, a version bump, a
+  migration policy and compatibility tests, in that order.
+
+| Version | Theme | Compression work in this release | Format revision? | Draws on | State |
+|---|---|---|---|---|---|
+| v0.2 | streaming and parallel engine | extend the encoder's per-tile cost model so `auto` chooses among **all** stable codecs, and measure the change on the 9-image seed corpus | no | P5, P2 | NOT STARTED |
+| v0.3 | adaptive tiling | variable-size tiles give the predictor more context: measure the ratio change against the fixed grid on the same corpus and the same denominator | **yes** — the partition representation | P7 | NOT STARTED |
+| v0.4 | preview pyramid | the pyramid levels are written with the same stable codecs, and the level a reader actually fetches is measured rather than assumed | **yes** — a second grid of tiles | P6 | NOT STARTED |
+| v0.5 | stable codec id 4 (LZ77) | implement the reserved LZ77 codec as stable id 4: golden vectors, conformance tests, and a measured ratio against ids 1–3 | **yes** — the codec table | P2 | NOT STARTED |
+| v0.6 | stable codec id 5 (dictionary) | implement predictor + dictionary as stable id 5, with the dictionary scope stated exactly (tile-local, per the ADR) | **yes** — the codec table | P2 | NOT STARTED |
+| v0.7 | stable codec id 6 (context-adaptive entropy) | implement the context-adaptive entropy codec as stable id 6, with the per-tile model cost included in the encoder's choice | **yes** — the codec table | P2 | NOT STARTED |
+| v0.8 | the 750-image corpus | replace the seed corpus with the full one and re-derive the auto-selection thresholds from it; every ratio is reported against PNG, WebP lossless and JPEG XL lossless | no | P8, P7 | NOT STARTED |
+| v0.9 | network streaming | add a `recompress` operation: re-encode a file's payloads with the current best codec set, changing the bytes and not the pixels | no | P13, P2 | NOT STARTED |
+| v0.10 | Python bindings | expose the per-tile codec choice and the measured ratio through the API, so a pipeline can select codecs itself against the same numbers | no | P9 | NOT STARTED |
+| v0.11 | graphical viewer | the viewer reports the codec mix of the file it opened, so a user can see why the file is the size it is | no | P11 | NOT STARTED |
+| v0.12 | WebAssembly package | measure decode time per codec **on the target device** and re-tune the auto-selection thresholds for that device; the build ships the stable codecs only | no | P12 | NOT STARTED |
+| v0.13 | graphical editor | the editor shows a dry-run comparison — what the file would weigh under a different codec — before the commit, measured with the encoder's own selection function | no | P11 | NOT STARTED |
+| v0.14 | layers and masks | each layer is compressed independently and the container reports the per-layer ratio; cross-layer prediction is explicitly out of scope | **yes** — several grids in one file | P14 | NOT STARTED |
+| v0.15 | GPU-ready payloads | the lossless payload stays normative; the GPU payload is an optional sibling, and the size of both is reported so the trade is visible rather than implied | **yes** — the payload kinds | P15 | NOT STARTED |
+| v0.16 | shared dictionaries | a dictionary shared across the tiles of one layer, measured against the per-tile dictionary on the same corpus | **yes** — the payload context | P7 | NOT STARTED |
+| v0.17 | context modelling | promote a research context model to a stable id **only** if it beats the stable predictor on the full corpus; the evidence is the comparison table, not the seed | **yes** — the codec table | P7, P2 | NOT STARTED |
+| v0.18 | parallel encoding | parallel encoding must not change the bytes: the same file must come out of one thread and of four, byte for byte | no | P5, P2 | NOT STARTED |
+| v0.19 | streaming encoder | the streaming writer chooses codecs per tile as it goes, and produces exactly the file the batch encoder produces | no | P5, P2 | NOT STARTED |
+| v0.20 | corpus-driven defaults | the auto codec's thresholds come from the corpus rather than from a guess; the change is measured on the whole corpus, and the seed-only numbers are reported as seed-only | no | P8, P7 | NOT STARTED |
+| v0.21 | closing the gap to JPEG XL | rANS with a shared dictionary and a trained per-category model, measured against the JPEG XL lossless baseline of 0.2189× on the corpus | **yes** — the codec table | P7, P2 | NOT STARTED |
+| v0.22 | metadata chunks | metadata is stored compressed and its compressed size is accounted for exactly, so the file's size accounting stays exact | **yes** — the chunk layout | P10 | NOT STARTED |
+| v0.23 | format freeze (the v1.0 candidate) | freeze the codec table, the golden fixtures and the compatibility tests; the research codecs stay research-only and cannot reach a file | **yes** — the version itself | P10 | NOT STARTED |
+
+**What this plan does not say.**
+
+* It does not say any of these versions exists. They are the order of the
+  work, not a promise of a date.
+* It does not say that a research codec will be promoted. v0.17 and v0.21
+  are the versions where that decision *could* be taken, and the
+  measurement that decides it is named in the row.
+* It does not change the v0.1 layout. The first row that moves the
+  container's minor version is v0.3, and each such row carries its own
+  migration policy and compatibility tests.
+* It does not cover work outside the format: security audits, release
+  engineering and the compatibility guarantees themselves are tracked by
+  the phase gates in §2, not here.

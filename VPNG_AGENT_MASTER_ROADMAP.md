@@ -1599,6 +1599,49 @@ Start now with this exact order:
 Do not jump directly to neural compression, GPU optimization, adaptive
 AI selection, or a graphical editor.
 
+# 21. Feature backlog and the release plan (v0.2 &#8594; v0.23)
+
+## 21.1 The feature backlog
+
+The capabilities below were proposed for the project and are now attached
+to phases, so that each one is part of the plan rather than a wish outside
+it. The canonical table — with the state of every item and what each one
+needs — lives in `docs/ROADMAP_STATUS.md` &#167;2.2, which is the living
+record; this section is the authoritative statement that the items exist
+and where they belong.
+
+| Capability | Phase | Notes |
+|---|---|---|
+| Multiresolution preview pyramid (mipmaps) | P6 | More than one grid of tiles; a format revision. |
+| Parallel tile decoding | P5 | The scheduler and the worker pool exist; the prefetch policy and the acceptance benchmark are left. |
+| Streaming reader and viewport priority | P5 | Done for local files (`vpng-source`, `vpng-view`); the HTTP Range variant is P13. |
+| Python bindings | P9 | The same engine, not a second implementation of it. |
+| Adaptive tiling and advanced codecs | P7 and P2 | Variable tile sizes and the reserved stable ids 4&#8211;6. A research codec is promoted only after a specification update, a version bump, a migration policy and compatibility tests. |
+| Graphical UI editor | P11 | A desktop front end over `vpng-view` and `vpng-editing`. No graphical editor exists in this repository yet. |
+| WebAssembly (WASM) package | P12 | A `wasm32` build of the decoder, the viewer and the editor. |
+| HTTP Range-request cloud streaming | P13 | The format already allows it: every payload has its own offset and length, so no format change is needed. |
+| Multi-layer / mask compositing | P14 | Several named grids in one file; a format revision. |
+| GPU texture block support (BC7/ASTC) | P15 | A separate, explicitly named payload kind; never a silent substitute for a lossless tile. |
+
+## 21.2 The release plan
+
+The release plan runs from **v0.2 to v0.23** and is maintained in
+`docs/ROADMAP_STATUS.md` &#167;9, where the full table lives. Its rules:
+
+-   A release version is a product version. The container's own version
+    (header bytes 8&#8211;9) moves only when the layout changes, and the
+    release plan says which releases move it.
+-   **Compression work is present in every release from v0.2 to v0.23.**
+    It is a standing line of work — a codec, a measurement, a tuning pass
+    or a format revision that opens a new compression axis — not one
+    project deferred to the end.
+-   No dates are promised and no version is claimed. A version ships when
+    its gate passes and the evidence is recorded.
+-   The invariants of &#167;0.1 hold in every release: exact lossless
+    reconstruction, deterministic output, compatibility with the existing
+    golden fixtures, no silent binary-layout change, and no lossy
+    fallback. A research codec never reaches a file.
+
 ## Final instruction
 
 Build VPNG as a real, independently specified, lossless, tiled image

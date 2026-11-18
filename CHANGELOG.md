@@ -8,6 +8,64 @@ separately as major.minor in the header.
 
 ### Added
 
+* **The parallel worker pool (`crates/vpng-view`).** The parallel engine:
+  a fixed set of worker threads that take requests from the scheduler,
+  decode them, and publish the results into the bounded cache.
+  * **The lock is never held across a decode.** The workers share one
+    mutex and hold it only while they take a request or publish a result,
+    so the decode — the expensive part — happens with the lock released.
+  * **One decode per tile.** A tile that is being decoded is *in flight*,
+    and a request for it does not start a second decode; the caller is
+    told that the work is already under way.
+  * **A cached tile is not decoded again.** The request path looks the
+    tile up first and counts the hit or the miss, so the cache hit rate
+    measures how much of the demand the cache satisfied.
+  * **A stale result is dropped, not shown.** The generation handle is
+    given to every decoder, so a worker can see that the viewport moved
+    while its tile was being decoded; the pixels are thrown away and
+    counted separately from a failure.
+  * **A failed decode does not stop the pool.** The failure is recorded
+    against the tile, the worker carries on, and the caller is told when
+    it waits for that tile.
+  * **The pixels are the same pixels.** The pool changes *when* a tile is
+    decoded, never *what* it decodes: a test decodes a 512×384 RGBA8 file
+    through four workers and through the sequential decoder, and asserts
+    that all 48 tiles are byte-identical.
+  * 8 new tests, including the byte-identity check, the in-flight
+    deduplication, the cache-hit path, the discarded-stale path and the
+    surviving-failure path.
+
+* **A shared tile cache (`crates/vpng-cache`).** The bounded, byte-budgeted
+  LRU cache moves out of `vpng-editing` into a crate of its own, because
+  two engines need it: the editor holds the tiles a session has touched,
+  and the viewer holds the tiles a viewport has shown. Both must be able
+  to state exactly how much decoded memory they hold, and there is one
+  implementation of the bound. `vpng_editing::TileCache` still resolves
+  to the same type, so no caller changes.
+
+* **The feature backlog and the release plan.** The capabilities that were
+  proposed for the project — a preview pyramid, parallel decoding, a
+  streaming reader, Python bindings, adaptive tiling, a graphical editor,
+  a WebAssembly package, HTTP Range streaming, layers and masks, and GPU
+  texture blocks — are now attached to phases in `docs/ROADMAP_STATUS.md`
+  §2.2 and in the master roadmap's new §21, with the state of each and
+  what each one needs. The separate feature list is gone; its contents
+  live in the roadmap, where they can be tracked.
+  * **A release plan from v0.2 to v0.23** (`docs/ROADMAP_STATUS.md` §9),
+    in which **compression work appears in every release**: a codec, a
+    measurement, a tuning pass, or a format revision that opens a new
+    compression axis. Compression is a standing line of work rather than
+    one project deferred to the end.
+  * A release version is a product version: the container's own version
+    (header bytes 8–9) moves only when the layout changes, and the plan
+    says which releases move it.
+  * No dates are promised and no version is claimed. Every row is a plan;
+    the only versions that are more than a plan are the ones in the phase
+    gates, and those say what was executed.
+  * The invariants hold in every row: exact lossless reconstruction,
+    deterministic output, compatibility with the existing golden fixtures,
+    no silent binary-layout change, and no lossy fallback.
+
 * **Streaming reader (`crates/vpng-source`).** The file half of the editing
   engine's `FileSource`, extracted into its own crate so that the
   interactive viewer and the editor share one implementation of the rules
@@ -201,7 +259,7 @@ separately as major.minor in the header.
   findings**, 3.9 s in the release profile. The *deterministic* harness found
   no library defect; the *coverage-guided* fuzzer, run in CI on Linux, found
   one (see **Fixed** below).
-* The test suite is **329 passed / 0 failed** (was 181).
+* The test suite is **337 passed / 0 failed** (was 181).
 
 ### Known limitations
 
