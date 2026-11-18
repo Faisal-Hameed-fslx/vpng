@@ -1,0 +1,19 @@
+{
+  "tool": "vpng-fuzz-mutate",
+  "schema": 1,
+  "seed": 6215335028777966080,
+  "iterations": 200000,
+  "elapsed_ms": 2120,
+  "targets": ["header", "directory", "container", "tile-payload", "experimental-codec", "region", "editing"],
+  "per_target": [
+    {"name": "header", "executions": 200000, "findings": 0},
+    {"name": "directory", "executions": 200000, "findings": 0},
+    {"name": "container", "executions": 200000, "findings": 0},
+    {"name": "tile-payload", "executions": 200000, "findings": 0},
+    {"name": "experimental-codec", "executions": 200000, "findings": 0},
+    {"name": "region", "executions": 200000, "findings": 0},
+    {"name": "editing", "executions": 200000, "findings": 0}
+  ],
+  "finding_count": 0,
+  "findings": [  ]
+}

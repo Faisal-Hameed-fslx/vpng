@@ -1,0 +1,164 @@
+name: CI
+
+# The CI suite is the gate for every change to the repository. It runs the
+# same commands a developer runs locally, plus the fuzzing jobs.
+#
+# The jobs are deliberately split so a failure points at one thing:
+#
+# * `fmt`        — the formatting check.
+# * `clippy`     — the lint check, with warnings treated as errors.
+# * `build`      — every target of every crate compiles.
+# * `test`       — the whole test suite.
+# * `golden`     — the golden fixtures, named on their own so a change to
+#                  the binary format is obvious in the job list.
+# * `fuzz-smoke` — the deterministic mutation harness over every parser.
+# * `fuzz`       — the coverage-guided `cargo-fuzz` targets, on nightly.
+# * `release`    — the release profile builds.
+# * `python`     — the benchmark and corpus scripts still parse, and the
+#                  milestone reports still match the raw data.
+
+on:
+  push:
+    # Both names are listed: the repository's branch is `master`, and a
+    # GitHub-hosted fork usually renames it `main`. The coverage-guided fuzz
+    # job must run on either.
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  fmt:
+    name: fmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Check the formatting
+        run: cargo fmt --all --check
+
+  clippy:
+    name: clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Lint every target
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build every target
+        run: cargo build --workspace --all-targets
+
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run the test suite
+        run: cargo test --workspace --all-targets
+
+  golden:
+    name: golden fixtures
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: The golden fixtures must not change
+        run: cargo test -p vpng-testkit --test golden -- --nocapture
+
+  fuzz-smoke:
+    name: fuzz (deterministic)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run the mutation harness
+        run: |
+          cargo run --release -p vpng-fuzzing --bin vpng-fuzz-mutate -- \
+            --iterations 50000 \
+            --output fuzz-smoke.json
+      - name: Publish the report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-smoke-report
+          path: fuzz-smoke.json
+          if-no-files-found: ignore
+
+  fuzz:
+    name: fuzz (coverage guided)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fuzz
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+      - name: Fuzz every target
+        run: |
+          set -e
+          # `--fuzz-dir` is cargo-fuzz's fuzz *project* directory (the one
+          # holding fuzz/Cargo.toml). The corpus and the crash artifacts live
+          # under fuzz/corpus/<target> and fuzz/artifacts/<target>.
+          for target in header directory container tile_payload experimental_codec region editing; do
+            echo "::group::fuzz $target"
+            cargo +nightly fuzz run "$target" --fuzz-dir fuzz -- -max_total_time=120 -rss_limit_mb=4096
+            echo "::endgroup::"
+          done
+      - name: Publish the corpus
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-corpus
+          path: fuzz/corpus
+          if-no-files-found: ignore
+
+  release:
+    name: release build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build the release profile
+        run: cargo build --workspace --release
+
+  python:
+    name: python scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: The scripts must parse
+        run: |
+          python -m compileall -q benchmarks python
+      - name: The research runner must show its help
+        run: python benchmarks/corpus/run_research.py --help
+      - name: The reports must match the raw data
+        run: python benchmarks/verify_reports.py

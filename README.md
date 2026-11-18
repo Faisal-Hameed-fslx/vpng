@@ -4,11 +4,12 @@ A lossless, adaptive, tiled, random-access image format and editing engine.
 
 **Primary requirement:** exact pixel reconstruction.
 **Secondary target:** fit eligible images within 10 MB — measured, never promised.
-**Status:** v0.1 container implemented, compiled, and tested. `cargo build
---workspace` and `cargo test --workspace` both pass (181 tests, 0 failures) on
-`stable-x86_64-pc-windows-gnu` rustc 1.100.0. Large-image stress runs and a
-seed-corpus measurement are recorded in `docs/BENCHMARKS.md`. See
-`docs/ROADMAP_STATUS.md`.
+**Status:** v0.1 container implemented, compiled, and tested; the editing engine
+(P4) and the compression research (P3.5) have landed. `cargo build
+--workspace` and `cargo test --workspace --all-targets` both pass (283 tests,
+0 failures) on `stable-x86_64-pc-windows-gnu` rustc 1.100.0. Large-image stress
+runs, a 16K memory matrix, an editing benchmark, and a seed-corpus measurement
+are recorded in `docs/BENCHMARKS.md`. See `docs/ROADMAP_STATUS.md`.
 
 ## What works today
 
@@ -18,25 +19,47 @@ seed-corpus measurement are recorded in `docs/BENCHMARKS.md`. See
   checksums, whole-image canonical SHA-256 digest.
 * Raw, Palette, Run-length, and Predictor+entropy tile codecs, uniform tiling,
   per-tile codec selection, tile decode, full decode, and region decode.
+* An **editing engine**: region reads and writes, dirty-tile tracking,
+  transactions, bounded tile-level undo/redo, and a copy-on-write save that
+  reuses every untouched payload byte for byte and replaces the file
+  atomically. A 64×64 edit on a 16384×16384 image decodes exactly one tile.
+  A successful commit is a new baseline: undo and redo cannot cross it,
+  while a failed commit preserves the whole editing state.
 * A CLI: `encode`, `decode`, `info`, `check`, `verify`, `decode-region`,
   `extract-tile`.
 * Conformance tests: exhaustive round-trip, region-vs-crop, malformed-input
-  sweeps, a bounded mutation sweep, golden files. 181 tests, all passing.
+  sweeps, a bounded mutation sweep, golden files, and a deterministic fuzzing
+  harness over seven targets. 289 tests, all passing.
 * Layered integrity: `info` (structure only), `check` (every payload CRC32C),
   `verify` (exact pixels against a reference).
 * Measured evidence: large-image stress (up to a 15360×8640 photo and
-  16384×16384 pixels) with sampled peak RSS and exactness checks, plus a 9-image
-  seed corpus compared against PNG and WebP lossless. See `docs/BENCHMARKS.md`.
+  16384×16384 pixels) with sampled peak RSS and exactness checks, a 12-case
+  16K memory matrix (all PASS, against a 64 MB target), an editing benchmark,
+  and a 9-image seed corpus compared against PNG, WebP lossless and JPEG XL
+  lossless. See `docs/BENCHMARKS.md`.
+* A **compression study** of eleven codecs on identical pixels and identical
+  tile layouts: the four stable codecs, four context-adaptive residual models
+  (CARC A–D), an LZ77 dictionary codec and three hybrids, each with a pinned
+  golden vector. Across the corpus the best research codec (CARC C) reaches
+  0.3062× of the canonical bytes against PNG's 0.3445× — and 0.2575× for
+  WebP lossless and 0.2189× for JPEG XL lossless, neither of which VPNG
+  beats. **No research codec is promoted.**
+  See `docs/P3_5_COMPRESSION_RESEARCH_REPORT.md`.
 
 ## What is explicitly not here yet
 
-Dictionary and context-adaptive entropy codecs, adaptive tiling, the tile
-cache, parallel decode, streaming, the editing engine, previews, the Python
-bindings, and coverage-guided fuzzing. A deterministic mutation sweep
-(`crates/vpng-testkit/tests/mutation_sweep.rs`) covers truncations and
-single-byte substitutions over Raw, Palette, Run-length, and Predictor files,
-but it is not a substitute for `cargo-fuzz`. Each phase has a row in the status
-table.
+Adaptive (variable-size) tiling, parallel decode, the streaming *reader* and
+the preview/multiresolution surface, the Python bindings, and a frozen v1.0
+format. The stable codec ids 4–6 are still reserved; the LZ77, CARC and hybrid
+codecs that were measured in the P3.5 study are **research-only** — their ids
+live in `0x80..=0xFF`, they cannot reach a file, and the decoder rejects a file
+that names one. Coverage-guided fuzzing runs in CI's nightly job but cannot be
+run on the Windows-GNU development host: the AddressSanitizer runtime, LLVM's
+MSVC-only libFuzzer Windows build and rustc's ELF-only coverage module all
+stop it there (the toolchain and `cargo-fuzz` themselves install and run); the
+local evidence is the deterministic mutation harness
+(`crates/vpng-fuzzing`). There is **no graphical editor** yet. Each phase has a
+row in the status table.
 
 ## Build
 
@@ -85,12 +108,18 @@ limit, `6` size limit, `7` verification failed, `8` I/O.
 crates/vpng-core        formats, geometry, checked arithmetic, errors, limits
 crates/vpng-container   header, directory, checksums, canonical digest
 crates/vpng-codecs      TileCodec trait + Raw, Palette, Run-length, Predictor (ids 0-3; 4-6 reserved)
+                         + research-only CARC / LZ77 / hybrids under src/experimental/
 crates/vpng-tiling      TileGrid and region-to-tile mapping
 crates/vpng-encoder     canonical pixels -> .vpng bytes
 crates/vpng-decoder     .vpng bytes -> full / tile / region pixels
+crates/vpng-editing     the editing engine: regions, transactions, undo/redo, atomic save
+crates/vpng-research    the P3.5 codec benchmark binary
+crates/vpng-fuzzing     fuzz targets + the deterministic mutation harness
+crates/vpng-validation  memory accounting, the streaming writer, the editing benchmark
 crates/vpng-testkit     deterministic fixtures + conformance tests
 crates/vpng-cli         the `vpng` binary
-docs/                   spec, audit, status, threat model, ADRs
+fuzz/                    cargo-fuzz wrappers over the vpng-fuzzing targets
+docs/                   spec, audit, status, threat model, ADRs, milestone reports
 ```
 
 ## Claims policy

@@ -1,0 +1,81 @@
+[package]
+name = "vpng-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+# The fuzz crate is deliberately outside the workspace: `cargo-fuzz` builds
+# it with its own flags and its own nightly toolchain, and a plain
+# `cargo build --workspace` must not try to build it.
+[workspace]
+members = []
+
+[package.metadata]
+cargo-fuzz = true
+
+# cargo-fuzz discovers its targets from the `[[bin]]` sections of this
+# manifest, not from the files in `fuzz_targets/`. Without these sections
+# `cargo fuzz list` is empty and `cargo fuzz run <target>` fails with
+# "no targets specified in the manifest".
+[[bin]]
+name = "header"
+path = "fuzz_targets/header.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "directory"
+path = "fuzz_targets/directory.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "container"
+path = "fuzz_targets/container.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "tile_payload"
+path = "fuzz_targets/tile_payload.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "experimental_codec"
+path = "fuzz_targets/experimental_codec.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "region"
+path = "fuzz_targets/region.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "editing"
+path = "fuzz_targets/editing.rs"
+test = false
+doc = false
+bench = false
+
+[dependencies]
+libfuzzer-sys = "0.4"
+vpng-fuzzing = { path = "../crates/vpng-fuzzing" }
+vpng-core = { path = "../crates/vpng-core" }
+vpng-codecs = { path = "../crates/vpng-codecs" }
+vpng-container = { path = "../crates/vpng-container" }
+vpng-decoder = { path = "../crates/vpng-decoder" }
+vpng-editing = { path = "../crates/vpng-editing" }
+vpng-encoder = { path = "../crates/vpng-encoder" }
+vpng-tiling = { path = "../crates/vpng-tiling" }
+
+[profile.release]
+debug = 1

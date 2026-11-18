@@ -17,11 +17,12 @@ with a status, the question, the decision, the rationale, and the consequences.
 | [0009](ADR-0009-palette-payload.md) | palette payload layout and canonical index packing (§6.2) | accepted |
 | [0010](ADR-0010-rle-tokens.md) | run-length token format, max run, ambiguity (§6.3) | accepted |
 | [0011](ADR-0011-predictor-entropy.md) | predictor set, residual folding, entropy coder, per-row selection (§6.4) | accepted |
+| [0012](ADR-0012-atomic-replacement.md) | atomic replacement per platform; append-only vs temporary-file rewrite (§18.9, §18.10) | accepted |
+| [0013](ADR-0013-cache-eviction.md) | decoded-tile cache eviction policy (§18.13) | accepted |
 
 ### Still open
 
 * §18.6 SHA-256 canonical digest encoding — the definition is in the spec and
   `vpng-container`; a formal ADR will be added when the digest is frozen.
-* §18.9 atomic replacement per platform, §18.10 append-only vs rewrite,
-  §18.11 metadata policy, §18.12 preview algorithm, §18.13 cache eviction,
-  §18.14 parallel scheduling — all belong to later phases (P4–P6).
+* §18.11 metadata policy, §18.12 preview algorithm, §18.14 parallel
+  scheduling — all belong to later phases (P5–P6).

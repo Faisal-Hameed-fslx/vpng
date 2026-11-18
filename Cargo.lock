@@ -234,11 +234,46 @@ dependencies = [
 ]
 
 [[package]]
+name = "vpng-editing"
+version = "0.1.0"
+dependencies = [
+ "vpng-codecs",
+ "vpng-container",
+ "vpng-core",
+ "vpng-decoder",
+ "vpng-encoder",
+ "vpng-tiling",
+]
+
+[[package]]
 name = "vpng-encoder"
 version = "0.1.0"
 dependencies = [
  "vpng-codecs",
  "vpng-container",
+ "vpng-core",
+ "vpng-tiling",
+]
+
+[[package]]
+name = "vpng-fuzzing"
+version = "0.1.0"
+dependencies = [
+ "vpng-codecs",
+ "vpng-container",
+ "vpng-core",
+ "vpng-decoder",
+ "vpng-editing",
+ "vpng-encoder",
+ "vpng-testkit",
+ "vpng-tiling",
+]
+
+[[package]]
+name = "vpng-research"
+version = "0.1.0"
+dependencies = [
+ "vpng-codecs",
  "vpng-core",
  "vpng-tiling",
 ]
@@ -260,6 +295,20 @@ name = "vpng-tiling"
 version = "0.1.0"
 dependencies = [
  "vpng-core",
+]
+
+[[package]]
+name = "vpng-validation"
+version = "0.1.0"
+dependencies = [
+ "vpng-codecs",
+ "vpng-container",
+ "vpng-core",
+ "vpng-decoder",
+ "vpng-editing",
+ "vpng-encoder",
+ "vpng-testkit",
+ "vpng-tiling",
 ]
 
 [[package]]

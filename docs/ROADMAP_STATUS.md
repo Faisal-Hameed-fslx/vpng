@@ -1,6 +1,6 @@
 # Roadmap status
 
-**Updated:** 2026-11-15
+**Updated:** 2026-11-16
 **Legend:**
 
 * `PASS` — the required test **exists and was executed**, and the observed result
@@ -18,7 +18,7 @@
 | Default host | `x86_64-pc-windows-gnu` |
 | Active toolchain | overridden by `E:\VPNG\rust-toolchain.toml` |
 | `cargo build --workspace` | **exit 0**, `Finished dev profile ... in 3.85s` |
-| `cargo test --workspace` | **exit 0**, `181 passed; 0 failed` |
+| `cargo test --workspace --all-targets` | **exit 0**, `289 passed; 0 failed` |
 | `cargo fmt --all --check` | **exit 0**, no diffs |
 | `cargo clippy --workspace --all-targets` | **exit 0**, zero warnings |
 
@@ -32,14 +32,14 @@ No Visual Studio is required: the GNU host ships `rust-lld` and a
 | P0 — repository audit and specification | unambiguous field sizes; executable serialization tests; reproducible build env | **PASS** | `vpng-container` 19 tests pass (header is exactly 64 bytes, directory entry exactly 40 bytes, round-trips exact, checksum detects a flipped byte). Build environment recorded in §1 and `docs/REPOSITORY_AUDIT.md`. |
 | P1 — minimal valid container | exact round-trip all formats; golden files; tile-only decode; malformed tests | **PASS** | `roundtrip.rs` 7 pass, `golden.rs` 5 pass, `malformed.rs` 12 pass, `vpng-decoder` 8 pass. Structural integrity checking (`vpng check`) is implemented and tested. See §3 for the CLI end-to-end run. |
 | P2 — baseline codecs | palette, RLE, predictor, LZ77, entropy | **PARTIAL** | Palette (id 1) implemented with byte-level golden vectors, whole-file golden fixture, and property tests (§3.1, A06); RLE (id 2) implemented with byte-level golden vectors, a whole-file golden fixture, and conformance tests (§3.2, A07); Predictor+entropy (id 3) implemented with seven spatial predictors, per-row measured-cost selection, an adaptive arithmetic coder, byte-level golden vectors, a whole-file golden fixture, and conformance/property tests (§3.3, A08). LZ77 (id 4), predictor+dictionary (id 5), and context-adaptive entropy (id 6) remain reserved and are rejected on decode. Cost-based per-tile selection with a Raw fallback is implemented and tested. |
-| P3 — adaptive tiling, region decode | region == crop; coverage validation; bounded cache; parallel decode | **PARTIAL** | Fixed-grid region decode and exact-coverage validation pass (`region_decode_equals_full_decode_crop`). Adaptive tiling, tile cache, and parallel decode are not started. |
-| P4 — editing engine | localized edit; payload reuse; crash safety; undo/redo | **NOT STARTED** | Design only (`docs/EDITING_MODEL.md`). |
+| P3 — adaptive tiling, region decode | region == crop; coverage validation; bounded cache; parallel decode | **PARTIAL** | Fixed-grid region decode and exact-coverage validation pass (`region_decode_equals_full_decode_crop`). A **bounded byte-budget LRU tile cache** now exists and is tested (`the_cache_evicts_when_the_budget_is_exceeded`; A14). Adaptive (variable-size) tiling and parallel decode are still not started. |
+| P4 — editing engine | localized edit; payload reuse; crash safety; undo/redo | **PASS** | The engine is implemented in `crates/vpng-editing` (51 tests). A localized edit decodes 1 tile of 64 and modifies 1; 63 of 64 payloads are preserved byte for byte and 1 is rewritten; BEGIN/COMMIT/ABORT, atomic copy-on-write save, and two injected failure points all preserve the original; undo/redo restore the pixels exactly. A successful commit is a **new baseline**: undo and redo cannot cross it, while a failed commit preserves the whole editing state. The design decisions it resolved are ADR-0012 (atomic replacement, §18.9/§18.10) and ADR-0013 (cache eviction, §18.13). Evidence: `docs/P4_EDITING_ENGINE_REPORT.md`, `benchmarks/p4_editing_results.json`. |
 | P5 — preview and multiresolution | thumbnail, pyramid | **NOT STARTED** | |
-| P6 — 16K and memory engineering | 16K stress; streaming; budgets | **NOT STARTED** | Limits are implemented and unit-tested, and a 16384×16384 gray8 run plus a 15360×8640 rgb8 run are recorded (§3.4, A19). 16K RGBA8 was skipped for insufficient free RAM; streaming, allocation budgets, cache eviction, and parallel limits are not started. |
-| P7 — compression research | controlled experiments | **NOT STARTED** | A 9-image seed corpus and the E2/E3 runner exist (`docs/BENCHMARKS.md`), but the 750-image corpus and statistical reporting do not. |
+| P6 — 16K and memory engineering | 16K stress; streaming; budgets | **PARTIAL** | A tile-by-tile streaming writer and a 12-case memory matrix now exist: 4096², 8192² and 16384² × {gray8, rgb8, rgba8, rgba16}, **12 PASS / 0 FAIL / 0 BLOCKED**. The 16384×16384 RGBA16 case (2 GiB of canonical pixels) writes in an 8.8 MB heap peak and edits with a 13.2 MB resident-set growth, against a 64 MB target. A bounded cache and a bounded history are implemented. Parallel limits and parallel decode are still not started. Evidence: `docs/P4_MEMORY_VALIDATION.md`, `benchmarks/p4_memory_results.json`. |
+| P7 — compression research | controlled experiments | **PARTIAL** | Eleven codecs were measured on identical pixels and identical tile layouts: the four stable codecs, four context-adaptive residual models (CARC A–D), an LZ77 dictionary codec and three hybrids, with pinned golden vectors for each. Every image was also measured against PNG, WebP lossless and JPEG XL lossless, so every column of the comparison shares one denominator. The results are in `benchmarks/p3_5_raw_results.json` (per-image, per-tile, per-category, per-resolution, aggregate and worst-case) and `benchmarks/p3_5_comparison.csv`. The **750-image corpus and statistical reporting do not exist**; the study is a 9-image seed. Evidence: `docs/P3_5_COMPRESSION_RESEARCH_REPORT.md`. |
 | P8 — 10 MB target evaluation | exact accounting; honest failure | **PARTIAL** | Exact size accounting passes (`size_accounting_is_exact`); refusal is honest and typed (`--max-size 1024` → exit 6 reporting the smallest lossless size 240,148). A 9-image seed corpus exists, but the 750-image target is unmet, so the per-category success distribution is unmeasured. |
 | P9 — Python API | bindings around Rust | **NOT STARTED** | CLI-driver tooling only. |
-| P10 — hardening and v1.0 | fuzzing; freeze | **NOT STARTED** | |
+| P10 — hardening and v1.0 | fuzzing; freeze | **PARTIAL** | A deterministic mutation harness over 7 targets runs in CI (200,000 iterations × 7 targets = 1,400,000 executions, 0 findings), and 7 `cargo-fuzz` targets are wired into a nightly CI job. The coverage-guided fuzzer cannot run on this Windows-GNU host — the toolchain and `cargo-fuzz` install and run, but the AddressSanitizer runtime, LLVM's MSVC-only libFuzzer Windows build and rustc's ELF-only coverage module each stop it there — and the format is not frozen. |
 
 ## 3. End-to-end CLI evidence (300x200 RGBA8, tile 64)
 
@@ -204,34 +204,41 @@ Integrity is therefore layered and each command states its own scope:
 | A06 | Palette codec | golden vectors | **PASS** | byte-level vectors in `vpng-codecs/src/palette.rs` (1/2/3/16/256/>256 colours); golden fixture `palette_checker_64x64_rgba8_tile32.vpng`; property tests `vpng-testkit/tests/palette.rs` 5 pass; CLI §3.1 |
 | A07 | RLE codec | golden vectors | **PASS** | byte-level vectors in `vpng-codecs/src/rle.rs` (literal/repeat boundaries, run splitting, multi-byte symbols, malformed streams); golden fixture `rle_mixed_64x64_gray8_tile64.vpng`; conformance tests `vpng-testkit/tests/rle.rs` 6 pass; CLI §3.2 |
 | A08 | Prediction codec | property tests | **PASS** | seven predictors (none/left/up/upper-left/average/Paeth/gradient) forced in turn, reversible modular residual folding, per-row measured-cost selection; byte-level vectors in `vpng-codecs/src/predictor.rs`; golden fixture `predictor_ramp_64x64_gray8_tile64.vpng`; conformance and property tests `vpng-testkit/tests/predictor.rs` 10 pass; CLI §3.3 |
-| A09 | Dictionary codec | property tests | NOT STARTED | |
-| A10 | Entropy coder | golden vectors | NOT STARTED | |
+| A09 | Dictionary codec | property tests | **PARTIAL** | A research-only LZ77 dictionary codec exists with 22 tests, a pinned golden hex vector, four matching strategies, malformed-stream handling and 8/16-bit support (`crates/vpng-codecs/src/experimental/lz77.rs`). It is **not** assignable to the stable id 4: the research ids live in `0x80..=0xFF`, `get_codec` cannot reach them, and the decoder rejects a file that names one. Stable id 4 remains reserved. |
+| A10 | Entropy coder | golden vectors | **PASS** | The arithmetic coder behind stable codec 3 is implemented with a pinned golden vector and per-row measured predictor selection (A08). A research-only context-adaptive entropy stage with 5 symbol groups exists for the hybrids (`crates/vpng-codecs/src/experimental/entropy.rs`), and CARC A–D add 256 integer probability blocks per tile. Stable id 6 remains reserved. |
 | A11 | Tile-only decode | instrumented test | **PASS** | `single_tile_decode_matches_full_image`, `region_does_not_decode_unrelated_tiles` |
 | A12 | Region decode | crop equality test | **PASS** | `region_decode_equals_full_decode_crop` (5 rects × 8 formats) |
 | A13 | Parallel decode | determinism test | NOT STARTED | |
-| A14 | Bounded cache | allocation test | NOT STARTED | |
-| A15 | Localized edit | instrumented test | NOT STARTED | |
-| A16 | Undo/redo | exact hash tests | NOT STARTED | |
-| A17 | Crash-safe commit | fault injection | NOT STARTED | |
+| A14 | Bounded cache | allocation test | **PASS** | `TileCache` is a strict LRU with a **byte** budget (`with_cache_bytes`), not a tile count. `the_cache_evicts_when_the_budget_is_exceeded`; the benchmark's cache scenario fills a 524,288-byte budget exactly with 2 evictions and never exceeds it. A tile larger than the whole budget is rejected rather than cached. |
+| A15 | Localized edit | instrumented test | **PASS** | `a_region_read_does_not_decode_unrelated_tiles`, `a_region_write_changes_only_the_tiles_it_intersects`, `the_engine_never_holds_a_full_image_buffer`. Measured: a 64×64 edit on 2048×2048 decodes 1 tile of 64 and dirties 1 (1.5625% of the image); on 16384² it decodes 1 tile of 1,024. |
+| A16 | Undo/redo | exact hash tests | **PASS** | `undo_and_redo_restore_the_pixels_exactly`, `undo_makes_a_tile_clean_again`, `undo_with_no_history_reports_that_there_is_nothing_to_do`, `a_new_edit_invalidates_the_redo_chain`. The benchmark confirms `undo_restores_pixels` and `redo_restores_pixels` with a byte-exact region comparison. |
+| A17 | Crash-safe commit | fault injection | **PASS** | The save never writes to the original: it writes a temporary file in the same directory, `sync_all`s it, and renames it over the target. `FailurePoint::AfterBytes` and `FailurePoint::BeforeRename` are injected in `a_failed_write_leaves_the_original_file_untouched` and `a_failure_before_the_rename_leaves_the_original_untouched`; in both cases the original is byte-identical, still parses, still passes its integrity check, and no temporary file is left behind. |
 | A18 | Preview separation | format and API tests | NOT STARTED | |
-| A19 | 16K stress | recorded run | **PARTIAL** | 16384×16384 gray8 and 15360×8640 rgb8 recorded with times, peak RSS, exactness (§3.4). 16K RGBA8 skipped for insufficient free RAM (needs ≈3.4 GiB); deferred to P6 streaming. No general 16K claim is made. |
+| A19 | 16K stress | recorded run | **PASS** | A 12-case matrix — 4096², 8192², 16384² × {gray8, rgb8, rgba8, rgba16} — **12 PASS / 0 FAIL / 0 BLOCKED** (`benchmarks/p4_memory_results.json`). Every case writes the file, verifies it, edits it, commits it and verifies the result. The 16384×16384 RGBA16 case (2,147,483,648 canonical bytes) writes with an 8.83 MB heap peak and edits with an 11.69 MB resident-set growth and a 12.52 MB heap peak, against the 64 MB target. A general 16K **performance** claim is not made; the write times are 2–461 s and are dominated by the predictor codec's arithmetic coding. |
 | A20 | 10 MB enforcement | boundary tests | **PASS** | `size_limit_is_reported_not_violated`; CLI step 9 exit 6 |
 | A21 | Corruption detection | mutation tests | **PASS** | `malformed.rs` 12 tests; `vpng-decoder` integrity tests; CLI step 12 (`decode`) and step 14 (`check`) exit 4 |
-| A22 | Fuzz robustness | fuzz report | **PARTIAL** | `malformed.rs` 12 tests plus `mutation_sweep.rs` 4 tests: all truncations and every single-byte substitution on Raw/Palette/RLE/Predictor files, and 2,000 seeded multi-byte corruptions per file, with no panic. Not coverage-guided; `cargo-fuzz` targets remain P10. |
+| A22 | Fuzz robustness | fuzz report | **PARTIAL** | `malformed.rs` 12 tests, `mutation_sweep.rs` 4 tests (every truncation and every single-byte substitution, plus 2,000 seeded multi-byte corruptions per file, with no panic), and a deterministic mutation harness over 7 targets: **200,000 iterations × 7 targets = 1,400,000 executions, 0 findings** (`benchmarks/results/fuzz-mutation-report.json`). 7 `cargo-fuzz` targets are provided and wired into a nightly CI job. **Coverage-guided fuzzing cannot run on this host** — the toolchain and `cargo-fuzz` v0.13.2 install and run, and `cargo fuzz list` sees all seven targets, but three platform limits stop the local run on `x86_64-pc-windows-gnu` (ASan is unsupported for the target, LLVM's libFuzzer Windows build is MSVC-only, and rustc's sanitizer-coverage module is ELF-only) — so the local evidence is the deterministic harness only. |
 | A23 | Python API | integration tests | NOT STARTED | |
 | A24 | v1.0 compatibility | golden corpus | NOT STARTED | |
 
 ## 5. Test inventory (executed)
 
+Command: `cargo test --workspace --all-targets -j 2`, release and debug
+profiles, `x86_64-pc-windows-gnu`.
+
 | Suite | Tests | Result |
 |-------|------:|--------|
 | `vpng-cli` unit | 11 | ok |
-| `vpng-codecs` unit | 58 | ok |
+| `vpng-codecs` unit | 110 | ok |
 | `vpng-container` unit | 19 | ok |
 | `vpng-core` unit | 19 | ok |
 | `vpng-decoder` unit | 8 | ok |
+| `vpng-editing` unit | 51 | ok |
 | `vpng-encoder` unit | 9 | ok |
-| `vpng-tiling` unit | 6 | ok |
+| `vpng-fuzzing` unit | 0 | ok |
+| `vpng-fuzzing` bin `vpng-fuzz-mutate` | 0 | ok |
+| `vpng-fuzzing` `tests/fuzz_smoke.rs` | 3 | ok |
+| `vpng-research` bin | 0 | ok |
 | `vpng-testkit` unit | 2 | ok |
 | `tests/golden.rs` | 5 | ok |
 | `tests/malformed.rs` | 12 | ok |
@@ -240,8 +247,15 @@ Integrity is therefore layered and each command states its own scope:
 | `tests/predictor.rs` | 10 | ok |
 | `tests/rle.rs` | 6 | ok |
 | `tests/roundtrip.rs` | 7 | ok |
+| `vpng-tiling` unit | 6 | ok |
+| `vpng-validation` unit | 2 | ok |
+| `vpng-validation` bins | 0 | ok |
 | Doc-tests | 0 | ok |
-| **Total** | **181** | **181 passed, 0 failed** |
+| **Total** | **289** | **289 passed, 0 failed** |
+
+The 108 new tests are: 52 codec tests (22 LZ77, 14 CARC, 12 hybrids, plus
+the registry and entropy-stage tests), 51 editing tests, 3 fuzzing tests
+and 2 memory-accounting tests.
 
 ## 6. Defects found and fixed this phase
 
@@ -265,6 +279,20 @@ Integrity is therefore layered and each command states its own scope:
 | 16 | predictor encoding took 221 ns/sample in release | the selector re-encoded every candidate through the **full** arithmetic encoder, then rolled the state back | split the coder into a `BitSink` trait with an output-producing `Encoder` and a cost-only `Probe`; the probe skips interval arithmetic and byte emission. 221 ns → 81 ns/sample |
 | 17 | `cargo clippy --workspace --all-targets` reported 6 warnings in the new codec | `RangeInclusive::contains` hand-rolled, a loop variable used to index a vector, and `extend(drain(..))` where `append` fits | rewrote each site; clippy is warning-free |
 | 18 | `auto_selection_records_a_codec_per_tile` failed after the predictor landed | the fixture's alpha channel was a constant `0xFF`, so the predictor could predict alpha exactly and legitimately beat Raw on the "noise" tiles | made every channel of the noise tiles random, so no predictor can predict them and Raw is genuinely the smallest representation |
+| 19 | the `History` peak could exceed the byte budget | the peak was recorded **before** the history was trimmed, so an oversized step was counted in the peak even though it was dropped | moved the peak update after the trim; added `the_peak_never_exceeds_the_budget` and `a_step_too_large_for_the_budget_is_dropped_at_once` |
+| 20 | `error[E0061]: this method takes 3 arguments but 2 were supplied` on `System::realloc` | the stable `GlobalAlloc` trait's `realloc` takes `(ptr, layout, new_size)` | passed `new_size` |
+| 21 | `error[E0425]: cannot find value 'CURRENT' in this scope` in the Windows memory counters | the pseudo-handle constant was named `CURRENT_PROCESS` but referenced as `CURRENT` | renamed the reference |
+| 22 | the 16-bit tile pattern wrote its samples one byte at a time | the sample's byte length was taken from the wrong slice, so a 16-bit sample was written as one byte | wrote the two little-endian bytes explicitly for the 16-bit path |
+| 23 | `error[E0277]: the trait bound 'String: From<u64>' is not satisfied` | a raw `u64` was passed where `Json::string` expected a `String` | formatted it with `format!` |
+| 24 | `error[E0308]: expected 'Option<String>', found '&Option<String>'` in the argument parser | `&args.next()` borrowed the iterator's item instead of consuming it | passed `args.next()` by value |
+| 25 | `mem::tests::the_heap_counter_follows_the_allocations` failed in the library's test binary | the tracking allocator is declared in the two *binaries*, so the library's own test binary had no allocator and the counter read zero | declared the tracking allocator in the library's `#[cfg(test)]` module, which is a different binary from the two tools |
+| 26 | the fuzz `region` target reported "tile 1 lies outside the image" | the target called `TileGrid::new` with the arguments in the wrong order (`width, height, tile_width, tile_height` instead of `tile_width, tile_height, image_width, image_height`) | corrected the call — a **harness** bug, not a library defect |
+| 27 | the fuzz `container` target reported "an accepted file failed its own integrity check" on a corrupted payload | the target asserted that every file the parser accepts also passes its integrity check, but `Document::parse` deliberately does **not** verify payload checksums — that is an O(1) parse | the target now checks the contract the decoder actually makes: an integrity failure is a *corrupt file* error, and a successful decode has the declared dimensions, byte count and crop equality — a **harness** bug, not a library defect |
+| 28 | the fuzz `header` target reported "an accepted header did not re-encode to its own bytes" | the target compared the re-encoded header with the **whole** input, but the parser reads only the first 64 bytes and ignores the rest | the comparison is now against the header's own 64 bytes — a **harness** bug |
+| 29 | the fuzz smoke test took 166 s in the debug profile | the `editing` target re-encoded its test image on every input, and the `region` target walked up to 4,096² tiles | the image is built once behind a `OnceLock`, and the grid bounds are 512²; the release profile runs 200,000 iterations in 3.9 s |
+| 30 | the matched-subset aggregation was empty | the subset filter disqualified an image when a *codec* reported "unsupported", instead of when a *baseline measurement* was missing | the filter now considers only the baselines, so a codec that cannot represent a tile (palette) no longer disqualifies an image, and a baseline tool that is absent from every image disqualifies nothing either |
+| 31 | `cargo fuzz list` printed nothing and `cargo fuzz run <target>` failed with "no targets specified in the manifest" | the fuzz crate's `Cargo.toml` had no `[[bin]]` sections, and cargo-fuzz discovers its targets from the manifest, not from the files in `fuzz_targets/` | seven `[[bin]]` sections were added, one per target |
+| 32 | `cargo fuzz run <target> --fuzz-dir fuzz/corpus` failed with "could not read the manifest file: …\fuzz\corpus\Cargo.toml" | `--fuzz-dir` is cargo-fuzz's *fuzz project* directory (the one holding the fuzz crate's `Cargo.toml`), not the corpus directory; the corpus lives in `<fuzz-dir>/corpus/<target>` | the runner and the CI job now pass `--fuzz-dir fuzz` |
 
 No defect was found in the container, encoder, or decoder logic itself. The three
 `integrity_check_*` tests were added with the `check` command (5 → 8 decoder
@@ -272,30 +300,80 @@ tests); the palette phase added the codec, the selection logic, and 23 tests
 (99 → 122); the RLE phase added the codec, the registry/selector/CLI wiring, and
 22 tests (122 → 144); the evidence batch added the mutation sweep and 4 tests
 (144 → 148); the predictor phase added the codec, the registry/selector/CLI
-wiring, and 33 tests (148 → 181).
+wiring, and 33 tests (148 → 181); the P3.5 + P4 milestone added the research
+codecs, the editing engine, the fuzzing harness, the validation tools and 102
+tests (181 → 283); the pre-commit correction pass added 6 editing tests
+(283 → 289).
 
 ## 7. Not yet measured (explicitly no claims)
 
-Corpus success rate under 10 MB, general 16K performance, memory ceilings, edit
-latency, and streaming behavior. Palette demonstrably shrinks palette-friendly
-tiles (CLI §3.1: 7.148x on a synthetic two-colour image) and Run-length shrinks
-flat tiles (CLI §3.2: 33.851x on a synthetic flat image). The predictor codec
-now shrinks smooth and photographic content (seed corpus: the 15360×8640 photo
-went from 0.774x to **0.312x** of its canonical bytes). The 9-image seed corpus
-(`docs/BENCHMARKS.md`) gives measured auto/raw/PNG/WebP ratios per category and
-a stress table, but it is a seed, not the 750-image corpus, so **no
-distribution, per-resolution, or 10 MB success claim follows from it**; on
-photographs and paintings VPNG still loses to PNG and WebP because the
-dictionary and context-adaptive entropy codecs do not exist yet. Raw stays
-≈1.0x and remains the guaranteed fallback. The 16384×16384 RGBA8 case was
-skipped for insufficient free physical memory. These remain targets, not
-results. No "faster than X" or "fits in 10 MB" claim is made anywhere in this
+Corpus success rate under 10 MB, general 16K **performance**, parallel
+decode, and streaming *latency* remain unmeasured. Palette demonstrably
+shrinks palette-friendly tiles (CLI §3.1: 7.148x on a synthetic two-colour
+image) and Run-length shrinks flat tiles (CLI §3.2: 33.851x on a synthetic
+flat image). The predictor codec shrinks smooth and photographic content
+(seed corpus: the 15360×8640 photo went from 0.774x to **0.312x** of its
+canonical bytes), and the P3.5 study adds seven research codecs measured on
+the same pixels — the best of them, CARC C, reaches 0.2995x on that photo
+and 0.3062x across the corpus, against PNG's 0.3445x and WebP
+lossless's 0.2575x.
+
+What is **still** not claimed:
+
+* **No distribution claim.** The compression study is a 9-image seed, not
+  the 750-image corpus, so no per-resolution distribution or 10 MB success
+  rate follows from it.
+* **No promotion of any experimental codec.** The research ids cannot
+  reach a file, and CARC C is still 18.9% worse than WebP lossless across
+  the corpus and expands incompressible data.
+* **No claim that `cjxl -d 0` is the best JPEG XL can do.** JPEG XL lossless
+  is measured on all nine images (0.2189× across the corpus, 0.2160× on the
+  15360×8640 photograph) and is the strongest of the three baselines, but
+  only one encoder setting was used.
+* **No 16K performance claim.** The 12-case matrix reports memory and
+  wall-clock times on one host; the writes take 2–461 s and are dominated
+  by the predictor codec's arithmetic coding.
+* **No edit-latency claim against another editor.** The editing timings
+  are measurements on this host with no baseline to compare against.
+* **No coverage-guided fuzzing result.** The deterministic harness ran;
+  `cargo-fuzz` cannot run on this host's target triple.
+
+Raw stays ≈1.0x and remains the guaranteed fallback. The 16384×16384 RGBA8
+case that was skipped in §3.4 for insufficient free memory has since been
+run through the streaming writer and the file-backed editor, and passes the
+64 MB target; what is still missing is a *whole-image in-memory* decode of
+a 16K RGBA8 file, which is a different question from the one P4 asks. No
+"faster than X" or "fits in 10 MB" claim is made anywhere in this
 repository.
 
 ## 8. Next phase
 
-P2 continues: palette (id 1), RLE (id 2), and predictor+entropy (id 3) have
-landed; implement the remaining baseline codecs (ids 4–6) one at a time — next
-is the LZ77 dictionary (id 4) — each with golden vectors and property tests
-before any size claim, keeping Raw as the guaranteed fallback and never
-sacrificing exactness.
+P3 and P6 continue in parallel, and neither blocks the other:
+
+* **P3** — adaptive (variable-size) tiling and parallel independent tile
+  decode. The bounded cache that the gate asks for now exists; the grid is
+  still fixed.
+* **P6** — parallel decode limits and the remaining streaming work, plus
+  the preview/multiresolution surface P5 needs.
+* **P2** — the stable codec ids 4–6 are still reserved. The P3.5 study
+  says **not** to promote any of the research codecs on the current
+  evidence; a promotion needs a specification update, a version bump, a
+  migration policy and compatibility tests, in that order.
+
+Two housekeeping items are carried forward from this milestone and are not
+code defects:
+
+1. `docs/VPNG_SPEC_0_1.md` line 64 describes header byte 27 as the
+   "codec used for all tiles in v0.1", while the implementation treats it
+   as informational and the per-tile directory entry as authoritative. The
+   wording needs a specification pass; the behaviour is already the one
+   ADR-0003 and the conformance matrix establish. Recorded in
+   `docs/P4_COMPATIBILITY_REPORT.md`.
+2. The `cargo-fuzz` targets could not be exercised locally — not for want of
+   a toolchain (the nightly toolchain and `cargo-fuzz` v0.13.2 both install
+   and run, and the seven targets are correctly wired) but because the
+   Windows-GNU target cannot support coverage-guided fuzzing: ASan is
+   unsupported for it, LLVM's libFuzzer Windows build is MSVC-only, and
+   rustc's sanitizer-coverage module is ELF-only. They run in CI's nightly
+   job on Linux, where all three limits disappear. The evidence for each
+   limit is in `docs/P4_COMPATIBILITY_REPORT.md`.

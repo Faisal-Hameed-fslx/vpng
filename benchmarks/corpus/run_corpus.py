@@ -20,15 +20,16 @@ import sys
 import time
 from pathlib import Path
 
-from PIL import Image, features
+from PIL import Image
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
 sys.path.insert(0, str(REPO / "benchmarks" / "stress"))
+sys.path.insert(0, str(HERE))
+from baselines import measure_baselines  # noqa: E402
 from canonicalize import convert_image  # noqa: E402
 
 CODECS = ["raw", "palette", "rle", "predictor", "auto"]
-PIL_MODES = {"gray8": "L", "graya8": "LA", "rgb8": "RGB", "rgba8": "RGBA"}
 
 
 def codec_histogram(path: Path) -> dict:
@@ -111,43 +112,16 @@ def measure_entry(entry: dict, root: Path, work: Path, vpng: Path, max_baseline_
 
     baselines_ok = width * height <= max_baseline_pixels
     if baselines_ok:
-        with raw.open("rb") as fh:
-            pixels = fh.read()
-        image = Image.frombytes(PIL_MODES[fmt], (width, height), pixels)
-        png = work / "baseline.png"
-        started = time.perf_counter()
-        image.save(png, format="PNG", compress_level=6)
-        record["baselines"]["png"] = {
-            "bytes": png.stat().st_size,
-            "ratio": round(png.stat().st_size / meta["bytes"], 5),
-            "ms": round((time.perf_counter() - started) * 1000),
-            "settings": "Pillow PNG, compress_level=6",
-        }
-        png.unlink(missing_ok=True)
-
-        if features.check("webp"):
-            webp = work / "baseline.webp"
-            started = time.perf_counter()
-            try:
-                image.save(webp, format="WEBP", lossless=True, quality=100, method=4)
-                record["baselines"]["webp"] = {
-                    "bytes": webp.stat().st_size,
-                    "ratio": round(webp.stat().st_size / meta["bytes"], 5),
-                    "ms": round((time.perf_counter() - started) * 1000),
-                    "settings": "Pillow WebP lossless, quality=100, method=4",
-                }
-            except Exception as exc:  # noqa: BLE001
-                record["baselines"]["webp"] = {"error": str(exc)}
-            webp.unlink(missing_ok=True)
-        else:
-            record["baselines"]["webp"] = {"error": "Pillow build has no WebP support"}
+        record["baselines"] = measure_baselines(
+            raw, width, height, fmt, meta["bytes"], work, max_baseline_pixels
+        )
     else:
         record["baselines"]["skipped"] = (
             f"{width * height} pixels exceeds the {max_baseline_pixels}-pixel baseline cap"
         )
 
-    record["baselines"]["jxl"] = {"error": "no JPEG XL encoder installed"}
-    record["baselines"]["flif"] = {"error": "no FLIF encoder installed"}
+    record["baselines"].setdefault("jxl", {"error": "no JPEG XL encoder installed"})
+    record["baselines"].setdefault("flif", {"error": "no FLIF encoder installed"})
 
     forced = [
         record["vpng"][codec]["bytes"]

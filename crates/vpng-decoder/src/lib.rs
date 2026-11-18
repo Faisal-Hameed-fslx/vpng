@@ -286,7 +286,13 @@ pub struct IntegrityReport {
 
 /// Derive the nominal tile grid from a directory and confirm exact, ordered
 /// coverage of the image.
-fn derive_grid(header: &Header, directory: &Directory, dims: Dimensions) -> Result<TileGrid> {
+///
+/// The function is public so a reader that parses the container itself — the
+/// editing engine's file-backed source, which cannot hold the whole file in
+/// memory — derives exactly the same grid as [`Document::parse`]. Sharing
+/// the derivation keeps the two readers from disagreeing about what a tile
+/// is.
+pub fn derive_grid(header: &Header, directory: &Directory, dims: Dimensions) -> Result<TileGrid> {
     if directory.entries.is_empty() {
         return Err(Error::corrupt("the tile directory is empty"));
     }

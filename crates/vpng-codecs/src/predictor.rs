@@ -112,13 +112,13 @@ pub const PREDICTOR_PAETH: u8 = 5;
 pub const PREDICTOR_GRADIENT: u8 = 6;
 
 /// Highest predictor code defined by payload version 1.
-const PREDICTOR_MAX: u8 = PREDICTOR_GRADIENT;
+pub(crate) const PREDICTOR_MAX: u8 = PREDICTOR_GRADIENT;
 
 /// Every predictor the encoder may choose, in code order.
 ///
 /// The order is also the tie-break order: the encoder keeps the first predictor
 /// that reaches the lowest estimated cost.
-const CANDIDATE_MODES: [u8; 7] = [
+pub(crate) const CANDIDATE_MODES: [u8; 7] = [
     PREDICTOR_NONE,
     PREDICTOR_LEFT,
     PREDICTOR_UP,
@@ -143,16 +143,21 @@ pub static PREDICTOR_CODEC: PredictorCodec = PredictorCodec;
 
 /// The sample grid of one tile: pixel width, interleaved channel count, and the
 /// byte width of one channel sample.
+///
+/// The geometry helpers are shared with the experimental research codecs in
+/// [`crate::experimental`]. They are `pub(crate)` so a research codec can reuse
+/// the exact same sample arithmetic — the stable codec's *behaviour* is
+/// unchanged; only the visibility of these items changed.
 #[derive(Debug, Clone, Copy)]
-struct Layout {
-    width: usize,
-    channels: usize,
-    sample_bytes: usize,
-    height: usize,
+pub(crate) struct Layout {
+    pub(crate) width: usize,
+    pub(crate) channels: usize,
+    pub(crate) sample_bytes: usize,
+    pub(crate) height: usize,
 }
 
 impl Layout {
-    fn new(width: usize, height: usize, channels: usize, sample_bytes: usize) -> Self {
+    pub(crate) fn new(width: usize, height: usize, channels: usize, sample_bytes: usize) -> Self {
         Layout {
             width,
             height,
@@ -162,28 +167,28 @@ impl Layout {
     }
 
     /// Samples in one row, channels interleaved.
-    fn row_samples(&self) -> usize {
+    pub(crate) fn row_samples(&self) -> usize {
         self.width * self.channels
     }
 
-    fn row_bytes(&self) -> usize {
+    pub(crate) fn row_bytes(&self) -> usize {
         self.row_samples() * self.sample_bytes
     }
 
-    fn total_samples(&self) -> usize {
+    pub(crate) fn total_samples(&self) -> usize {
         self.row_samples() * self.height
     }
 }
 
 /// Byte offset of sample `(x, c)` within a tile row.
 #[inline]
-fn sample_offset(layout: &Layout, x: usize, c: usize) -> usize {
+pub(crate) fn sample_offset(layout: &Layout, x: usize, c: usize) -> usize {
     (x * layout.channels + c) * layout.sample_bytes
 }
 
 /// Read one whole sample as a little-endian integer.
 #[inline]
-fn read_sample(bytes: &[u8], offset: usize, sample_bytes: usize) -> u32 {
+pub(crate) fn read_sample(bytes: &[u8], offset: usize, sample_bytes: usize) -> u32 {
     let mut value = 0u32;
     for i in 0..sample_bytes {
         value |= u32::from(bytes[offset + i]) << (8 * i);
@@ -193,7 +198,7 @@ fn read_sample(bytes: &[u8], offset: usize, sample_bytes: usize) -> u32 {
 
 /// Mask selecting one sample's bits.
 #[inline]
-fn sample_mask(sample_bytes: usize) -> u32 {
+pub(crate) fn sample_mask(sample_bytes: usize) -> u32 {
     match sample_bytes {
         1 => 0xFF,
         2 => 0xFFFF,
@@ -207,7 +212,7 @@ fn sample_mask(sample_bytes: usize) -> u32 {
 /// complement sample uses, so `reconstruct + residual` reproduces the original
 /// sample exactly under the same mask.
 #[inline]
-fn wrap_sub(a: u32, b: u32, sample_bytes: usize) -> i32 {
+pub(crate) fn wrap_sub(a: u32, b: u32, sample_bytes: usize) -> i32 {
     let modulus = 1u32 << (8 * sample_bytes);
     let mask = modulus - 1;
     let diff = a.wrapping_sub(b) & mask;
@@ -274,7 +279,7 @@ fn gradient(left: i64, up: i64, upper_left: i64) -> i64 {
 /// so the average's integer division is a floor and the result never leaves the
 /// sample's range.
 #[inline]
-fn predict_from_neighbours(mode: u8, left: i64, up: i64, upper_left: i64) -> u32 {
+pub(crate) fn predict_from_neighbours(mode: u8, left: i64, up: i64, upper_left: i64) -> u32 {
     let predicted = match mode {
         PREDICTOR_LEFT => left,
         PREDICTOR_UP => up,
@@ -333,7 +338,7 @@ fn predict_sample(tile: &[u8], layout: &Layout, y: usize, x: usize, c: usize, mo
 /// All candidates are computed in one pass, so the row's samples are read from
 /// the tile exactly once. The result is indexed by the candidate's position in
 /// [`CANDIDATE_MODES`].
-fn row_residual_candidates(tile: &[u8], layout: &Layout, y: usize) -> Vec<Vec<i32>> {
+pub(crate) fn row_residual_candidates(tile: &[u8], layout: &Layout, y: usize) -> Vec<Vec<i32>> {
     let samples = layout.row_samples();
     let sample_bytes = layout.sample_bytes;
     let row = y * layout.row_bytes();
@@ -383,6 +388,20 @@ fn reconstruct(
     plan: &Plan,
     tile_len: usize,
 ) -> Result<Vec<u8>> {
+    reconstruct_tile(residuals, layout, &plan.row_modes, tile_len)
+}
+
+/// Rebuild a tile from residuals and a per-row predictor plan.
+///
+/// Shared with the research hybrids: the predictor stage of a hybrid produces
+/// the same row modes and the same residuals as the stable codec, so the
+/// reconstruction must be bit-for-bit identical.
+pub(crate) fn reconstruct_tile(
+    residuals: &[i32],
+    layout: &Layout,
+    row_modes: &[u8],
+    tile_len: usize,
+) -> Result<Vec<u8>> {
     let expected = layout.row_bytes() * layout.height;
     if expected != tile_len {
         return Err(Error::corrupt(format!(
@@ -396,12 +415,24 @@ fn reconstruct(
             layout.total_samples()
         )));
     }
+    if row_modes.len() != layout.height {
+        return Err(Error::corrupt(format!(
+            "predictor plan has {} row modes but the tile has {} rows",
+            row_modes.len(),
+            layout.height
+        )));
+    }
+    for &mode in row_modes {
+        if mode > PREDICTOR_MAX {
+            return Err(Error::corrupt(format!("predictor mode {mode} is reserved")));
+        }
+    }
 
     let mut tile = vec![0u8; tile_len];
     let mask = sample_mask(layout.sample_bytes);
     let mut index = 0usize;
 
-    for (y, &mode) in plan.row_modes.iter().enumerate() {
+    for (y, &mode) in row_modes.iter().enumerate() {
         let row = y * layout.row_bytes();
         for x in 0..layout.width {
             for c in 0..layout.channels {
@@ -440,22 +471,22 @@ const TOP: u32 = 1 << 24;
 /// stays strictly inside `(0, PROB_TOTAL)`, so neither symbol is ever given a
 /// zero-width interval — that would desynchronise encoder and decoder.
 #[derive(Clone, Copy)]
-struct Model {
-    prob: u32,
+pub(crate) struct Model {
+    pub(crate) prob: u32,
 }
 
 impl Model {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Model { prob: PROB_INIT }
     }
 
     #[inline]
-    fn probability(&self) -> u32 {
+    pub(crate) fn probability(&self) -> u32 {
         self.prob
     }
 
     #[inline]
-    fn update(&mut self, bit: u32) {
+    pub(crate) fn update(&mut self, bit: u32) {
         if bit == 0 {
             self.prob += (PROB_TOTAL - self.prob) >> PROB_SHIFT;
         } else {
@@ -465,7 +496,7 @@ impl Model {
 }
 
 /// A fresh set of per-context models.
-fn models(contexts: usize) -> Vec<Model> {
+pub(crate) fn models(contexts: usize) -> Vec<Model> {
     vec![Model::new(); contexts]
 }
 
@@ -474,7 +505,7 @@ fn models(contexts: usize) -> Vec<Model> {
 /// The real [`Encoder`] produces bytes; the [`Probe`] only measures what the
 /// same bits would cost. Both run the identical probability model, so a probe
 /// and the encoder always agree on what a symbol costs.
-trait BitSink {
+pub(crate) trait BitSink {
     fn encode_bit(&mut self, ctx: usize, bit: u32);
 }
 
@@ -489,16 +520,16 @@ trait BitSink {
 /// released once a newer byte that is not `0xFF` has absorbed the carry. The
 /// group therefore always holds `0xFF` bytes followed by at most one newer
 /// byte, and the output order is exactly the commit order.
-struct Encoder {
-    out: Vec<u8>,
+pub(crate) struct Encoder {
+    pub(crate) out: Vec<u8>,
     low: u64,
     range: u32,
     pending: Vec<u8>,
-    models: Vec<Model>,
+    pub(crate) models: Vec<Model>,
 }
 
 impl Encoder {
-    fn new(contexts: usize) -> Self {
+    pub(crate) fn new(contexts: usize) -> Self {
         Encoder {
             out: Vec::new(),
             low: 0,
@@ -510,7 +541,7 @@ impl Encoder {
         }
     }
 
-    fn encode_bit(&mut self, ctx: usize, bit: u32) {
+    pub(crate) fn encode_bit(&mut self, ctx: usize, bit: u32) {
         let probability = self.models[ctx].probability();
         let bound = (self.range >> PROB_BITS) * probability;
         if bit == 0 {
@@ -564,7 +595,7 @@ impl Encoder {
         }
     }
 
-    fn finish(mut self) -> Vec<u8> {
+    pub(crate) fn finish(mut self) -> Vec<u8> {
         // Five shifts flush the pending group and leave enough bytes for the
         // decoder's initial read.
         for _ in 0..5 {
@@ -590,13 +621,13 @@ impl BitSink for Encoder {
 /// symbols, so it is what the predictor selection compares — and it costs a
 /// fraction of a real encoding, because no interval arithmetic and no byte
 /// emission is needed.
-struct Probe {
+pub(crate) struct Probe {
     models: Vec<Model>,
-    cost: u64,
+    pub(crate) cost: u64,
 }
 
 impl Probe {
-    fn new(models: &[Model]) -> Self {
+    pub(crate) fn new(models: &[Model]) -> Self {
         Probe {
             models: models.to_vec(),
             cost: 0,
@@ -619,27 +650,38 @@ impl BitSink for Probe {
 }
 
 /// Binary arithmetic decoder mirroring [`Encoder`].
-struct Decoder<'a> {
+pub(crate) struct Decoder<'a> {
     input: &'a [u8],
     cursor: usize,
     range: u32,
     code: u32,
     models: Vec<Model>,
+    overrun: bool,
 }
 
 impl<'a> Decoder<'a> {
-    fn new(input: &'a [u8], contexts: usize) -> Self {
+    pub(crate) fn new(input: &'a [u8], contexts: usize) -> Self {
         let mut decoder = Decoder {
             input,
             cursor: 0,
             range: u32::MAX,
             code: 0,
             models: models(contexts),
+            overrun: false,
         };
         for _ in 0..5 {
             decoder.code = (decoder.code << 8) | u32::from(decoder.next_byte());
         }
         decoder
+    }
+
+    /// Whether the decoder ever had to read past the end of its input.
+    ///
+    /// The stable codec tolerates this because it is a terminator on a count;
+    /// a research codec that must reject truncated streams can use this as a
+    /// corruption signal.
+    pub(crate) fn overran(&self) -> bool {
+        self.overrun
     }
 
     /// Bytes past the end of the payload read as zero: the coder is a terminator
@@ -650,11 +692,12 @@ impl<'a> Decoder<'a> {
             self.cursor += 1;
             byte
         } else {
+            self.overrun = true;
             0
         }
     }
 
-    fn decode_bit(&mut self, ctx: usize) -> u32 {
+    pub(crate) fn decode_bit(&mut self, ctx: usize) -> u32 {
         let bound = (self.range >> PROB_BITS) * self.models[ctx].probability();
         let bit = if self.code < bound {
             self.range = bound;
@@ -830,7 +873,7 @@ static LOG2_SCALED: [u16; 2048] = [
 
 /// `log2(value)` in 1/1024-bit units, for `value` in `1..=2047`.
 #[inline]
-fn log2_scaled(value: u32) -> u32 {
+pub(crate) fn log2_scaled(value: u32) -> u32 {
     debug_assert!((1..2048).contains(&value));
     u32::from(LOG2_SCALED[value as usize])
 }
@@ -842,12 +885,12 @@ fn log2_scaled(value: u32) -> u32 {
 /// Number of probability contexts: one for the sign, one per magnitude plane
 /// for the "not started yet" decision, and one per magnitude plane for the
 /// decision after the first 1-bit.
-fn context_count(sample_bits: u32) -> usize {
+pub(crate) fn context_count(sample_bits: u32) -> usize {
     sample_bits as usize * 2 + 1
 }
 
 /// Context index of the sign decision.
-const SIGN_CONTEXT: usize = 0;
+pub(crate) const SIGN_CONTEXT: usize = 0;
 /// Context of magnitude plane `plane` while no 1-bit has been seen yet.
 ///
 /// Each plane has its own "not started" context. A shared context would have
@@ -856,13 +899,13 @@ const SIGN_CONTEXT: usize = 0;
 /// common case (a residual whose magnitude always sits in the same plane)
 /// collapses to a near-deterministic decision.
 #[inline]
-fn leading_context(plane: u32) -> usize {
+pub(crate) fn leading_context(plane: u32) -> usize {
     1 + plane as usize
 }
 
 /// Context of magnitude plane `plane`, used once the first 1-bit is seen.
 #[inline]
-fn plane_context(plane: u32, sample_bits: u32) -> usize {
+pub(crate) fn plane_context(plane: u32, sample_bits: u32) -> usize {
     1 + sample_bits as usize + plane as usize
 }
 
@@ -872,12 +915,28 @@ fn plane_context(plane: u32, sample_bits: u32) -> usize {
 /// plane's own leading context; the plane that carries the first 1-bit turns
 /// its leading context to 1, and the planes below it each get their own plane
 /// context, which is what gives the coder its resolution.
-fn code_residual(sink: &mut impl BitSink, residual: i32, sample_bits: u32) {
-    sink.encode_bit(SIGN_CONTEXT, u32::from(residual < 0));
+pub(crate) fn code_residual(sink: &mut impl BitSink, residual: i32, sample_bits: u32) {
+    code_residual_at(sink, residual, sample_bits, 0)
+}
+
+/// [`code_residual`] with a context-block offset.
+///
+/// `base` selects which block of the probability table the residual is coded
+/// against. With `base == 0` this is byte-for-byte the stable codec's coding;
+/// a context-adaptive research codec passes the block it selected for this
+/// residual. The bit layout is identical in both cases — only the probability
+/// contexts differ.
+pub(crate) fn code_residual_at(
+    sink: &mut impl BitSink,
+    residual: i32,
+    sample_bits: u32,
+    base: usize,
+) {
+    sink.encode_bit(base + SIGN_CONTEXT, u32::from(residual < 0));
     let magnitude = residual.unsigned_abs();
     if magnitude == 0 {
         for plane in (0..sample_bits).rev() {
-            sink.encode_bit(leading_context(plane), 0);
+            sink.encode_bit(base + leading_context(plane), 0);
         }
         return;
     }
@@ -887,24 +946,33 @@ fn code_residual(sink: &mut impl BitSink, residual: i32, sample_bits: u32) {
     // magnitude bit.
     let top = 31 - magnitude.leading_zeros();
     for plane in (top + 1..sample_bits).rev() {
-        sink.encode_bit(leading_context(plane), 0);
+        sink.encode_bit(base + leading_context(plane), 0);
     }
-    sink.encode_bit(leading_context(top), 1);
+    sink.encode_bit(base + leading_context(top), 1);
     for plane in (0..top).rev() {
-        sink.encode_bit(plane_context(plane, sample_bits), (magnitude >> plane) & 1);
+        sink.encode_bit(
+            base + plane_context(plane, sample_bits),
+            (magnitude >> plane) & 1,
+        );
     }
 }
 
 /// Inverse of [`code_residual`].
-fn decode_residual(decoder: &mut Decoder<'_>, sample_bits: u32) -> i32 {
-    let negative = decoder.decode_bit(SIGN_CONTEXT) == 1;
+pub(crate) fn decode_residual(decoder: &mut Decoder<'_>, sample_bits: u32) -> i32 {
+    decode_residual_at(decoder, sample_bits, 0)
+}
+
+/// [`decode_residual`] with a context-block offset. Inverse of
+/// [`code_residual_at`].
+pub(crate) fn decode_residual_at(decoder: &mut Decoder<'_>, sample_bits: u32, base: usize) -> i32 {
+    let negative = decoder.decode_bit(base + SIGN_CONTEXT) == 1;
     let mut magnitude = 0u32;
     let mut started = false;
     for plane in (0..sample_bits).rev() {
         let bit = if started {
-            decoder.decode_bit(plane_context(plane, sample_bits))
+            decoder.decode_bit(base + plane_context(plane, sample_bits))
         } else {
-            let bit = decoder.decode_bit(leading_context(plane));
+            let bit = decoder.decode_bit(base + leading_context(plane));
             if bit == 1 {
                 started = true;
             }
@@ -923,7 +991,7 @@ fn decode_residual(decoder: &mut Decoder<'_>, sample_bits: u32) -> i32 {
 // LEB128
 // ---------------------------------------------------------------------------
 
-fn put_uleb128(out: &mut Vec<u8>, mut value: u64) {
+pub(crate) fn put_uleb128(out: &mut Vec<u8>, mut value: u64) {
     loop {
         let byte = (value & 0x7F) as u8;
         value >>= 7;
@@ -937,7 +1005,7 @@ fn put_uleb128(out: &mut Vec<u8>, mut value: u64) {
 
 /// Read a LEB128 from `input` starting at `cursor`. Returns the value and the
 /// offset just past it.
-fn get_uleb128(input: &[u8], mut cursor: usize) -> Result<(u64, usize)> {
+pub(crate) fn get_uleb128(input: &[u8], mut cursor: usize) -> Result<(u64, usize)> {
     let mut value = 0u64;
     let mut shift = 0u32;
     loop {
@@ -960,6 +1028,55 @@ fn get_uleb128(input: &[u8], mut cursor: usize) -> Result<(u64, usize)> {
 // ---------------------------------------------------------------------------
 // Codec entry points
 // ---------------------------------------------------------------------------
+
+/// Choose a predictor for every row, collect the selected residuals, and code
+/// them with the stable entropy model.
+///
+/// The selection is exactly the stable codec's: each row's residuals are
+/// measured under every candidate predictor with a live probe of the entropy
+/// model, and the lowest-cost predictor wins (ties go to the lowest predictor
+/// code). The probe reads the *live* model, so the choice for row `y` depends
+/// on the rows before it — and the returned `coded` bytes are what the stable
+/// codec would have written.
+///
+/// The stable encoder and the research codecs share this function, so a
+/// comparison between them measures the *entropy model* and never a different
+/// predictor choice.
+///
+/// Returns `(row_modes, residuals, coded)` where `residuals` are in raster
+/// order.
+pub(crate) fn plan_rows(input: &[u8], layout: &Layout) -> (Vec<u8>, Vec<i32>, Vec<u8>) {
+    let sample_bits = (layout.sample_bytes * 8) as u32;
+    let mut row_modes = Vec::with_capacity(layout.height);
+    let mut residuals = Vec::with_capacity(layout.total_samples());
+    let mut encoder = Encoder::new(context_count(sample_bits));
+
+    for y in 0..layout.height {
+        let candidates = row_residual_candidates(input, layout, y);
+        let mut best_slot = 0usize;
+        let mut best_cost = u64::MAX;
+
+        for (slot, row) in candidates.iter().enumerate() {
+            let mut probe = Probe::new(&encoder.models);
+            for &residual in row {
+                code_residual(&mut probe, residual, sample_bits);
+            }
+            if probe.cost < best_cost {
+                best_cost = probe.cost;
+                best_slot = slot;
+            }
+        }
+
+        row_modes.push(CANDIDATE_MODES[best_slot]);
+        for &residual in &candidates[best_slot] {
+            code_residual(&mut encoder, residual, sample_bits);
+        }
+        residuals.extend_from_slice(&candidates[best_slot]);
+    }
+
+    let coded = encoder.finish();
+    (row_modes, residuals, coded)
+}
 
 impl PredictorCodec {
     /// Build a predictor payload for `input`.
@@ -1004,36 +1121,12 @@ impl PredictorCodec {
         }
         let height = pixels / width;
         let layout = Layout::new(width, height, channels, sample_bytes);
-        let sample_bits = (sample_bytes * 8) as u32;
 
         // Choose a predictor per row by measuring each candidate with the live
         // coder's probability model, then code the residuals it produced.
-        let mut row_modes = Vec::with_capacity(height);
-        let mut encoder = Encoder::new(context_count(sample_bits));
-        for y in 0..height {
-            let candidates = row_residual_candidates(input, &layout, y);
-            let mut best_slot = 0usize;
-            let mut best_cost = u64::MAX;
-
-            for (slot, residuals) in candidates.iter().enumerate() {
-                let mut probe = Probe::new(&encoder.models);
-                for &residual in residuals {
-                    code_residual(&mut probe, residual, sample_bits);
-                }
-                if probe.cost < best_cost {
-                    best_cost = probe.cost;
-                    best_slot = slot;
-                }
-            }
-
-            row_modes.push(CANDIDATE_MODES[best_slot]);
-            for &residual in &candidates[best_slot] {
-                code_residual(&mut encoder, residual, sample_bits);
-            }
-        }
+        let (row_modes, _residuals, coded) = plan_rows(input, &layout);
 
         let plan = Plan { width, row_modes };
-        let coded = encoder.finish();
 
         out.clear();
         plan.encode(out);

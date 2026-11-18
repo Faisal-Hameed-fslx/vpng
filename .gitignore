@@ -1,5 +1,7 @@
 # Rust build output
 /target/
+# The fuzz crate has its own target directory.
+/fuzz/target/
 **/*.rs.bk
 
 # Python experiment output
@@ -12,6 +14,8 @@ venv/
 # Benchmark raw runs (keep manifests and reports, ignore bulk data)
 /benchmarks/results/*
 !/benchmarks/results/.gitkeep
+# The fuzzing report is small and is the milestone's durable fuzz evidence.
+!/benchmarks/results/fuzz-mutation-report.json
 
 # Large test corpora (provenance recorded in manifests)
 /corpus-data/

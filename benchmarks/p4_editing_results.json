@@ -1,0 +1,174 @@
+{
+  "tool": "vpng-editing-bench",
+  "schema": 1,
+  "generated_at": "1794890873",
+  "context": {
+    "width": 2048,
+    "height": 2048,
+    "format": "RGBA8",
+    "tile_size": 256,
+    "elapsed_ms": 23457,
+    "rustc": "unknown"
+  },
+  "definitions": {
+    "cache_bytes": "the bytes of decoded tile pixels the cache holds; the budget is a byte budget, not a tile count",
+    "history_bytes": "the bytes the undo history holds: the pixel buffers plus a per-entry overhead estimate",
+    "payload_identity": "the CRC32C of every tile payload, before and after the save; an untouched tile must have the same CRC",
+    "digest": "the canonical SHA-256 digest of the pixels, as defined in docs/VPNG_SPEC_0_1.md section 7",
+    "tiles_decoded": "tiles whose compressed payload was read and decoded back into pixels; decoding is not rewriting",
+    "tiles_modified": "tiles whose pixels changed; a modified tile is one the editor's dirty set holds",
+    "tiles_rewritten": "tiles whose encoded payload was replaced during a commit, by re-encoding the modified pixels",
+    "tiles_preserved": "tiles whose original compressed payload was copied into the new file byte for byte; a preserved tile was neither decoded nor re-encoded during the commit"
+  },
+  "scenarios": [
+    {
+      "name": "localized-edit",
+      "image": {
+        "width": 2048,
+        "height": 2048,
+        "format": "RGBA8",
+        "tile_size": 256,
+        "file_bytes": 4309019,
+        "full_image_pixel_bytes": 16777216
+      },
+      "region": {
+        "x": 1024,
+        "y": 1024,
+        "width": 64,
+        "height": 64,
+        "read_ms": 10.268700,
+        "write_ms": 0.102500
+      },
+      "cache": {
+        "hits": 1,
+        "misses": 1,
+        "evictions": 0,
+        "decoded_tiles": 1,
+        "rejected_tiles": 0,
+        "resident_tiles": 1,
+        "current_bytes": 262144,
+        "peak_bytes": 262144,
+        "decode_time_ms": 10.142200
+      },
+      "dirty": {
+        "tile_count": 1,
+        "tiles": [
+          36
+        ],
+        "bytes": 262144,
+        "fraction_of_image": 0.015625
+      },
+      "history": {
+        "undo_depth": 1,
+        "redo_depth": 0,
+        "current_bytes": 262208,
+        "peak_bytes": 262208,
+        "dropped_entries": 0
+      },
+      "tiles": {
+        "decoded": 1,
+        "modified": 1,
+        "rewritten": 0,
+        "preserved": 0
+      }
+    },
+    {
+      "name": "payload-reuse",
+      "commit_ms": 45.950700,
+      "report": {
+        "tiles_rewritten": 1,
+        "tiles_copied": 63,
+        "copied_payload_bytes": 4239148,
+        "rewritten_payload_bytes": 67312,
+        "file_size": 4309088
+      },
+      "payload_identity": {
+        "identical_tiles": 63,
+        "changed_tiles": 1,
+        "all_untouched_payloads_identical": true
+      },
+      "tiles": {
+        "decoded": 1,
+        "modified": 1,
+        "rewritten": 1,
+        "preserved": 63
+      },
+      "pixels_exact_after_reopen": true,
+      "digest_original": "0cfcb51dd8790bec712c4ea30aa83038d67cec02ae702aea888a6bed26dad51f",
+      "digest_expected_after_patch": "e384aa6979c8327a70b06f5fd19b970ff390b3665f1d92d2fea8e36243d062be",
+      "digest_after_save": "e384aa6979c8327a70b06f5fd19b970ff390b3665f1d92d2fea8e36243d062be",
+      "digests_match": true
+    },
+    {
+      "name": "save-reopen-digest",
+      "digest_expected": "8edcce252bac99f3019ae40ae23b14c3cce921a48f80ecaa2e0508147170cfe5",
+      "digest_actual": "8edcce252bac99f3019ae40ae23b14c3cce921a48f80ecaa2e0508147170cfe5",
+      "digests_match": true
+    },
+    {
+      "name": "abort-preserves-original",
+      "file_bytes_unchanged": true,
+      "file_still_parses": true,
+      "integrity_ok": true,
+      "editor_clean_after_abort": true,
+      "digest": "0cfcb51dd8790bec712c4ea30aa83038d67cec02ae702aea888a6bed26dad51f"
+    },
+    {
+      "name": "failure-injection",
+      "attempts": [
+        {
+          "failure_point": "after-bytes",
+          "commit_failed": true,
+          "original_preserved": true,
+          "original_still_parses": true,
+          "temporary_files_left": [],
+          "no_temporary_files_left": true
+        },
+        {
+          "failure_point": "before-rename",
+          "commit_failed": true,
+          "original_preserved": true,
+          "original_still_parses": true,
+          "temporary_files_left": [],
+          "no_temporary_files_left": true
+        }
+      ]
+    },
+    {
+      "name": "undo-redo",
+      "write_ms": 0.137400,
+      "undo_ms": 0.136400,
+      "redo_ms": 0.145600,
+      "undo_available": true,
+      "redo_available": true,
+      "undo_restores_pixels": true,
+      "redo_restores_pixels": true,
+      "dirty_after_undo": 0,
+      "dirty_after_redo": 1
+    },
+    {
+      "name": "cache-budget",
+      "budget_bytes": 524288,
+      "tile_bytes": 262144,
+      "hits": 0,
+      "misses": 4,
+      "evictions": 2,
+      "decoded_tiles": 4,
+      "current_bytes": 524288,
+      "peak_bytes": 524288,
+      "within_budget": true
+    },
+    {
+      "name": "history-budget",
+      "budget_bytes": 1048576,
+      "tile_bytes": 262144,
+      "edits": 12,
+      "undo_depth": 3,
+      "redo_depth": 0,
+      "current_bytes": 786624,
+      "peak_bytes": 786624,
+      "dropped_entries": 9,
+      "within_budget": true
+    }
+  ]
+}

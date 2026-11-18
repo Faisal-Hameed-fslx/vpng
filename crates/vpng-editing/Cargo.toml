@@ -1,0 +1,19 @@
+[package]
+name = "vpng-editing"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors = ["VPNG contributors"]
+description = "VPNG editing engine: bounded tile cache, transactional copy-on-write editing, and tile-level undo/redo."
+
+[dependencies]
+vpng-core.workspace = true
+vpng-container.workspace = true
+vpng-codecs.workspace = true
+vpng-decoder.workspace = true
+vpng-encoder.workspace = true
+vpng-tiling.workspace = true
+
+[dev-dependencies]
+vpng-codecs.workspace = true

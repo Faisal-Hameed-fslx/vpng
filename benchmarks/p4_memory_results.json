@@ -1,0 +1,1613 @@
+{
+ "tool": "run_memory.py",
+ "schema": 1,
+ "generated_at": "2026-11-17T10:01:39",
+ "host": {
+  "platform": "win32",
+  "processor": "Intel64 Family 6 Model 154 Stepping 4, GenuineIntel",
+  "logical_cpus": 12,
+  "total_physical_bytes": 8301043712,
+  "available_physical_bytes": 710078464,
+  "total_page_file_bytes": 26970419200,
+  "available_page_file_bytes": 4838047744,
+  "work_disk_total_bytes": 106544754688,
+  "work_disk_free_bytes": 6641278976
+ },
+ "context": {
+  "binary": "E:\\VPNG\\target\\release\\vpng-memory.exe",
+  "tile_size": 512,
+  "cache_budget_bytes": 16777216,
+  "history_budget_bytes": 33554432,
+  "memory_target_bytes": 67108864,
+  "python": "3.13.0"
+ },
+ "definitions": {
+  "verdict": "PASS: the case ran, the file verified, the edit read back exactly, the untouched payloads were byte identical, and the edit's memory stayed inside the target. FAIL: the case ran and one of those conditions did not hold. BLOCKED: the case could not run on this host.",
+  "working_set_bytes": "the operating system's resident-set size of the process, from K32GetProcessMemoryInfo. It includes the binary, the stacks, the allocator's own bookkeeping and the heap.",
+  "heap_peak_bytes": "the bytes the process's own allocator had outstanding at the busiest moment, counted by a tracking global allocator. It excludes the binary, the stacks and the operating system's own overhead.",
+  "working_set_delta_bytes": "the resident-set high-water mark minus the resident set measured before the edit started. This is what the edit itself cost the process.",
+  "included_in_the_target": "the decoded-tile cache, the undo history, the dirty tiles, the region buffers, the tile payloads the writer read, and the process's own code and stacks",
+  "excluded_from_the_target": "the operating system's page cache, the file on disk, the memory other processes use, and the space the temporary file occupies",
+  "streaming_note": "the writer never holds the whole image: it generates one tile, encodes it, writes it, and moves on. The canonical size of the image is recorded for comparison only."
+ },
+ "summary": {
+  "cases": 12,
+  "pass": 12,
+  "fail": 0,
+  "blocked": 0
+ },
+ "cases": [
+  {
+   "case": {
+    "width": 4096,
+    "height": 4096,
+    "format": "RGBA8",
+    "tile_size": 512,
+    "canonical_bytes": 67108864,
+    "cache_budget_bytes": 16777216,
+    "history_budget_bytes": 33554432
+   },
+   "baseline": {
+    "working_set_bytes": 3215360,
+    "heap_bytes": 1225
+   },
+   "write": {
+    "file_size_bytes": 9318919,
+    "payload_bytes": 9316291,
+    "framing_bytes": 2628,
+    "tile_count": 64,
+    "codec_histogram": {
+     "predictor": 64
+    },
+    "elapsed_ms": 7591,
+    "peak_heap_bytes": 6230208,
+    "peak_working_set_bytes": 10371072,
+    "tile_buffer_bytes": 1048576
+   },
+   "write_memory": {
+    "heap_peak_bytes": 6230208,
+    "working_set_at_end_bytes": 4247552,
+    "peak_working_set_bytes": 10371072,
+    "working_set_delta_bytes": 7155712
+   },
+   "verification": {
+    "tile_count": 64,
+    "checked_tiles": 3,
+    "mismatches": 0,
+    "elapsed_ms": 103,
+    "valid": true
+   },
+   "edit": {
+    "full_image_pixel_bytes": 67108864,
+    "region": {
+     "x": 2048,
+     "y": 2048,
+     "width": 64,
+     "height": 64
+    },
+    "read_ms": 29.8262,
+    "write_ms": 0.54,
+    "commit_ms": 218.9586,
+    "cache": {
+     "hits": 1,
+     "misses": 1,
+     "evictions": 0,
+     "decoded_tiles": 1,
+     "rejected_tiles": 0,
+     "resident_tiles": 1,
+     "current_bytes": 1048576,
+     "peak_bytes": 1048576,
+     "decode_time_ms": 29.4329,
+     "budget_bytes": 16777216,
+     "within_budget": true
+    },
+    "history": {
+     "undo_depth": 1,
+     "current_bytes": 1048640,
+     "peak_bytes": 1048640,
+     "dropped_entries": 0,
+     "budget_bytes": 33554432,
+     "within_budget": true
+    },
+    "dirty": {
+     "tile_count": 1,
+     "bytes": 0
+    },
+    "commit": {
+     "tiles_rewritten": 1,
+     "tiles_copied": 63,
+     "copied_payload_bytes": 9175011,
+     "rewritten_payload_bytes": 141484,
+     "file_size": 9319123
+    },
+    "payload_identity": {
+     "identical_tiles": 63,
+     "changed_tiles": 1,
+     "untouched_payloads_byte_identical": true
+    },
+    "pixels_read_back_exact": true,
+    "memory": {
+     "working_set_before_bytes": 3993600,
+     "working_set_peak_bytes": 12505088,
+     "working_set_delta_bytes": 8511488,
+     "heap_peak_bytes": 8047576,
+     "heap_delta_bytes": 1603133,
+     "pagefile_peak_bytes": 25280
+    },
+    "tile_size": 512
+   },
+   "process_peak": {
+    "peak_working_set_bytes": 12505088,
+    "peak_heap_bytes": 8047576,
+    "allocations": 567459
+   },
+   "wall_ms": 8069,
+   "command": [
+    "E:\\VPNG\\target\\release\\vpng-memory.exe",
+    "--width",
+    "4096",
+    "--height",
+    "4096",
+    "--format",
+    "rgba8",
+    "--tile-size",
+    "512",
+    "--work-dir",
+    "benchmarks\\results\\memory-work",
+    "--cache-bytes",
+    "16777216",
+    "--history-bytes",
+    "33554432",
+    "--output",
+    "benchmarks\\results\\memory-work\\case-4096-rgba8.json"
+   ],
+   "verdict": "PASS",
+   "failures": [],
+   "id": "4096x4096-rgba8",
+   "resolution": 4096,
+   "format": "rgba8",
+   "elapsed_ms": 8081
+  },
+  {
+   "case": {
+    "width": 4096,
+    "height": 4096,
+    "format": "Gray8",
+    "tile_size": 512,
+    "canonical_bytes": 16777216,
+    "cache_budget_bytes": 16777216,
+    "history_budget_bytes": 33554432
+   },
+   "baseline": {
+    "working_set_bytes": 3215360,
+    "heap_bytes": 1225
+   },
+   "write": {
+    "file_size_bytes": 2545200,
+    "payload_bytes": 2542572,
+    "framing_bytes": 2628,
+    "tile_count": 64,
+    "codec_histogram": {
+     "predictor": 64
+    },
+    "elapsed_ms": 2190,
+    "peak_heap_bytes": 1768097,
+    "peak_working_set_bytes": 5148672,
+    "tile_buffer_bytes": 262144
+   },
+   "write_memory": {
+    "heap_peak_bytes": 1768097,
+    "working_set_at_end_bytes": 3678208,
+    "peak_working_set_bytes": 5148672,
+    "working_set_delta_bytes": 1933312
+   },
+   "verification": {
+    "tile_count": 64,
+    "checked_tiles": 3,
+    "mismatches": 0,
+    "elapsed_ms": 41,
+    "valid": true
+   },
+   "edit": {
+    "full_image_pixel_bytes": 16777216,
+    "region": {
+     "x": 2048,
+     "y": 2048,
+     "width": 64,
+     "height": 64
+    },
+    "read_ms": 8.4479,
+    "write_ms": 0.1387,
+    "commit_ms": 48.7926,
+    "cache": {
+     "hits": 1,
+     "misses": 1,
+     "evictions": 0,
+     "decoded_tiles": 1,
+     "rejected_tiles": 0,
+     "resident_tiles": 1,
+     "current_bytes": 262144,
+     "peak_bytes": 262144,
+     "decode_time_ms": 8.331,
+     "budget_bytes": 16777216,
+     "within_budget": true
+    },
+    "history": {
+     "undo_depth": 1,
+     "current_bytes": 262208,
+     "peak_bytes": 262208,
+     "dropped_entries": 0,
+     "budget_bytes": 33554432,
+     "within_budget": true
+    },
+    "dirty": {
+     "tile_count": 1,
+     "bytes": 0
+    },
+    "commit": {
+     "tiles_rewritten": 1,
+     "tiles_copied": 63,
+     "copied_payload_bytes": 2503667,
+     "rewritten_payload_bytes": 38981,
+     "file_size": 2545276
+    },
+    "payload_identity": {
+     "identical_tiles": 63,
+     "changed_tiles": 1,
+     "untouched_payloads_byte_identical": true
+    },
+    "pixels_read_back_exact": true,
+    "memory": {
+     "working_set_before_bytes": 3457024,
+     "working_set_peak_bytes": 5697536,
+     "working_set_delta_bytes": 2240512,
+     "heap_peak_bytes": 2217839,
+     "heap_delta_bytes": 449742,
+     "pagefile_peak_bytes": 25280
+    },
+    "tile_size": 512
+   },
+   "process_peak": {
+    "peak_working_set_bytes": 5697536,
+    "peak_heap_bytes": 2217839,
+    "allocations": 567459
+   },
+   "wall_ms": 2319,
+   "command": [
+    "E:\\VPNG\\target\\release\\vpng-memory.exe",
+    "--width",
+    "4096",
+    "--height",
+    "4096",
+    "--format",
+    "gray8",
+    "--tile-size",
+    "512",
+    "--work-dir",
+    "benchmarks\\results\\memory-work",
+    "--cache-bytes",
+    "16777216",
+    "--history-bytes",
+    "33554432",
+    "--output",
+    "benchmarks\\results\\memory-work\\case-4096-gray8.json"
+   ],
+   "verdict": "PASS",
+   "failures": [],
+   "id": "4096x4096-gray8",
+   "resolution": 4096,
+   "format": "gray8",
+   "elapsed_ms": 2324
+  },
+  {
+   "case": {
+    "width": 4096,
+    "height": 4096,
+    "format": "RGB8",
+    "tile_size": 512,
+    "canonical_bytes": 50331648,
+    "cache_budget_bytes": 16777216,
+    "history_budget_bytes": 33554432
+   },
+   "baseline": {
+    "working_set_bytes": 3215360,
+    "heap_bytes": 1224
+   },
+   "write": {
+    "file_size_bytes": 7093080,
+    "payload_bytes": 7090452,
+    "framing_bytes": 2628,
+    "tile_count": 64,
+    "codec_histogram": {
+     "predictor": 64
+    },
+    "elapsed_ms": 6030,
+    "peak_heap_bytes": 4810200,
+    "peak_working_set_bytes": 8249344,
+    "tile_buffer_bytes": 786432
+   },
+   "write_memory": {
+    "heap_peak_bytes": 4810200,
+    "working_set_at_end_bytes": 4231168,
+    "peak_working_set_bytes": 8249344,
+    "working_set_delta_bytes": 5033984
+   },
+   "verification": {
+    "tile_count": 64,
+    "checked_tiles": 3,
+    "mismatches": 0,
+    "elapsed_ms": 87,
+    "valid": true
+   },
+   "edit": {
+    "full_image_pixel_bytes": 50331648,
+    "region": {
+     "x": 2048,
+     "y": 2048,
+     "width": 64,
+     "height": 64
+    },
+    "read_ms": 23.4143,
+    "write_ms": 0.3176,
+    "commit_ms": 182.3672,
+    "cache": {
+     "hits": 1,
+     "misses": 1,
+     "evictions": 0,
+     "decoded_tiles": 1,
+     "rejected_tiles": 0,
+     "resident_tiles": 1,
+     "current_bytes": 786432,
+     "peak_bytes": 786432,
+     "decode_time_ms": 23.1022,
+     "budget_bytes": 16777216,
+     "within_budget": true
+    },
+    "history": {
+     "undo_depth": 1,
+     "current_bytes": 786496,
+     "peak_bytes": 786496,
+     "dropped_entries": 0,
+     "budget_bytes": 33554432,
+     "within_budget": true
+    },
+    "dirty": {
+     "tile_count": 1,
+     "bytes": 0
+    },
+    "commit": {
+     "tiles_rewritten": 1,
+     "tiles_copied": 63,
+     "copied_payload_bytes": 6983008,
+     "rewritten_payload_bytes": 107621,
+     "file_size": 7093257
+    },
+    "payload_identity": {
+     "identical_tiles": 63,
+     "changed_tiles": 1,
+     "untouched_payloads_byte_identical": true
+    },
+    "pixels_read_back_exact": true,
+    "memory": {
+     "working_set_before_bytes": 4272128,
+     "working_set_peak_bytes": 9924608,
+     "working_set_delta_bytes": 5652480,
+     "heap_peak_bytes": 6039182,
+     "heap_delta_bytes": 1201277,
+     "pagefile_peak_bytes": 25280
+    },
+    "tile_size": 512
+   },
+   "process_peak": {
+    "peak_working_set_bytes": 9924608,
+    "peak_heap_bytes": 6039182,
+    "allocations": 567459
+   },
+   "wall_ms": 6381,
+   "command": [
+    "E:\\VPNG\\target\\release\\vpng-memory.exe",
+    "--width",
+    "4096",
+    "--height",
+    "4096",
+    "--format",
+    "rgb8",
+    "--tile-size",
+    "512",
+    "--work-dir",
+    "benchmarks\\results\\memory-work",
+    "--cache-bytes",
+    "16777216",
+    "--history-bytes",
+    "33554432",
+    "--output",
+    "benchmarks\\results\\memory-work\\case-4096-rgb8.json"
+   ],
+   "verdict": "PASS",
+   "failures": [],
+   "id": "4096x4096-rgb8",
+   "resolution": 4096,
+   "format": "rgb8",
+   "elapsed_ms": 6385
+  },
+  {
+   "case": {
+    "width": 4096,
+    "height": 4096,
+    "format": "RGBA16",
+    "tile_size": 512,
+    "canonical_bytes": 134217728,
+    "cache_budget_bytes": 16777216,
+    "history_budget_bytes": 33554432
+   },
+   "baseline": {
+    "working_set_bytes": 3223552,
+    "heap_bytes": 1226
+   },
+   "write": {
+    "file_size_bytes": 10537385,
+    "payload_bytes": 10534757,
+    "framing_bytes": 2628,
+    "tile_count": 64,
+    "codec_histogram": {
+     "predictor": 64
+    },
+    "elapsed_ms": 12858,
+    "peak_heap_bytes": 9174040,
+    "peak_working_set_bytes": 13164544,
+    "tile_buffer_bytes": 2097152
+   },
+   "write_memory": {
+    "heap_peak_bytes": 9174040,
+    "working_set_at_end_bytes": 4583424,
+    "peak_working_set_bytes": 13164544,
+    "working_set_delta_bytes": 9940992
+   },
+   "verification": {
+    "tile_count": 64,
+    "checked_tiles": 3,
+    "mismatches": 0,
+    "elapsed_ms": 155,
+    "valid": true
+   },
+   "edit": {
+    "full_image_pixel_bytes": 134217728,
+    "region": {
+     "x": 2048,
+     "y": 2048,
+     "width": 64,
+     "height": 64
+    },
+    "read_ms": 44.0153,
+    "write_ms": 1.2806,
+    "commit_ms": 214.6392,
+    "cache": {
+     "hits": 1,
+     "misses": 1,
+     "evictions": 0,
+     "decoded_tiles": 1,
+     "rejected_tiles": 0,
+     "resident_tiles": 1,
+     "current_bytes": 2097152,
+     "peak_bytes": 2097152,
+     "decode_time_ms": 43.3809,
+     "budget_bytes": 16777216,
+     "within_budget": true
+    },
+    "history": {
+     "undo_depth": 1,
+     "current_bytes": 2097216,
+     "peak_bytes": 2097216,
+     "dropped_entries": 0,
+     "budget_bytes": 33554432,
+     "within_budget": true
+    },
+    "dirty": {
+     "tile_count": 1,
+     "bytes": 0
+    },
+    "commit": {
+     "tiles_rewritten": 1,
+     "tiles_copied": 63,
+     "copied_payload_bytes": 10374450,
+     "rewritten_payload_bytes": 163874,
+     "file_size": 10540952
+    },
+    "payload_identity": {
+     "identical_tiles": 63,
+     "changed_tiles": 1,
+     "untouched_payloads_byte_identical": true
+    },
+    "pixels_read_back_exact": true,
+    "memory": {
+     "working_set_before_bytes": 3735552,
+     "working_set_peak_bytes": 16666624,
+     "working_set_delta_bytes": 12931072,
+     "heap_peak_bytes": 13082447,
+     "heap_delta_bytes": 3908407,
+     "pagefile_peak_bytes": 25280
+    },
+    "tile_size": 512
+   },
+   "process_peak": {
+    "peak_working_set_bytes": 16666624,
+    "peak_heap_bytes": 13082447,
+    "allocations": 567459
+   },
+   "wall_ms": 13349,
+   "command": [
+    "E:\\VPNG\\target\\release\\vpng-memory.exe",
+    "--width",
+    "4096",
+    "--height",
+    "4096",
+    "--format",
+    "rgba16",
+    "--tile-size",
+    "512",
+    "--work-dir",
+    "benchmarks\\results\\memory-work",
+    "--cache-bytes",
+    "16777216",
+    "--history-bytes",
+    "33554432",
+    "--output",
+    "benchmarks\\results\\memory-work\\case-4096-rgba16.json"
+   ],
+   "verdict": "PASS",
+   "failures": [],
+   "id": "4096x4096-rgba16",
+   "resolution": 4096,
+   "format": "rgba16",
+   "elapsed_ms": 13356
+  },
+  {
+   "case": {
+    "width": 8192,
+    "height": 8192,
+    "format": "RGBA8",
+    "tile_size": 512,
+    "canonical_bytes": 268435456,
+    "cache_budget_bytes": 16777216,
+    "history_budget_bytes": 33554432
+   },
+   "baseline": {
+    "working_set_bytes": 3219456,
+    "heap_bytes": 1225
+   },
+   "write": {
+    "file_size_bytes": 37664751,
+    "payload_bytes": 37654443,
+    "framing_bytes": 10308,
+    "tile_count": 256,
+    "codec_histogram": {
+     "predictor": 256
+    },
+    "elapsed_ms": 31092,
+    "peak_heap_bytes": 6260483,
+    "peak_working_set_bytes": 10211328,
+    "tile_buffer_bytes": 1048576
+   },
+   "write_memory": {
+    "heap_peak_bytes": 6260483,
+    "working_set_at_end_bytes": 3891200,
+    "peak_working_set_bytes": 10211328,
+    "working_set_delta_bytes": 6991872
+   },
+   "verification": {
+    "tile_count": 256,
+    "checked_tiles": 3,
+    "mismatches": 0,
+    "elapsed_ms": 117,
+    "valid": true
+   },
+   "edit": {
+    "full_image_pixel_bytes": 268435456,
+    "region": {
+     "x": 4096,
+     "y": 4096,
+     "width": 64,
+     "height": 64
+    },
+    "read_ms": 30.2598,
+    "write_ms": 0.4778,
+    "commit_ms": 253.5726,
+    "cache": {
+     "hits": 1,
+     "misses": 1,
+     "evictions": 0,
+     "decoded_tiles": 1,
+     "rejected_tiles": 0,
+     "resident_tiles": 1,
+     "current_bytes": 1048576,
+     "peak_bytes": 1048576,
+     "decode_time_ms": 29.7656,
+     "budget_bytes": 16777216,
+     "within_budget": true
+    },
+    "history": {
+     "undo_depth": 1,
+     "current_bytes": 1048640,
+     "peak_bytes": 1048640,
+     "dropped_entries": 0,
+     "budget_bytes": 33554432,
+     "within_budget": true
+    },
+    "dirty": {
+     "tile_count": 1,
+     "bytes": 0
+    },
+    "commit": {
+     "tiles_rewritten": 1,
+     "tiles_copied": 255,
+     "copied_payload_bytes": 37512481,
+     "rewritten_payload_bytes": 141928,
+     "file_size": 37664717
+    },
+    "payload_identity": {
+     "identical_tiles": 255,
+     "changed_tiles": 1,
+     "untouched_payloads_byte_identical": true
+    },
+    "pixels_read_back_exact": true,
+    "memory": {
+     "working_set_before_bytes": 3596288,
+     "working_set_peak_bytes": 11583488,
+     "working_set_delta_bytes": 7987200,
+     "heap_peak_bytes": 8056468,
+     "heap_delta_bytes": 1588678,
+     "pagefile_peak_bytes": 25280
+    },
+    "tile_size": 512
+   },
+   "process_peak": {
+    "peak_working_set_bytes": 11583488,
+    "peak_heap_bytes": 8056468,
+    "allocations": 2242851
+   },
+   "wall_ms": 31567,
+   "command": [
+    "E:\\VPNG\\target\\release\\vpng-memory.exe",
+    "--width",
+    "8192",
+    "--height",
+    "8192",
+    "--format",
+    "rgba8",
+    "--tile-size",
+    "512",
+    "--work-dir",
+    "benchmarks\\results\\memory-work",
+    "--cache-bytes",
+    "16777216",
+    "--history-bytes",
+    "33554432",
+    "--output",
+    "benchmarks\\results\\memory-work\\case-8192-rgba8.json"
+   ],
+   "verdict": "PASS",
+   "failures": [],
+   "id": "8192x8192-rgba8",
+   "resolution": 8192,
+   "format": "rgba8",
+   "elapsed_ms": 31571
+  },
+  {
+   "case": {
+    "width": 8192,
+    "height": 8192,
+    "format": "Gray8",
+    "tile_size": 512,
+    "canonical_bytes": 67108864,
+    "cache_budget_bytes": 16777216,
+    "history_budget_bytes": 33554432
+   },
+   "baseline": {
+    "working_set_bytes": 3215360,
+    "heap_bytes": 1225
+   },
+   "write": {
+    "file_size_bytes": 10325664,
+    "payload_bytes": 10315356,
+    "framing_bytes": 10308,
+    "tile_count": 256,
+    "codec_histogram": {
+     "predictor": 256
+    },
+    "elapsed_ms": 9389,
+    "peak_heap_bytes": 1782568,
+    "peak_working_set_bytes": 5316608,
+    "tile_buffer_bytes": 262144
+   },
+   "write_memory": {
+    "heap_peak_bytes": 1782568,
+    "working_set_at_end_bytes": 3678208,
+    "peak_working_set_bytes": 5316608,
+    "working_set_delta_bytes": 2101248
+   },
+   "verification": {
+    "tile_count": 256,
+    "checked_tiles": 3,
+    "mismatches": 0,
+    "elapsed_ms": 45,
+    "valid": true
+   },
+   "edit": {
+    "full_image_pixel_bytes": 67108864,
+    "region": {
+     "x": 4096,
+     "y": 4096,
+     "width": 64,
+     "height": 64
+    },
+    "read_ms": 8.8791,
+    "write_ms": 0.1076,
+    "commit_ms": 64.8284,
+    "cache": {
+     "hits": 1,
+     "misses": 1,
+     "evictions": 0,
+     "decoded_tiles": 1,
+     "rejected_tiles": 0,
+     "resident_tiles": 1,
+     "current_bytes": 262144,
+     "peak_bytes": 262144,
+     "decode_time_ms": 8.7542,
+     "budget_bytes": 16777216,
+     "within_budget": true
+    },
+    "history": {
+     "undo_depth": 1,
+     "current_bytes": 262208,
+     "peak_bytes": 262208,
+     "dropped_entries": 0,
+     "budget_bytes": 33554432,
+     "within_budget": true
+    },
+    "dirty": {
+     "tile_count": 1,
+     "bytes": 0
+    },
+    "commit": {
+     "tiles_rewritten": 1,
+     "tiles_copied": 255,
+     "copied_payload_bytes": 10276823,
+     "rewritten_payload_bytes": 38595,
+     "file_size": 10325726
+    },
+    "payload_identity": {
+     "identical_tiles": 255,
+     "changed_tiles": 1,
+     "untouched_payloads_byte_identical": true
+    },
+    "pixels_read_back_exact": true,
+    "memory": {
+     "working_set_before_bytes": 3461120,
+     "working_set_peak_bytes": 6320128,
+     "working_set_delta_bytes": 2859008,
+     "heap_peak_bytes": 2225901,
+     "heap_delta_bytes": 443333,
+     "pagefile_peak_bytes": 25280
+    },
+    "tile_size": 512
+   },
+   "process_peak": {
+    "peak_working_set_bytes": 6320128,
+    "peak_heap_bytes": 2225901,
+    "allocations": 2242851
+   },
+   "wall_ms": 9549,
+   "command": [
+    "E:\\VPNG\\target\\release\\vpng-memory.exe",
+    "--width",
+    "8192",
+    "--height",
+    "8192",
+    "--format",
+    "gray8",
+    "--tile-size",
+    "512",
+    "--work-dir",
+    "benchmarks\\results\\memory-work",
+    "--cache-bytes",
+    "16777216",
+    "--history-bytes",
+    "33554432",
+    "--output",
+    "benchmarks\\results\\memory-work\\case-8192-gray8.json"
+   ],
+   "verdict": "PASS",
+   "failures": [],
+   "id": "8192x8192-gray8",
+   "resolution": 8192,
+   "format": "gray8",
+   "elapsed_ms": 9552
+  },
+  {
+   "case": {
+    "width": 8192,
+    "height": 8192,
+    "format": "RGB8",
+    "tile_size": 512,
+    "canonical_bytes": 201326592,
+    "cache_budget_bytes": 16777216,
+    "history_budget_bytes": 33554432
+   },
+   "baseline": {
+    "working_set_bytes": 3223552,
+    "heap_bytes": 1224
+   },
+   "write": {
+    "file_size_bytes": 28678686,
+    "payload_bytes": 28668378,
+    "framing_bytes": 10308,
+    "tile_count": 256,
+    "codec_histogram": {
+     "predictor": 256
+    },
+    "elapsed_ms": 24169,
+    "peak_heap_bytes": 4835295,
+    "peak_working_set_bytes": 8327168,
+    "tile_buffer_bytes": 786432
+   },
+   "write_memory": {
+    "heap_peak_bytes": 4835295,
+    "working_set_at_end_bytes": 4255744,
+    "peak_working_set_bytes": 8327168,
+    "working_set_delta_bytes": 5103616
+   },
+   "verification": {
+    "tile_count": 256,
+    "checked_tiles": 3,
+    "mismatches": 0,
+    "elapsed_ms": 89,
+    "valid": true
+   },
+   "edit": {
+    "full_image_pixel_bytes": 201326592,
+    "region": {
+     "x": 4096,
+     "y": 4096,
+     "width": 64,
+     "height": 64
+    },
+    "read_ms": 24.4145,
+    "write_ms": 0.4503,
+    "commit_ms": 256.2937,
+    "cache": {
+     "hits": 1,
+     "misses": 1,
+     "evictions": 0,
+     "decoded_tiles": 1,
+     "rejected_tiles": 0,
+     "resident_tiles": 1,
+     "current_bytes": 786432,
+     "peak_bytes": 786432,
+     "decode_time_ms": 24.0361,
+     "budget_bytes": 16777216,
+     "within_budget": true
+    },
+    "history": {
+     "undo_depth": 1,
+     "current_bytes": 786496,
+     "peak_bytes": 786496,
+     "dropped_entries": 0,
+     "budget_bytes": 33554432,
+     "within_budget": true
+    },
+    "dirty": {
+     "tile_count": 1,
+     "bytes": 0
+    },
+    "commit": {
+     "tiles_rewritten": 1,
+     "tiles_copied": 255,
+     "copied_payload_bytes": 28560281,
+     "rewritten_payload_bytes": 108131,
+     "file_size": 28678720
+    },
+    "payload_identity": {
+     "identical_tiles": 255,
+     "changed_tiles": 1,
+     "untouched_payloads_byte_identical": true
+    },
+    "pixels_read_back_exact": true,
+    "memory": {
+     "working_set_before_bytes": 5902336,
+     "working_set_peak_bytes": 9936896,
+     "working_set_delta_bytes": 4034560,
+     "heap_peak_bytes": 6048140,
+     "heap_delta_bytes": 1186742,
+     "pagefile_peak_bytes": 25280
+    },
+    "tile_size": 512
+   },
+   "process_peak": {
+    "peak_working_set_bytes": 9936896,
+    "peak_heap_bytes": 6048140,
+    "allocations": 2242851
+   },
+   "wall_ms": 24609,
+   "command": [
+    "E:\\VPNG\\target\\release\\vpng-memory.exe",
+    "--width",
+    "8192",
+    "--height",
+    "8192",
+    "--format",
+    "rgb8",
+    "--tile-size",
+    "512",
+    "--work-dir",
+    "benchmarks\\results\\memory-work",
+    "--cache-bytes",
+    "16777216",
+    "--history-bytes",
+    "33554432",
+    "--output",
+    "benchmarks\\results\\memory-work\\case-8192-rgb8.json"
+   ],
+   "verdict": "PASS",
+   "failures": [],
+   "id": "8192x8192-rgb8",
+   "resolution": 8192,
+   "format": "rgb8",
+   "elapsed_ms": 24616
+  },
+  {
+   "case": {
+    "width": 8192,
+    "height": 8192,
+    "format": "RGBA16",
+    "tile_size": 512,
+    "canonical_bytes": 536870912,
+    "cache_budget_bytes": 16777216,
+    "history_budget_bytes": 33554432
+   },
+   "baseline": {
+    "working_set_bytes": 3215360,
+    "heap_bytes": 1226
+   },
+   "write": {
+    "file_size_bytes": 42505880,
+    "payload_bytes": 42495572,
+    "framing_bytes": 10308,
+    "tile_count": 256,
+    "codec_histogram": {
+     "predictor": 256
+    },
+    "elapsed_ms": 68327,
+    "peak_heap_bytes": 9203749,
+    "peak_working_set_bytes": 13279232,
+    "tile_buffer_bytes": 2097152
+   },
+   "write_memory": {
+    "heap_peak_bytes": 9203749,
+    "working_set_at_end_bytes": 4845568,
+    "peak_working_set_bytes": 13279232,
+    "working_set_delta_bytes": 10063872
+   },
+   "verification": {
+    "tile_count": 256,
+    "checked_tiles": 3,
+    "mismatches": 0,
+    "elapsed_ms": 148,
+    "valid": true
+   },
+   "edit": {
+    "full_image_pixel_bytes": 536870912,
+    "region": {
+     "x": 4096,
+     "y": 4096,
+     "width": 64,
+     "height": 64
+    },
+    "read_ms": 49.033,
+    "write_ms": 1.4996,
+    "commit_ms": 353.1979,
+    "cache": {
+     "hits": 1,
+     "misses": 1,
+     "evictions": 0,
+     "decoded_tiles": 1,
+     "rejected_tiles": 0,
+     "resident_tiles": 1,
+     "current_bytes": 2097152,
+     "peak_bytes": 2097152,
+     "decode_time_ms": 47.4159,
+     "budget_bytes": 16777216,
+     "within_budget": true
+    },
+    "history": {
+     "undo_depth": 1,
+     "current_bytes": 2097216,
+     "peak_bytes": 2097216,
+     "dropped_entries": 0,
+     "budget_bytes": 33554432,
+     "within_budget": true
+    },
+    "dirty": {
+     "tile_count": 1,
+     "bytes": 0
+    },
+    "commit": {
+     "tiles_rewritten": 1,
+     "tiles_copied": 255,
+     "copied_payload_bytes": 42334920,
+     "rewritten_payload_bytes": 164805,
+     "file_size": 42510033
+    },
+    "payload_identity": {
+     "identical_tiles": 255,
+     "changed_tiles": 1,
+     "untouched_payloads_byte_identical": true
+    },
+    "pixels_read_back_exact": true,
+    "memory": {
+     "working_set_before_bytes": 3551232,
+     "working_set_peak_bytes": 17305600,
+     "working_set_delta_bytes": 13754368,
+     "heap_peak_bytes": 13091826,
+     "heap_delta_bytes": 3888077,
+     "pagefile_peak_bytes": 25280
+    },
+    "tile_size": 512
+   },
+   "process_peak": {
+    "peak_working_set_bytes": 17305600,
+    "peak_heap_bytes": 13091826,
+    "allocations": 2242851
+   },
+   "wall_ms": 69053,
+   "command": [
+    "E:\\VPNG\\target\\release\\vpng-memory.exe",
+    "--width",
+    "8192",
+    "--height",
+    "8192",
+    "--format",
+    "rgba16",
+    "--tile-size",
+    "512",
+    "--work-dir",
+    "benchmarks\\results\\memory-work",
+    "--cache-bytes",
+    "16777216",
+    "--history-bytes",
+    "33554432",
+    "--output",
+    "benchmarks\\results\\memory-work\\case-8192-rgba16.json"
+   ],
+   "verdict": "PASS",
+   "failures": [],
+   "id": "8192x8192-rgba16",
+   "resolution": 8192,
+   "format": "rgba16",
+   "elapsed_ms": 69054
+  },
+  {
+   "case": {
+    "width": 16384,
+    "height": 16384,
+    "format": "RGBA8",
+    "tile_size": 512,
+    "canonical_bytes": 1073741824,
+    "cache_budget_bytes": 16777216,
+    "history_budget_bytes": 33554432
+   },
+   "baseline": {
+    "working_set_bytes": 3219456,
+    "heap_bytes": 1226
+   },
+   "write": {
+    "file_size_bytes": 151673619,
+    "payload_bytes": 151632591,
+    "framing_bytes": 41028,
+    "tile_count": 1024,
+    "codec_histogram": {
+     "predictor": 1024
+    },
+    "elapsed_ms": 113037,
+    "peak_heap_bytes": 6314601,
+    "peak_working_set_bytes": 10563584,
+    "tile_buffer_bytes": 1048576
+   },
+   "write_memory": {
+    "heap_peak_bytes": 6314601,
+    "working_set_at_end_bytes": 5263360,
+    "peak_working_set_bytes": 10563584,
+    "working_set_delta_bytes": 7344128
+   },
+   "verification": {
+    "tile_count": 1024,
+    "checked_tiles": 3,
+    "mismatches": 0,
+    "elapsed_ms": 101,
+    "valid": true
+   },
+   "edit": {
+    "full_image_pixel_bytes": 1073741824,
+    "region": {
+     "x": 8192,
+     "y": 8192,
+     "width": 64,
+     "height": 64
+    },
+    "read_ms": 26.5642,
+    "write_ms": 0.5799,
+    "commit_ms": 568.7498,
+    "cache": {
+     "hits": 1,
+     "misses": 1,
+     "evictions": 0,
+     "decoded_tiles": 1,
+     "rejected_tiles": 0,
+     "resident_tiles": 1,
+     "current_bytes": 1048576,
+     "peak_bytes": 1048576,
+     "decode_time_ms": 26.1812,
+     "budget_bytes": 16777216,
+     "within_budget": true
+    },
+    "history": {
+     "undo_depth": 1,
+     "current_bytes": 1048640,
+     "peak_bytes": 1048640,
+     "dropped_entries": 0,
+     "budget_bytes": 33554432,
+     "within_budget": true
+    },
+    "dirty": {
+     "tile_count": 1,
+     "bytes": 0
+    },
+    "commit": {
+     "tiles_rewritten": 1,
+     "tiles_copied": 1023,
+     "copied_payload_bytes": 151490121,
+     "rewritten_payload_bytes": 142504,
+     "file_size": 151673653
+    },
+    "payload_identity": {
+     "identical_tiles": 1023,
+     "changed_tiles": 1,
+     "untouched_payloads_byte_identical": true
+    },
+    "pixels_read_back_exact": true,
+    "memory": {
+     "working_set_before_bytes": 3792896,
+     "working_set_peak_bytes": 12980224,
+     "working_set_delta_bytes": 9187328,
+     "heap_peak_bytes": 8090841,
+     "heap_delta_bytes": 1524107,
+     "pagefile_peak_bytes": 25280
+    },
+    "tile_size": 512
+   },
+   "process_peak": {
+    "peak_working_set_bytes": 12980224,
+    "peak_heap_bytes": 8090841,
+    "allocations": 8944419
+   },
+   "wall_ms": 113859,
+   "command": [
+    "E:\\VPNG\\target\\release\\vpng-memory.exe",
+    "--width",
+    "16384",
+    "--height",
+    "16384",
+    "--format",
+    "rgba8",
+    "--tile-size",
+    "512",
+    "--work-dir",
+    "benchmarks\\results\\memory-work",
+    "--cache-bytes",
+    "16777216",
+    "--history-bytes",
+    "33554432",
+    "--output",
+    "benchmarks\\results\\memory-work\\case-16384-rgba8.json"
+   ],
+   "verdict": "PASS",
+   "failures": [],
+   "id": "16384x16384-rgba8",
+   "resolution": 16384,
+   "format": "rgba8",
+   "elapsed_ms": 113860
+  },
+  {
+   "case": {
+    "width": 16384,
+    "height": 16384,
+    "format": "Gray8",
+    "tile_size": 512,
+    "canonical_bytes": 268435456,
+    "cache_budget_bytes": 16777216,
+    "history_budget_bytes": 33554432
+   },
+   "baseline": {
+    "working_set_bytes": 3219456,
+    "heap_bytes": 1226
+   },
+   "write": {
+    "file_size_bytes": 41722203,
+    "payload_bytes": 41681175,
+    "framing_bytes": 41028,
+    "tile_count": 1024,
+    "codec_histogram": {
+     "predictor": 1024
+    },
+    "elapsed_ms": 30871,
+    "peak_heap_bytes": 1820656,
+    "peak_working_set_bytes": 6004736,
+    "tile_buffer_bytes": 262144
+   },
+   "write_memory": {
+    "heap_peak_bytes": 1820656,
+    "working_set_at_end_bytes": 3661824,
+    "peak_working_set_bytes": 6004736,
+    "working_set_delta_bytes": 2785280
+   },
+   "verification": {
+    "tile_count": 1024,
+    "checked_tiles": 3,
+    "mismatches": 0,
+    "elapsed_ms": 42,
+    "valid": true
+   },
+   "edit": {
+    "full_image_pixel_bytes": 268435456,
+    "region": {
+     "x": 8192,
+     "y": 8192,
+     "width": 64,
+     "height": 64
+    },
+    "read_ms": 7.6658,
+    "write_ms": 0.1456,
+    "commit_ms": 160.2413,
+    "cache": {
+     "hits": 1,
+     "misses": 1,
+     "evictions": 0,
+     "decoded_tiles": 1,
+     "rejected_tiles": 0,
+     "resident_tiles": 1,
+     "current_bytes": 262144,
+     "peak_bytes": 262144,
+     "decode_time_ms": 7.4828,
+     "budget_bytes": 16777216,
+     "within_budget": true
+    },
+    "history": {
+     "undo_depth": 1,
+     "current_bytes": 262208,
+     "peak_bytes": 262208,
+     "dropped_entries": 0,
+     "budget_bytes": 33554432,
+     "within_budget": true
+    },
+    "dirty": {
+     "tile_count": 1,
+     "bytes": 0
+    },
+    "commit": {
+     "tiles_rewritten": 1,
+     "tiles_copied": 1023,
+     "copied_payload_bytes": 41642627,
+     "rewritten_payload_bytes": 38643,
+     "file_size": 41722298
+    },
+    "payload_identity": {
+     "identical_tiles": 1023,
+     "changed_tiles": 1,
+     "untouched_payloads_byte_identical": true
+    },
+    "pixels_read_back_exact": true,
+    "memory": {
+     "working_set_before_bytes": 3440640,
+     "working_set_peak_bytes": 6565888,
+     "working_set_delta_bytes": 3125248,
+     "heap_peak_bytes": 2259746,
+     "heap_delta_bytes": 439090,
+     "pagefile_peak_bytes": 25280
+    },
+    "tile_size": 512
+   },
+   "process_peak": {
+    "peak_working_set_bytes": 6565888,
+    "peak_heap_bytes": 2259746,
+    "allocations": 8944419
+   },
+   "wall_ms": 31131,
+   "command": [
+    "E:\\VPNG\\target\\release\\vpng-memory.exe",
+    "--width",
+    "16384",
+    "--height",
+    "16384",
+    "--format",
+    "gray8",
+    "--tile-size",
+    "512",
+    "--work-dir",
+    "benchmarks\\results\\memory-work",
+    "--cache-bytes",
+    "16777216",
+    "--history-bytes",
+    "33554432",
+    "--output",
+    "benchmarks\\results\\memory-work\\case-16384-gray8.json"
+   ],
+   "verdict": "PASS",
+   "failures": [],
+   "id": "16384x16384-gray8",
+   "resolution": 16384,
+   "format": "gray8",
+   "elapsed_ms": 31132
+  },
+  {
+   "case": {
+    "width": 16384,
+    "height": 16384,
+    "format": "RGB8",
+    "tile_size": 512,
+    "canonical_bytes": 805306368,
+    "cache_budget_bytes": 16777216,
+    "history_budget_bytes": 33554432
+   },
+   "baseline": {
+    "working_set_bytes": 3215360,
+    "heap_bytes": 1225
+   },
+   "write": {
+    "file_size_bytes": 115535824,
+    "payload_bytes": 115494796,
+    "framing_bytes": 41028,
+    "tile_count": 1024,
+    "codec_histogram": {
+     "predictor": 1024
+    },
+    "elapsed_ms": 83962,
+    "peak_heap_bytes": 4884243,
+    "peak_working_set_bytes": 9351168,
+    "tile_buffer_bytes": 786432
+   },
+   "write_memory": {
+    "heap_peak_bytes": 4884243,
+    "working_set_at_end_bytes": 5136384,
+    "peak_working_set_bytes": 9351168,
+    "working_set_delta_bytes": 6135808
+   },
+   "verification": {
+    "tile_count": 1024,
+    "checked_tiles": 3,
+    "mismatches": 0,
+    "elapsed_ms": 70,
+    "valid": true
+   },
+   "edit": {
+    "full_image_pixel_bytes": 805306368,
+    "region": {
+     "x": 8192,
+     "y": 8192,
+     "width": 64,
+     "height": 64
+    },
+    "read_ms": 20.4031,
+    "write_ms": 0.4136,
+    "commit_ms": 428.2133,
+    "cache": {
+     "hits": 1,
+     "misses": 1,
+     "evictions": 0,
+     "decoded_tiles": 1,
+     "rejected_tiles": 0,
+     "resident_tiles": 1,
+     "current_bytes": 786432,
+     "peak_bytes": 786432,
+     "decode_time_ms": 20.0879,
+     "budget_bytes": 16777216,
+     "within_budget": true
+    },
+    "history": {
+     "undo_depth": 1,
+     "current_bytes": 786496,
+     "peak_bytes": 786496,
+     "dropped_entries": 0,
+     "budget_bytes": 33554432,
+     "within_budget": true
+    },
+    "dirty": {
+     "tile_count": 1,
+     "bytes": 0
+    },
+    "commit": {
+     "tiles_rewritten": 1,
+     "tiles_copied": 1023,
+     "copied_payload_bytes": 115386554,
+     "rewritten_payload_bytes": 108291,
+     "file_size": 115535873
+    },
+    "payload_identity": {
+     "identical_tiles": 1023,
+     "changed_tiles": 1,
+     "untouched_payloads_byte_identical": true
+    },
+    "pixels_read_back_exact": true,
+    "memory": {
+     "working_set_before_bytes": 5963776,
+     "working_set_peak_bytes": 11173888,
+     "working_set_delta_bytes": 5210112,
+     "heap_peak_bytes": 6082097,
+     "heap_delta_bytes": 1123029,
+     "pagefile_peak_bytes": 25280
+    },
+    "tile_size": 512
+   },
+   "process_peak": {
+    "peak_working_set_bytes": 11173888,
+    "peak_heap_bytes": 6082097,
+    "allocations": 8944419
+   },
+   "wall_ms": 84574,
+   "command": [
+    "E:\\VPNG\\target\\release\\vpng-memory.exe",
+    "--width",
+    "16384",
+    "--height",
+    "16384",
+    "--format",
+    "rgb8",
+    "--tile-size",
+    "512",
+    "--work-dir",
+    "benchmarks\\results\\memory-work",
+    "--cache-bytes",
+    "16777216",
+    "--history-bytes",
+    "33554432",
+    "--output",
+    "benchmarks\\results\\memory-work\\case-16384-rgb8.json"
+   ],
+   "verdict": "PASS",
+   "failures": [],
+   "id": "16384x16384-rgb8",
+   "resolution": 16384,
+   "format": "rgb8",
+   "elapsed_ms": 84574
+  },
+  {
+   "case": {
+    "width": 16384,
+    "height": 16384,
+    "format": "RGBA16",
+    "tile_size": 512,
+    "canonical_bytes": 2147483648,
+    "cache_budget_bytes": 16777216,
+    "history_budget_bytes": 33554432
+   },
+   "baseline": {
+    "working_set_bytes": 3215360,
+    "heap_bytes": 1227
+   },
+   "write": {
+    "file_size_bytes": 171237665,
+    "payload_bytes": 171196637,
+    "framing_bytes": 41028,
+    "tile_count": 1024,
+    "codec_histogram": {
+     "predictor": 1024
+    },
+    "elapsed_ms": 199545,
+    "peak_heap_bytes": 9256371,
+    "peak_working_set_bytes": 13791232,
+    "tile_buffer_bytes": 2097152
+   },
+   "write_memory": {
+    "heap_peak_bytes": 9256371,
+    "working_set_at_end_bytes": 3747840,
+    "peak_working_set_bytes": 13791232,
+    "working_set_delta_bytes": 10575872
+   },
+   "verification": {
+    "tile_count": 1024,
+    "checked_tiles": 3,
+    "mismatches": 0,
+    "elapsed_ms": 137,
+    "valid": true
+   },
+   "edit": {
+    "full_image_pixel_bytes": 2147483648,
+    "region": {
+     "x": 8192,
+     "y": 8192,
+     "width": 64,
+     "height": 64
+    },
+    "read_ms": 48.6715,
+    "write_ms": 2.1233,
+    "commit_ms": 693.6528,
+    "cache": {
+     "hits": 1,
+     "misses": 1,
+     "evictions": 0,
+     "decoded_tiles": 1,
+     "rejected_tiles": 0,
+     "resident_tiles": 1,
+     "current_bytes": 2097152,
+     "peak_bytes": 2097152,
+     "decode_time_ms": 43.5243,
+     "budget_bytes": 16777216,
+     "within_budget": true
+    },
+    "history": {
+     "undo_depth": 1,
+     "current_bytes": 2097216,
+     "peak_bytes": 2097216,
+     "dropped_entries": 0,
+     "budget_bytes": 33554432,
+     "within_budget": true
+    },
+    "dirty": {
+     "tile_count": 1,
+     "bytes": 0
+    },
+    "commit": {
+     "tiles_rewritten": 1,
+     "tiles_copied": 1023,
+     "copied_payload_bytes": 171036008,
+     "rewritten_payload_bytes": 165252,
+     "file_size": 171242288
+    },
+    "payload_identity": {
+     "identical_tiles": 1023,
+     "changed_tiles": 1,
+     "untouched_payloads_byte_identical": true
+    },
+    "pixels_read_back_exact": true,
+    "memory": {
+     "working_set_before_bytes": 3543040,
+     "working_set_peak_bytes": 17342464,
+     "working_set_delta_bytes": 13799424,
+     "heap_peak_bytes": 13126070,
+     "heap_delta_bytes": 3869699,
+     "pagefile_peak_bytes": 25280
+    },
+    "tile_size": 512
+   },
+   "process_peak": {
+    "peak_working_set_bytes": 17342464,
+    "peak_heap_bytes": 13126070,
+    "allocations": 8944419
+   },
+   "wall_ms": 200639,
+   "command": [
+    "E:\\VPNG\\target\\release\\vpng-memory.exe",
+    "--width",
+    "16384",
+    "--height",
+    "16384",
+    "--format",
+    "rgba16",
+    "--tile-size",
+    "512",
+    "--work-dir",
+    "benchmarks\\results\\memory-work",
+    "--cache-bytes",
+    "16777216",
+    "--history-bytes",
+    "33554432",
+    "--output",
+    "benchmarks\\results\\memory-work\\case-16384-rgba16.json"
+   ],
+   "verdict": "PASS",
+   "failures": [],
+   "id": "16384x16384-rgba16",
+   "resolution": 16384,
+   "format": "rgba16",
+   "elapsed_ms": 200640
+  }
+ ]
+}

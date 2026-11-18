@@ -7,6 +7,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod experimental;
 pub mod palette;
 pub mod predictor;
 pub mod raw;

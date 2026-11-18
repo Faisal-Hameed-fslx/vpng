@@ -7,8 +7,12 @@ members = [
     "crates/vpng-tiling",
     "crates/vpng-encoder",
     "crates/vpng-decoder",
+    "crates/vpng-editing",
+    "crates/vpng-fuzzing",
     "crates/vpng-testkit",
     "crates/vpng-cli",
+    "crates/vpng-research",
+    "crates/vpng-validation",
 ]
 
 [workspace.package]
@@ -27,6 +31,10 @@ vpng-codecs = { path = "crates/vpng-codecs" }
 vpng-tiling = { path = "crates/vpng-tiling" }
 vpng-encoder = { path = "crates/vpng-encoder" }
 vpng-decoder = { path = "crates/vpng-decoder" }
+vpng-editing = { path = "crates/vpng-editing" }
+vpng-fuzzing = { path = "crates/vpng-fuzzing" }
+vpng-testkit = { path = "crates/vpng-testkit" }
+vpng-validation = { path = "crates/vpng-validation" }
 crc32c = "0.6"
 sha2 = "0.10"
 png = "0.17"

@@ -264,7 +264,11 @@ pub fn encode(image: &CanonicalImage, options: &EncodeOptions) -> Result<EncodeR
 /// ([`ErrorKind::UnsupportedFeature`]) is skipped, and the smallest payload
 /// wins. Because the ids are visited in ascending order and a candidate must be
 /// *strictly* smaller to replace the incumbent, ties go to the lowest id.
-fn select_payload(
+///
+/// The function is public so the editing engine rewrites a tile exactly the
+/// way the encoder would. Sharing the selection keeps a re-encoded tile from
+/// differing from the tile the encoder would have produced.
+pub fn select_payload(
     tile: &[u8],
     ctx: &EncodeContext,
     options: &EncodeOptions,

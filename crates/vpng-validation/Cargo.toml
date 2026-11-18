@@ -1,0 +1,26 @@
+[package]
+name = "vpng-validation"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors = ["VPNG contributors"]
+description = "Memory validation and editing benchmarks for the VPNG editing engine."
+
+[dependencies]
+vpng-core.workspace = true
+vpng-container.workspace = true
+vpng-codecs.workspace = true
+vpng-decoder.workspace = true
+vpng-encoder.workspace = true
+vpng-editing.workspace = true
+vpng-testkit.workspace = true
+vpng-tiling.workspace = true
+
+[[bin]]
+name = "vpng-memory"
+path = "src/bin/vpng-memory.rs"
+
+[[bin]]
+name = "vpng-editing-bench"
+path = "src/bin/vpng-editing-bench.rs"

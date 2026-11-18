@@ -35,7 +35,7 @@ treated as attacker-controlled.
 | T12 | Recursion / stack exhaustion | parsing is flat and iterative; no recursive descent | container, decoder |
 | T13 | Metadata code execution | v0.1 has no metadata chunks at all | spec section 1.1 |
 | T14 | Network access during decode | none exists; no network code in any crate | all crates |
-| T15 | Interrupted edit destroys the file | not implemented yet; P4 mandates atomic replacement | roadmap P4 |
+| T15 | Interrupted edit destroys the file | the save writes a temporary file in the same directory, `sync_all`s it, and renames it over the target; the original is never written to. Two injected failure points (`AfterBytes`, `BeforeRename`) both leave the original byte-identical and leave no partial file behind | `vpng-editing` (`commit.rs`), `docs/P4_EDITING_ENGINE_REPORT.md` |
 | T16 | Silent weakening of losslessness | exact-bytes tests, canonical digest checks, `verify` command | tests, CLI |
 
 ## 4. Out of scope for v0.1

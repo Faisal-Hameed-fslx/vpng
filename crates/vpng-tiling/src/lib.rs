@@ -155,6 +155,17 @@ impl TileGrid {
         Ok((row as usize) * (self.columns as usize) + (col as usize))
     }
 
+    /// The geometry of the tile at a row-major index.
+    pub fn geometry_for_index(&self, index: usize) -> Result<TileGeometry> {
+        let columns = self.columns as usize;
+        if columns == 0 || index >= columns * self.rows as usize {
+            return Err(Error::invalid(format!(
+                "tile index {index} is out of range"
+            )));
+        }
+        self.geometry((index % columns) as u32, (index / columns) as u32)
+    }
+
     /// Iterate every tile in row-major order.
     pub fn iter(&self) -> TileGridIter<'_> {
         TileGridIter {
