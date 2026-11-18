@@ -155,10 +155,24 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Install the script dependencies
+        # The corpus scripts import Pillow (the baseline encoders and the
+        # canonicaliser) and numpy (the synthetic generator and the seed
+        # corpus). Without them the scripts cannot even be imported, so the
+        # "must show its help" checks below would fail for the wrong reason.
+        run: python -m pip install --upgrade pillow numpy
       - name: The scripts must parse
         run: |
           python -m compileall -q benchmarks python
       - name: The research runner must show its help
         run: python benchmarks/corpus/run_research.py --help
+      - name: The corpus runner must show its help
+        run: python benchmarks/corpus/run_corpus.py --help
+      - name: The seed generator must show its help
+        run: python benchmarks/corpus/seed.py --help
+      - name: The synthetic generator must show its help
+        run: python benchmarks/stress/gen_synthetic.py --help
+      - name: The memory runner must show its help
+        run: python benchmarks/memory/run_memory.py --help
       - name: The reports must match the raw data
         run: python benchmarks/verify_reports.py
