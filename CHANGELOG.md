@@ -70,6 +70,11 @@ separately as major.minor in the header.
     (`crash-32233a96f431ba8ee472ae5d927905192ef267aa`) is stored as a
     literal in `crates/vpng-fuzzing/tests/fuzz_regressions.rs` and replayed on
     every `cargo test` run.
+  * **The fix is re-verified by the fuzzer.** The CI run after the fix
+    (44274770109) executed all seven coverage-guided targets again —
+    78,850,985 executions, 0 findings — with the `header` target's coverage
+    up from 130 to 184 edges, the extra branch being the new dimension
+    check.
 
 ### Added
 
@@ -202,10 +207,11 @@ separately as major.minor in the header.
   `__sancov_pcs` sections and the weak `__start___sancov_*` anchors on ELF
   targets only, so a COFF target cannot link the fuzz target at all). The
   coverage-guided fuzzer **did** run in CI on Linux — 132,429,711 executions
-  across the seven targets, 0 findings in the first run (44264162940), and a
+  across the seven targets, 0 findings in the first run (44264162940), a
   second run (44266490454) that found the header defect recorded under
-  **Fixed** above. The deterministic harness — 200,000 iterations × 7 targets
-  = 1,400,000 executions — is the local evidence.
+  **Fixed** above, and a third run (44274770109) that re-verified the fix
+  (78,850,985 executions, 0 findings). The deterministic harness — 200,000
+  iterations × 7 targets = 1,400,000 executions — is the local evidence.
 * **No graphical editor.** The engine is a library and a benchmark.
 * The editing history is in memory only, temporary files left by a killed
   process are not swept, and there is no file locking.

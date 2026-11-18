@@ -55,10 +55,11 @@ format. The stable codec ids 4–6 are still reserved; the LZ77, CARC and hybrid
 codecs that were measured in the P3.5 study are **research-only** — their ids
 live in `0x80..=0xFF`, they cannot reach a file, and the decoder rejects a file
 that names one. Coverage-guided fuzzing runs in CI's nightly job on Linux —
-132,429,711 executions across seven targets in the first run, and a second run
+132,429,711 executions across seven targets in the first run, a second run
 that found a real defect (`Header::parse` accepted a zero-dimension header
-that `Header::to_bytes` refused to serialize; it is fixed and the exact crash
-input is replayed by the test suite) — but it cannot be run on the Windows-GNU
+that `Header::to_bytes` refused to serialize; it is fixed, the exact crash
+input is replayed by the test suite, and a third run of 78,850,985
+executions re-verified the fix) — but it cannot be run on the Windows-GNU
 development host: the AddressSanitizer runtime, LLVM's MSVC-only libFuzzer
 Windows build and rustc's ELF-only coverage module all stop it there (the
 toolchain and `cargo-fuzz` themselves install and run); the local evidence is

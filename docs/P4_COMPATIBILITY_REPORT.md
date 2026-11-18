@@ -21,8 +21,8 @@ and a CI workflow. **None of it changes the VPNG file format.**
 | The experimental codec ids | **unreachable from any file** |
 | The decoder's public API | **unchanged** (two pure additions: `derive_grid`, `select_payload`) |
 | The test suite | **green** |
-| Fuzzing | **clean locally, and it found one real defect in CI**: the deterministic harness ran 200,000 iterations × 7 targets = 1,400,000 executions with 0 findings; the coverage-guided fuzzer in CI on Linux found one genuine bug — `Header::parse` accepted a zero-dimension header that `Header::to_bytes` refused to serialize — which is fixed and pinned by a regression test (§3.1) |
-| CI | **9 jobs**, including a nightly coverage-guided fuzz job — **exercised on Linux**: the first run was clean, the second found the defect in §3.1, the third re-verifies the fix |
+| Fuzzing | **clean locally, and it found one real defect in CI**: the deterministic harness ran 200,000 iterations × 7 targets = 1,400,000 executions with 0 findings; the coverage-guided fuzzer in CI on Linux found one genuine bug — `Header::parse` accepted a zero-dimension header that `Header::to_bytes` refused to serialize — which is fixed, pinned by a regression test, and re-verified clean (§3.1) |
+| CI | **9 jobs**, including a nightly coverage-guided fuzz job — **exercised on Linux**: the first run was clean, the second found the defect in §3.1, the third re-verified the fix (78,850,985 executions, 0 findings) |
 | `cargo-fuzz` on this host | **BLOCKED** — the toolchain installs and the targets are correctly wired, but three platform limits stop the local run on `x86_64-pc-windows-gnu` (ASan unsupported, libFuzzer's Windows build is MSVC-only, rustc's coverage module is ELF-only); the deterministic harness is the local evidence |
 
 ---
@@ -248,6 +248,25 @@ end. One run therefore covers the whole target set instead of stopping at
 the first finding, and the crash artifacts are uploaded as an artefact so a
 finding can be reproduced locally.
 
+**Re-verification.** The run after the fix (44274770109) executed all seven
+targets again, 120 s each, **0 findings**:
+
+| Target | Executions | Coverage (edges) | Features | Corpus | Exec/s | Peak RSS |
+|---|---:|---:|---:|---:|---:|---:|
+| `header` | 25,213,799 | 184 | 202 | 21 | 208,378 | 519 MB |
+| `directory` | 20,166,894 | 248 | 789 | 34 | 166,668 | 647 MB |
+| `container` | 20,284,836 | 155 | 159 | 18 | 167,643 | 481 MB |
+| `tile_payload` | 4,194,847 | 338 | 698 | 225 | 34,668 | 444 MB |
+| `experimental_codec` | 3,302,782 | 756 | 1,543 | 447 | 27,295 | 534 MB |
+| `region` | 2,915,534 | 126 | 435 | 37 | 24,095 | 534 MB |
+| `editing` | 2,772,293 | 491 | 561 | 19 | 22,911 | 430 MB |
+| **Total** | **78,850,985** | | | | | |
+
+The `header` target's coverage is now **184 edges**, where it was 130 before
+the fix — the extra branch is the dimension check that `Header::parse` now
+performs. The run's log carries no `ERROR: libFuzzer` line and no
+`Test unit written` line.
+
 **Still BLOCKED on this host:** `cargo-fuzz` itself — not for the reason
 recorded before. The earlier blocker was the toolchain: `rustup toolchain
 install nightly` failed with a network timeout (`os error 10060`). **That is
@@ -350,7 +369,8 @@ on this host; it **has** run in CI on Linux. The first run (44264162940)
 executed all seven coverage-guided targets with 0 findings, and the
 `python` job's missing dependencies (Pillow and numpy) were found by that
 same run and fixed. The second run (44266490454) found the library defect
-in §3.1.
+in §3.1. The third (44274770109) re-verified the fix: 78,850,985
+executions, 0 findings.
 
 **Q10 — Is there a known wording discrepancy in the specification?**
 **It was recorded rather than silently decided, and it has now been resolved
@@ -406,13 +426,14 @@ either a new module or a pure addition of visibility.
   Windows-GNU target cannot support it (ASan, libFuzzer's MSVC-only
   Windows build and rustc's ELF-only coverage module). It **did** run in CI
   on Linux: 132,429,711 executions across the seven targets in the first
-  run, and a second run that found the defect in §3.1. That is a statement
-  about a Linux runner, not about this machine.
+  run, a second run that found the defect in §3.1, and a third run of
+  78,850,985 executions that re-verified the fix. That is a statement about
+  a Linux runner, not about this machine.
 * **No claim that fuzzing found no bugs in the library.** It found one — the
   header parse/serialize asymmetry in §3.1 — and fixed it. The
   deterministic harness (1,400,000 executions) and the coverage-guided runs
-  (132,429,711 executions in the first CI run) say nothing about the inputs
-  nobody has tried yet.
+  (132,429,711 executions in the first CI run, 78,850,985 in the third) say
+  nothing about the inputs nobody has tried yet.
 * **No claim that the fix is complete.** The fix makes `parse` and
   `to_bytes` agree about the dimensions. It does not claim that the two
   functions can never disagree about anything else; that is what the fuzz
@@ -451,7 +472,7 @@ either a new module or a pure addition of visibility.
 | 10 | The decoder's public API is unchanged | PASS |
 | 11 | The encoder's public API is unchanged | PASS |
 | 12 | The deterministic fuzzing harness is clean | PASS |
-| 13 | Coverage-guided fuzzing runs in CI | **PASS** — verified on Linux: run 44264162940 executed all seven targets (132,429,711 executions, 0 findings); run 44266490454 found a real defect (§3.1), which is fixed and pinned by a regression test |
+| 13 | Coverage-guided fuzzing runs in CI | **PASS** — verified on Linux: run 44264162940 executed all seven targets (132,429,711 executions, 0 findings); run 44266490454 found a real defect (§3.1), which is fixed and pinned by a regression test; run 44274770109 re-verified the fix (78,850,985 executions, 0 findings) |
 | 14 | Coverage-guided fuzzing ran on this host | **BLOCKED** (platform: ASan, MSVC-only libFuzzer, ELF-only rustc coverage module) |
 | 15 | The CI workflow runs on push, pull request and dispatch | PASS |
 | 16 | The specification's `default_codec` wording is consistent with the code | **PASS** (resolved 2026-11-18: the byte is informational; §2.3, with a conformance test) |
