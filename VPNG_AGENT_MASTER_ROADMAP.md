@@ -1613,7 +1613,7 @@ and where they belong.
 | Capability | Phase | Notes |
 |---|---|---|
 | Multiresolution preview pyramid (mipmaps) | P6 | More than one grid of tiles; a format revision. |
-| Parallel tile decoding | P5 | The scheduler and the worker pool exist; the prefetch policy and the acceptance benchmark are left. |
+| Parallel tile decoding | P5 | **Done.** The streaming reader, the bounded scheduler, the parallel worker pool, the predictive prefetch and the acceptance benchmark are all in place. The 16K RGBA8 acceptance case ran: 63.56 ms for the first viewport against the sequential baseline's 118.96 ms, 16 of 4,096 tiles decoded, 47.9 MB peak resident set. A 144-case matrix asserts every parallel tile is byte-identical to the sequential decoder's. Evidence: `docs/P5_REPORT.md`. |
 | Streaming reader and viewport priority | P5 | Done for local files (`vpng-source`, `vpng-view`); the HTTP Range variant is P13. |
 | Python bindings | P9 | The same engine, not a second implementation of it. |
 | Adaptive tiling and advanced codecs | P7 and P2 | Variable tile sizes and the reserved stable ids 4&#8211;6. A research codec is promoted only after a specification update, a version bump, a migration policy and compatibility tests. |

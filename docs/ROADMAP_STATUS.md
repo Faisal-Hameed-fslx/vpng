@@ -27,6 +27,16 @@ No Visual Studio is required: the GNU host ships `rust-lld` and a
 
 ## 2. Phase gates
 
+> **Two numberings are in this file, and they collide.** This table uses
+> the **original** master-roadmap numbering, in which **P5 = preview and
+> multiresolution** and **P6 = 16K and memory engineering**. §2.1 below
+> uses the **forward-plan** numbering, in which **P5 = streaming and
+> parallel decoding** and **P6 = the preview pyramid**. The old numbering
+> stays authoritative for work already done; the forward plan renumbers
+> the remaining work. Where this table says "P5" it means *preview*, and
+> where §2.1 says "P5" it means *streaming and parallel decoding*. The
+> forward-plan names are always qualified ("forward P5").
+
 | Phase | Gate summary | Status | Evidence |
 |-------|--------------|--------|----------|
 | P0 — repository audit and specification | unambiguous field sizes; executable serialization tests; reproducible build env | **PASS** | `vpng-container` 19 tests pass (header is exactly 64 bytes, directory entry exactly 40 bytes, round-trips exact, checksum detects a flipped byte). Build environment recorded in §1 and `docs/REPOSITORY_AUDIT.md`. |
@@ -34,8 +44,8 @@ No Visual Studio is required: the GNU host ships `rust-lld` and a
 | P2 — baseline codecs | palette, RLE, predictor, LZ77, entropy | **PARTIAL** | Palette (id 1) implemented with byte-level golden vectors, whole-file golden fixture, and property tests (§3.1, A06); RLE (id 2) implemented with byte-level golden vectors, a whole-file golden fixture, and conformance tests (§3.2, A07); Predictor+entropy (id 3) implemented with seven spatial predictors, per-row measured-cost selection, an adaptive arithmetic coder, byte-level golden vectors, a whole-file golden fixture, and conformance/property tests (§3.3, A08). LZ77 (id 4), predictor+dictionary (id 5), and context-adaptive entropy (id 6) remain reserved and are rejected on decode. Cost-based per-tile selection with a Raw fallback is implemented and tested. |
 | P3 — adaptive tiling, region decode | region == crop; coverage validation; bounded cache; parallel decode | **PARTIAL** | Fixed-grid region decode and exact-coverage validation pass (`region_decode_equals_full_decode_crop`). A **bounded byte-budget LRU tile cache** now exists and is tested (`the_cache_evicts_when_the_budget_is_exceeded`; A14). The **parallel decode engine** now exists and is measured: `crates/vpng-view` decodes a 16K viewport in 63.56 ms against the sequential baseline's 118.96 ms, and its tiles are byte-identical to the sequential decoder's (`docs/P5_REPORT.md` §3.1, Q11). The parallel half of this gate is closed by measurement. Adaptive (variable-size) tiling is still not started. |
 | P4 — editing engine | localized edit; payload reuse; crash safety; undo/redo | **PASS** | The engine is implemented in `crates/vpng-editing` (51 tests). A localized edit decodes 1 tile of 64 and modifies 1; 63 of 64 payloads are preserved byte for byte and 1 is rewritten; BEGIN/COMMIT/ABORT, atomic copy-on-write save, and two injected failure points all preserve the original; undo/redo restore the pixels exactly. A successful commit is a **new baseline**: undo and redo cannot cross it, while a failed commit preserves the whole editing state. The design decisions it resolved are ADR-0012 (atomic replacement, §18.9/§18.10) and ADR-0013 (cache eviction, §18.13). Evidence: `docs/P4_EDITING_ENGINE_REPORT.md`, `benchmarks/p4_editing_results.json`. |
-| P5 — preview and multiresolution | thumbnail, pyramid | **NOT STARTED** | |
-| P6 — 16K and memory engineering | 16K stress; streaming; budgets | **PARTIAL** | A tile-by-tile streaming writer and a 12-case memory matrix now exist: 4096², 8192² and 16384² × {gray8, rgb8, rgba8, rgba16}, **12 PASS / 0 FAIL / 0 BLOCKED**. The 16384×16384 RGBA16 case (2 GiB of canonical pixels) writes in an 8.8 MB heap peak and edits with a 13.2 MB resident-set growth, against a 64 MB target. A bounded cache and a bounded history are implemented. The parallel engine is now measured on a 16K workload: a full viewing run peaks at 47.9 MB of resident set and 43.8 MB of heap against the 64 MB target (`docs/P5_REPORT.md` §3.5). Evidence: `docs/P4_MEMORY_VALIDATION.md`, `benchmarks/p4_memory_results.json`, and `benchmarks/p5_view_results.json`. |
+| P5 — preview and multiresolution | thumbnail, pyramid | **NOT STARTED** | Not started. This is the *old* P5; the preview pyramid is **forward P6** (§2.1). The gate asks for a derived level that is explicitly marked as derived, an exact original level, and a measured time-to-first-preview — none of it exists yet. |
+| P6 — 16K and memory engineering | 16K stress; streaming; budgets | **PARTIAL** | A tile-by-tile streaming writer and a 12-case memory matrix now exist: 4096², 8192² and 16384² × {gray8, rgb8, rgba8, rgba16}, **12 PASS / 0 FAIL / 0 BLOCKED**. The 16384×16384 RGBA16 case (2 GiB of canonical pixels) writes in an 8.8 MB heap peak and edits with a 13.2 MB resident-set growth, against a 64 MB target. A bounded cache and a bounded history are implemented. The parallel engine is now measured on a 16K workload: a full viewing run peaks at 47.9 MB of resident set and 43.8 MB of heap against the 64 MB target (`docs/P5_REPORT.md` §3.5). **Still open:** the streaming *encoder* that picks a codec per tile as it goes (the release plan's v0.19) and the parallel *encoder* that must produce byte-identical files from one thread and four (v0.18). Evidence: `docs/P4_MEMORY_VALIDATION.md`, `benchmarks/p4_memory_results.json`, and `benchmarks/p5_view_results.json`. |
 | P7 — compression research | controlled experiments | **PARTIAL** | Eleven codecs were measured on identical pixels and identical tile layouts: the four stable codecs, four context-adaptive residual models (CARC A–D), an LZ77 dictionary codec and three hybrids, with pinned golden vectors for each. Every image was also measured against PNG, WebP lossless and JPEG XL lossless, so every column of the comparison shares one denominator. The results are in `benchmarks/p3_5_raw_results.json` (per-image, per-tile, per-category, per-resolution, aggregate and worst-case) and `benchmarks/p3_5_comparison.csv`. The **750-image corpus and statistical reporting do not exist**; the study is a 9-image seed. Evidence: `docs/P3_5_COMPRESSION_RESEARCH_REPORT.md`. |
 | P8 — 10 MB target evaluation | exact accounting; honest failure | **PARTIAL** | Exact size accounting passes (`size_accounting_is_exact`); refusal is honest and typed (`--max-size 1024` → exit 6 reporting the smallest lossless size 240,148). A 9-image seed corpus exists, but the 750-image target is unmet, so the per-category success distribution is unmeasured. |
 | P9 — Python API | bindings around Rust | **NOT STARTED** | CLI-driver tooling only. |
@@ -75,7 +85,7 @@ not lost.
 | Capability | Source of the proposal | Phase | State | What it needs |
 |---|---|---|---|---|
 | Multiresolution preview pyramid (mipmaps) | already in the roadmap | **P6** | NOT STARTED | A pyramid layout in the container: more than one grid of tiles, plus the rule that lets a reader pick a level. A format revision, with the thumbnail level written by the encoder and verified by the decoder. |
-| Parallel tile decoding | already in the roadmap | **P5** | IN PROGRESS | Stage 1 (the streaming reader), stage 2 (the bounded scheduler) and stage 3 (the worker pool) are done. What is left is the prefetch policy and the acceptance benchmark. |
+| Parallel tile decoding | already in the roadmap | **P5** | **DONE** | All six stages are done: the streaming reader (`vpng-source`), the bounded scheduler, the parallel worker pool, the predictive prefetch, and the acceptance benchmark. The 16K RGBA8 acceptance case **ran**: the first viewport takes 63.56 ms against the sequential baseline's 118.96 ms, only 16 of 4,096 tiles are decoded, and the whole run peaks at 47.9 MB of resident set against the 64 MB target. A 144-case matrix asserts every parallel tile is byte-identical to the sequential decoder's. Prefetch is measured, not assumed — it helps at 16K and does not help at 2K, and both runs are kept. Evidence: `docs/P5_REPORT.md`, `benchmarks/p5_view_results.json`, `benchmarks/p5_view_results_small.json`. |
 | Streaming reader and viewport priority | already in the roadmap | **P5** | DONE for local files | `crates/vpng-source` and the scheduler in `crates/vpng-view`. The proposal also suggested HTTP Range streaming, which is tracked separately as **P13**. |
 | Python bindings | already in the roadmap | **P9** | NOT STARTED | Native bindings returning NumPy arrays over the same engine, not a re-implementation of it. |
 | Adaptive tiling and advanced codecs | already in the roadmap | **P7** and **P2** | NOT STARTED | Variable tile sizes, and the reserved stable codec ids 4–6. A research codec is promoted to a stable id only after a specification update, a version bump, a migration policy and compatibility tests — in that order. The research ids `0x80..=0xFF` cannot reach a file; a decoder rejects one with `UnsupportedFeature`. |
@@ -267,7 +277,7 @@ Integrity is therefore layered and each command states its own scope:
 | A10 | Entropy coder | golden vectors | **PASS** | The arithmetic coder behind stable codec 3 is implemented with a pinned golden vector and per-row measured predictor selection (A08). A research-only context-adaptive entropy stage with 5 symbol groups exists for the hybrids (`crates/vpng-codecs/src/experimental/entropy.rs`), and CARC A–D add 256 integer probability blocks per tile. Stable id 6 remains reserved. |
 | A11 | Tile-only decode | instrumented test | **PASS** | `single_tile_decode_matches_full_image`, `region_does_not_decode_unrelated_tiles` |
 | A12 | Region decode | crop equality test | **PASS** | `region_decode_equals_full_decode_crop` (5 rects × 8 formats) |
-| A13 | Parallel decode | determinism test | NOT STARTED | |
+| A13 | Parallel decode | determinism test | **PASS** | The parallel engine never changes *what* it decodes, only *when*. `crates/vpng-view/tests/parallel_matrix.rs` checks **144 cases** — all eight v0.1 pixel formats × six representative sizes × three tile geometries (16, 64, 256) — and asserts that every tile the pool produces is byte-identical to the sequential decoder's. The unit test `the_pool_produces_the_same_pixels_as_the_sequential_decoder` does the same for a 512 × 384 file with 48 tiles through four workers, and the acceptance benchmark compares the first viewport's 16 tiles again at 16K. The pool also has one decode per tile (`AlreadyInFlight`), and a tile whose decode lands after a pan is kept when the new viewport still wants it (83 such results in the 16K run). Evidence: `docs/P5_REPORT.md` §3.1 and Q11. |
 | A14 | Bounded cache | allocation test | **PASS** | `TileCache` is a strict LRU with a **byte** budget (`with_cache_bytes`), not a tile count. `the_cache_evicts_when_the_budget_is_exceeded`; the benchmark's cache scenario fills a 524,288-byte budget exactly with 2 evictions and never exceeds it. A tile larger than the whole budget is rejected rather than cached. |
 | A15 | Localized edit | instrumented test | **PASS** | `a_region_read_does_not_decode_unrelated_tiles`, `a_region_write_changes_only_the_tiles_it_intersects`, `the_engine_never_holds_a_full_image_buffer`. Measured: a 64×64 edit on 2048×2048 decodes 1 tile of 64 and dirties 1 (1.5625% of the image); on 16384² it decodes 1 tile of 1,024. |
 | A16 | Undo/redo | exact hash tests | **PASS** | `undo_and_redo_restore_the_pixels_exactly`, `undo_makes_a_tile_clean_again`, `undo_with_no_history_reports_that_there_is_nothing_to_do`, `a_new_edit_invalidates_the_redo_chain`. The benchmark confirms `undo_restores_pixels` and `redo_restores_pixels` with a byte-exact region comparison. |
@@ -378,8 +388,9 @@ parallel-decode coverage matrix added 1 integration test over 144 cases
 
 ## 7. Not yet measured (explicitly no claims)
 
-Corpus success rate under 10 MB, general 16K **performance**, parallel
-decode, and streaming *latency* remain unmeasured. Palette demonstrably
+Corpus success rate under 10 MB and general 16K **performance** remain
+unmeasured. Parallel decode *is* now measured (`docs/P5_REPORT.md`), but
+only for the parameters recorded there. Palette demonstrably
 shrinks palette-friendly tiles (CLI §3.1: 7.148x on a synthetic two-colour
 image) and Run-length shrinks flat tiles (CLI §3.2: 33.851x on a synthetic
 flat image). The predictor codec shrinks smooth and photographic content
@@ -404,6 +415,23 @@ What is **still** not claimed:
 * **No 16K performance claim.** The 12-case matrix reports memory and
   wall-clock times on one host; the writes take 2–461 s and are dominated
   by the predictor codec's arithmetic coding.
+* **No general "P5 is faster" claim.** The parallel engine's speedup is
+  1.87× on the first viewport of one file, with 8 workers, against the
+  sequential baseline measured in the same run. It is not a claim about
+  other images, other worker counts, or other hardware.
+* **No claim that prefetching always helps.** The radius sweep shows it
+  helping at 16K (best radius 2) and *not* helping at 2K (best radius 0).
+  Both runs are kept, including the unfavourable one.
+* **No statistical confidence in the P5 figures.** Each scenario is one
+  run. The variance between separate invocations is visible in the raw
+  files — the standalone no-prefetch pan (415.94 ms) and the sweep's
+  radius-0 run (316.91 ms) are the same measurement on the same file and
+  differ by roughly a quarter — so the comparisons are taken from the
+  sweep, which runs the radii back to back in one process.
+* **No latency matrix for the parallel engine.** The byte-identity
+  correctness matrix covers 144 cases (8 formats × 6 sizes × 3 tile
+  geometries), but how the *latency* moves with the tile size, the viewport
+  size and the worker count is not measured.
 * **No edit-latency claim against another editor.** The editing timings
   are measurements on this host with no baseline to compare against.
 * **No coverage-guided fuzzing result *on this host*.** The deterministic
@@ -414,6 +442,8 @@ What is **still** not claimed:
 * **No claim that the fuzzing found everything.** It found one real defect
   (§A22). That is a statement about the inputs that were tried, not a proof
   that the library has no others.
+* **No graphical editor.** The engine is a library. There is no window, no
+  pan-and-zoom widget, and no UI in this repository.
 
 Raw stays ≈1.0x and remains the guaranteed fallback. The 16384×16384 RGBA8
 case that was skipped in §3.4 for insufficient free memory has since been
