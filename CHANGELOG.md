@@ -8,6 +8,13 @@ separately as major.minor in the header.
 
 ### Added
 
+* **The parallel-decode coverage matrix.**
+  `crates/vpng-view/tests/parallel_matrix.rs` checks **144 cases** — all
+  eight v0.1 pixel formats × six representative sizes × three tile
+  geometries (16, 64, 256) — and asserts that every tile the pool produces
+  is byte-identical to the sequential decoder's. The promise the engine
+  rests on is now checked across the whole format, not just one file.
+
 * **P5 is closed — the 16K acceptance case ran.** The raw data is
   `benchmarks/p5_view_results.json` (16K) and
   `benchmarks/p5_view_results_small.json` (2K), and the report is
@@ -331,7 +338,7 @@ separately as major.minor in the header.
   findings**, 3.9 s in the release profile. The *deterministic* harness found
   no library defect; the *coverage-guided* fuzzer, run in CI on Linux, found
   one (see **Fixed** below).
-* The test suite is **350 passed / 0 failed** (was 181).
+* The test suite is **351 passed / 0 failed** (was 181).
 
 ### Known limitations
 

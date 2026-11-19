@@ -18,7 +18,7 @@
 | Default host | `x86_64-pc-windows-gnu` |
 | Active toolchain | overridden by `E:\VPNG\rust-toolchain.toml` |
 | `cargo build --workspace` | **exit 0**, `Finished dev profile ... in 3.85s` |
-| `cargo test --workspace --all-targets` | **exit 0**, `350 passed; 0 failed` |
+| `cargo test --workspace --all-targets` | **exit 0**, `351 passed; 0 failed` |
 | `cargo fmt --all --check` | **exit 0**, no diffs |
 | `cargo clippy --workspace --all-targets` | **exit 0**, zero warnings |
 
@@ -300,6 +300,7 @@ profiles, `x86_64-pc-windows-gnu`.
 | `vpng-fuzzing` `tests/fuzz_regressions.rs` | 3 | ok |
 | `vpng-source` unit | 11 | ok |
 | `vpng-view` unit | 38 | ok |
+| `vpng-view` `tests/parallel_matrix.rs` | 1 | ok (144 cases) |
 | `vpng-research` bin | 0 | ok |
 | `vpng-testkit` unit | 2 | ok |
 | `tests/default_codec.rs` | 7 | ok |
@@ -314,7 +315,7 @@ profiles, `x86_64-pc-windows-gnu`.
 | `vpng-validation` unit | 2 | ok |
 | `vpng-validation` bins | 0 | ok |
 | Doc-tests | 0 | ok |
-| **Total** | **350** | **350 passed, 0 failed** |
+| **Total** | **351** | **351 passed, 0 failed** |
 
 The 115 new tests are: 52 codec tests (22 LZ77, 14 CARC, 12 hybrids, plus
 the registry and entropy-stage tests), 51 editing tests, 3 fuzzing tests,
@@ -371,7 +372,9 @@ conformance tests (289 → 296); the coverage-guided fuzzing fix added 2 header
 unit tests and 3 regression tests that replay the fuzzer's crash artifact
 (296 → 301); the P5 streaming reader added 11 tests (301 → 312); the P5
 scheduler added 17 (312 → 329); the P5 worker pool added 8 (329 → 337); the P5
-prefetch policy added 12 viewport tests and 1 scheduler test (337 → 350).
+prefetch policy added 12 viewport tests and 1 scheduler test (337 → 350); the
+parallel-decode coverage matrix added 1 integration test over 144 cases
+(350 → 351).
 
 ## 7. Not yet measured (explicitly no claims)
 
@@ -438,9 +441,12 @@ by `benchmarks/verify_reports.py`. The work continues in this order:
   says **not** to promote any of the research codecs on the current
   evidence; a promotion needs a specification update, a version bump, a
   migration policy and compatibility tests, in that order.
-* **The parallel-decode coverage matrix.** The parallel-vs-sequential
-  byte-identity test covers one file; the format-and-geometry matrix for
-  parallel decode is the next correctness item.
+* **The parallel-decode coverage matrix is done.** The integration test
+  `crates/vpng-view/tests/parallel_matrix.rs` checks 144 cases — all eight
+  v0.1 pixel formats × six representative sizes × three tile geometries —
+  and asserts that every tile the pool produces is byte-identical to the
+  sequential decoder's. What is not measured is how the latency moves with
+  the tile size, the viewport size and the worker count.
 
 Two housekeeping items were carried forward from this milestone. One is now
 closed and one is still open:

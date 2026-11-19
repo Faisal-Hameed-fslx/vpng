@@ -319,12 +319,16 @@ P4 property is unchanged: P5 does not weaken it.
 
 **Q11 — Are the parallel results byte-identical to the sequential
 decoder's?**
-**Yes, measured two ways.** The benchmark decodes the same 16 tiles with
+**Yes, measured three ways.** The benchmark decodes the same 16 tiles with
 the pool and with the ordinary decoder and compares them: **16 of 16
 identical, 0 different** (and 4 of 4 at 2K). The unit test
 `the_pool_produces_the_same_pixels_as_the_sequential_decoder` does the
-same for a 512 × 384 file with 48 tiles through four workers. The parallel
-engine changes *when* a tile is decoded, never *what* it decodes.
+same for a 512 × 384 file with 48 tiles through four workers. The
+integration test `crates/vpng-view/tests/parallel_matrix.rs` widens it to
+**144 cases** — all eight v0.1 pixel formats × six representative sizes ×
+three tile geometries (16, 64, 256) — and asserts that every tile of every
+case is byte-identical. The parallel engine changes *when* a tile is
+decoded, never *what* it decodes.
 
 **Q12 — What is not measured, and what remains untested?**
 The limits are listed in §6. The three that matter most: the sweep is one
@@ -383,9 +387,10 @@ write when the file is already there.
   roughly a quarter — so the comparisons in this report are taken from the
   sweep, which runs the radii back to back in one process.
 * **No claim about the other pixel formats or tile sizes.** The
-  acceptance case is RGBA8 with 256 × 256 tiles. The parallel-vs-sequential
-  byte-identity test covers one file; the format-and-geometry matrix for
-  parallel decode is not done.
+  *acceptance* case is RGBA8 with 256 × 256 tiles. The
+  parallel-vs-sequential byte-identity **correctness** matrix covers all
+  eight formats and three tile geometries (144 cases), but the *latency*
+  figures are for RGBA8 at 256 × 256 only.
 * **No graphical editor.** The engine is a library. There is no window,
   no pan-and-zoom widget, and no UI in this repository.
 
@@ -412,9 +417,10 @@ write when the file is already there.
   spatially adaptive layout would change both the compression and the
   shape of a viewport's tile set, and the prefetch policy would have to be
   re-measured on it.
-* **The parallel-decode coverage matrix.** The byte-identity test covers
-  one file. The format-and-geometry matrix for parallel decode is the
-  next correctness item, and it is cheap to run.
 * **The prefetch policy under other workloads.** The two runs here show
   the policy is workload-dependent. The honest next step is a small
   workload suite, not a larger prefetch radius.
+* **The latency matrix.** The byte-identity matrix is done (144 cases).
+  What is not measured is how the latency moves with the tile size, the
+  viewport size and the worker count — the parameters a caller actually
+  has to choose.
