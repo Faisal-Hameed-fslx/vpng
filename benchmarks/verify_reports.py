@@ -29,6 +29,108 @@ def close(a, b, tol=5e-5) -> bool:
     return abs(a - b) <= tol
 
 
+def check_p5() -> None:
+    """Check the P5 report against the two viewing result files."""
+    report = (REPO / "docs/P5_REPORT.md").read_text(encoding="utf-8")
+    big = json.loads((REPO / "benchmarks/p5_view_results.json").read_text(encoding="utf-8"))
+    small = json.loads((REPO / "benchmarks/p5_view_results_small.json").read_text(encoding="utf-8"))
+
+    def quoted(value, fmt) -> None:
+        text = format(value, fmt)
+        check(text in report, f"the report does not contain the figure {text!r}")
+
+    for data, label in ((big, "16K"), (small, "2K")):
+        r = data["report"]
+        s = r["scenarios"]
+        fv = s["first_viewport"]
+
+        # The file is the size the report says it is.
+        quoted(r["file"]["file_size_bytes"], ",")
+        quoted(r["file"]["tile_count"], ",")
+        quoted(fv["bytes_read"], ",")
+        quoted(s["sequential_baseline"]["bytes_read_from_file"], ",")
+        # The header and the directory are the difference between what the
+        # baseline read and what the pool's workers read.
+        header = s["sequential_baseline"]["bytes_read_from_file"] - fv["bytes_read"]
+        quoted(header, ",")
+
+        # The first viewport, and the baseline it is measured against.
+        quoted(fv["first_viewport_ms"], ".2f")
+        quoted(fv["open"]["elapsed_ms"], ".2f")
+        quoted(s["sequential_baseline"]["elapsed_ms"], ".2f")
+        ratio = s["sequential_baseline"]["elapsed_ms"] / fv["first_viewport_ms"]
+        quoted(round(ratio, 2), ".2f")
+
+        # The acceptance properties, not just the figures.
+        check(fv["only_viewport_tiles_decoded"], f"{label}: more than the viewport's tiles were decoded")
+        check(
+            fv["tiles_decoded"] == fv["viewport"]["visible_tiles"],
+            f"{label}: the decoded tile count is not the viewport's tile count",
+        )
+        check(
+            fv["pixel_identity"]["different_from_sequential"] == 0,
+            f"{label}: the parallel pixels differ from the sequential ones",
+        )
+        check(
+            fv["pixel_identity"]["identical_to_sequential"] == fv["viewport"]["visible_tiles"],
+            f"{label}: not every viewport tile was compared",
+        )
+        check(
+            s["edit_and_save"]["payload_identity"]["untouched_payloads_byte_identical"],
+            f"{label}: the untouched payloads changed",
+        )
+        check(s["edit_and_save"]["pixels_read_back_exact"], f"{label}: the pixels are not exact")
+        quoted(fv["memory"]["heap_peak_bytes"], ",")
+        quoted(fv["memory"]["working_set_peak_bytes"], ",")
+        quoted(fv["cache"]["peak_bytes"], ",")
+
+        # The prefetch sweep: every radius, including the losing ones.
+        comparison = s["prefetch_comparison"]
+        for radius in comparison["radii"]:
+            run = comparison["runs"][str(radius)]
+            quoted(run["total_ms"], ".2f")
+            quoted(run["visible_hit_rate"], ".4f")
+            quoted(run["tiles_decoded"], "d")
+            quoted(run["cancelled"], "d")
+        check("best_radius" in comparison, f"{label}: the sweep has no best radius")
+
+        # The two pan scenarios.
+        for key in ("pan_without_prefetch", "pan_with_prefetch"):
+            pan = s[key]
+            quoted(pan["total_ms"], ".2f")
+            quoted(pan["mean_ms"], ".2f")
+            quoted(pan["max_ms"], ".2f")
+            quoted(pan["tiles_decoded"], "d")
+            quoted(pan["scheduler"]["cancellation_rate"], ".4f")
+            quoted(pan["recovered_results"], "d")
+            quoted(pan["memory"]["working_set_peak_bytes"], ",")
+
+        # The memory figures for the whole run.
+        quoted(data["process"]["peak_working_set_bytes"], ",")
+        quoted(data["process"]["peak_heap_bytes"], ",")
+        check(
+            data["process"]["peak_working_set_bytes"] <= 64 * 1024 * 1024,
+            f"{label}: the resident set exceeds the 64 MB target",
+        )
+        check(
+            data["process"]["peak_heap_bytes"] <= 64 * 1024 * 1024,
+            f"{label}: the heap exceeds the 64 MB target",
+        )
+        check(fv["cache"]["within_budget"], f"{label}: the viewing cache is over its budget")
+
+    # The two workloads disagree about prefetch, and the report says so.
+    check(big["report"]["scenarios"]["prefetch_comparison"]["prefetch_reduced_total_latency"],
+          "the 16K sweep no longer shows prefetch helping")
+    check(not small["report"]["scenarios"]["prefetch_comparison"]["prefetch_reduced_total_latency"],
+          "the 2K sweep no longer shows prefetch not helping")
+    check(big["report"]["scenarios"]["prefetch_comparison"]["best_radius"] == 2,
+          "the best radius at 16K is not 2")
+    check(small["report"]["scenarios"]["prefetch_comparison"]["best_radius"] == 0,
+          "the best radius at 2K is not 0")
+    check("does not help" in report or "does not always" in report,
+          "the report does not record that prefetch can fail to help")
+
+
 def main() -> int:
     raw = json.loads((REPO / "benchmarks/p3_5_raw_results.json").read_text(encoding="utf-8"))
     report = (REPO / "docs/P3_5_COMPRESSION_RESEARCH_REPORT.md").read_text(encoding="utf-8")
@@ -255,6 +357,9 @@ def main() -> int:
               f"{attempt['failure_point']}: a temporary file was left behind")
     check(scenarios["cache-budget"]["within_budget"], "the cache scenario is over its budget")
     check(scenarios["history-budget"]["within_budget"], "the history scenario is over its budget")
+
+    # ---- the P5 viewing deliverable -----------------------------------------
+    check_p5()
 
     if problems:
         print(f"{len(problems)} problem(s):")

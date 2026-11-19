@@ -16,10 +16,13 @@
 //!   are dispatched in the order they arrived, so nothing is starved.
 //! * **A bounded queue.** The queue holds at most *N* requests. A full
 //!   queue refuses a `Prefetch` or `Background` request and does not block
-//!   the caller. A `Visible` request is never refused: when the queue is
-//!   full it displaces the least urgent request in it, because the tile the
-//!   user is looking at matters more than the tile we guessed they might
-//!   want.
+//!   the caller. A `Visible` request is refused only when every queued
+//!   request is visible too: it displaces the least urgent *less urgent*
+//!   request in the queue, because the tile the user is looking at
+//!   matters more than the tile we guessed they might want — but it never
+//!   displaces another visible request, since dropping one tile the user
+//!   is looking at to make room for another would help nobody. The caller
+//!   sizes the queue for its viewport.
 //! * **Cancellation by generation.** Every request carries the *viewport
 //!   generation* it was issued under. A new viewport advances the
 //!   generation, and every queued request from an older generation is
@@ -273,15 +276,24 @@ impl Scheduler {
                 self.counters.rejected_full += 1;
                 return SubmitOutcome::RejectedFull;
             }
-            // A visible request displaces the least urgent request in the
-            // queue: the tile the user is looking at matters more than the
-            // tile we guessed they might want.
-            if let Some(victim) = self.least_urgent() {
-                self.pending.remove(&victim);
-                self.counters.cancelled += 1;
-            } else {
-                self.counters.rejected_full += 1;
-                return SubmitOutcome::RejectedFull;
+            // A visible request displaces the least urgent *less urgent*
+            // request in the queue: the tile the user is looking at
+            // matters more than the tile we guessed they might want. It
+            // never displaces another visible request — dropping a tile
+            // the user is looking at to make room for a different tile the
+            // user is looking at would help nobody. When every queued
+            // request is visible, the queue is genuinely full and the
+            // request is refused; the caller sizes the queue for its
+            // viewport.
+            match self.least_urgent_below(spec.class) {
+                Some(victim) => {
+                    self.pending.remove(&victim);
+                    self.counters.cancelled += 1;
+                }
+                None => {
+                    self.counters.rejected_full += 1;
+                    return SubmitOutcome::RejectedFull;
+                }
             }
         }
 
@@ -396,13 +408,15 @@ impl Scheduler {
         }));
     }
 
-    /// The least urgent queued request: the one a visible request displaces.
+    /// The least urgent queued request of a class *less* urgent than
+    /// `class`: the one a request of `class` displaces.
     ///
     /// The queue is bounded and small, so a scan is cheaper than keeping a
     /// second structure in step with the first.
-    fn least_urgent(&self) -> Option<usize> {
+    fn least_urgent_below(&self, class: RequestClass) -> Option<usize> {
         self.pending
             .iter()
+            .filter(|(_, request)| request.class > class)
             .max_by_key(|(_, request)| (request.class, request.distance, request.sequence))
             .map(|(tile, _)| *tile)
     }

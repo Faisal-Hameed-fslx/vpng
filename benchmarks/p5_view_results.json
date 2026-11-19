@@ -1,0 +1,489 @@
+{
+  "report": {
+    "tool": "vpng-view-bench",
+    "parameters": {
+      "width": 16384,
+      "height": 16384,
+      "format": "RGBA8",
+      "tile_size": 256,
+      "workers": 8,
+      "viewport_width": 1024,
+      "viewport_height": 1024,
+      "prefetch_radius": 2,
+      "direction_reach": 2,
+      "direction_bonus": 4,
+      "pans": 12,
+      "pan_step": 512,
+      "cache_bytes": 33554432,
+      "queue_capacity": 256
+    },
+    "file": {
+      "path": "E:\\VPNG\\benchmarks\\work\\view-16384x16384-RGBA8.vpng",
+      "file_size_bytes": 140431266,
+      "tile_count": 4096,
+      "canonical_pixel_bytes": 1073741824,
+      "write_ms": 152660,
+      "reused": false
+    },
+    "memory_scope": {
+      "included": "the process's resident set (working set) and the allocator's tracked heap during the measured phase, including the decoded tiles held in the viewing cache and the payload buffers in flight",
+      "excluded": "the file on disk, the operating system's file cache, the memory of other processes, and the memory of the benchmark driver itself"
+    },
+    "scenarios": {
+      "first_viewport": {
+        "open": {
+          "elapsed_ms": 13.663900,
+          "tile_count": 4096
+        },
+        "viewport": {
+          "x": 7680,
+          "y": 7680,
+          "width": 1024,
+          "height": 1024,
+          "visible_tiles": 16,
+          "prefetch_tiles": 0
+        },
+        "first_viewport_ms": 63.563800,
+        "submitted_visible": 16,
+        "tiles_decoded": 16,
+        "only_viewport_tiles_decoded": true,
+        "pixel_identity": {
+          "tiles_compared": 16,
+          "identical_to_sequential": 16,
+          "different_from_sequential": 0,
+          "pixels_identical_to_sequential": true
+        },
+        "bytes_read": 540792,
+        "scheduler": {
+          "submitted": 16,
+          "accepted": 16,
+          "dispatched": 16,
+          "cancelled": 0,
+          "discarded_stale": 0
+        },
+        "cache": {
+          "hits": 0,
+          "misses": 16,
+          "evictions": 0,
+          "decoded_tiles": 16,
+          "resident_tiles": 16,
+          "current_bytes": 4194304,
+          "peak_bytes": 4194304,
+          "budget_bytes": 33554432,
+          "within_budget": true
+        },
+        "memory": {
+          "heap_peak_bytes": 12245903,
+          "working_set_peak_bytes": 15015936,
+          "working_set_delta_bytes": 11358208,
+          "heap_delta_bytes": 10412093
+        }
+      },
+      "sequential_baseline": {
+        "elapsed_ms": 118.963400,
+        "tiles_decoded": 16,
+        "pixel_bytes": 4194304,
+        "bytes_read_from_file": 704700,
+        "payloads_read": 16,
+        "memory": {
+          "heap_peak_bytes": 1534906,
+          "working_set_peak_bytes": 15015936,
+          "working_set_delta_bytes": 11493376
+        }
+      },
+      "pan_without_prefetch": {
+        "prefetch_radius": 0,
+        "pans": 12,
+        "visible_tiles_requested": 192,
+        "total_ms": 415.943000,
+        "mean_ms": 34.661917,
+        "max_ms": 72.339800,
+        "latencies_ms": [
+          72.339800,
+          45.272800,
+          47.324300,
+          24.554200,
+          28.380300,
+          26.289900,
+          29.763100,
+          27.545600,
+          32.731000,
+          26.558600,
+          27.027100,
+          28.156300
+        ],
+        "tiles_decoded": 104,
+        "bytes_read": 3564366,
+        "scheduler": {
+          "submitted": 104,
+          "accepted": 104,
+          "dispatched": 104,
+          "cancelled": 0,
+          "discarded_stale": 0,
+          "rejected_full": 0,
+          "cancellation_rate": 0.000000
+        },
+        "discarded_results": 0,
+        "recovered_results": 0,
+        "cache": {
+          "hits": 88,
+          "misses": 104,
+          "evictions": 0,
+          "decoded_tiles": 104,
+          "peak_bytes": 27262976,
+          "hit_rate": 0.458333,
+          "visible_hit_rate": 0.458333,
+          "speculative_hit_rate": null,
+          "visible_hits": 88,
+          "visible_misses": 104
+        },
+        "memory": {
+          "heap_peak_bytes": 34535818,
+          "working_set_peak_bytes": 35987456,
+          "working_set_delta_bytes": 31649792
+        }
+      },
+      "pan_with_prefetch": {
+        "prefetch_radius": 2,
+        "pans": 12,
+        "visible_tiles_requested": 192,
+        "total_ms": 318.317000,
+        "mean_ms": 26.526417,
+        "max_ms": 67.815300,
+        "latencies_ms": [
+          67.815300,
+          64.525200,
+          14.089400,
+          21.996400,
+          14.184900,
+          17.640300,
+          21.489600,
+          24.420700,
+          17.813000,
+          18.541900,
+          13.789600,
+          22.010700
+        ],
+        "tiles_decoded": 132,
+        "bytes_read": 4605923,
+        "scheduler": {
+          "submitted": 442,
+          "accepted": 442,
+          "dispatched": 141,
+          "cancelled": 275,
+          "discarded_stale": 1,
+          "rejected_full": 0,
+          "cancellation_rate": 0.622172
+        },
+        "discarded_results": 1,
+        "recovered_results": 83,
+        "cache": {
+          "hits": 223,
+          "misses": 529,
+          "evictions": 4,
+          "decoded_tiles": 133,
+          "peak_bytes": 33554432,
+          "hit_rate": 0.296543,
+          "visible_hit_rate": 0.526042,
+          "speculative_hit_rate": 0.217857,
+          "visible_hits": 101,
+          "visible_misses": 91
+        },
+        "memory": {
+          "heap_peak_bytes": 43738033,
+          "working_set_peak_bytes": 47153152,
+          "working_set_delta_bytes": 38846464
+        }
+      },
+      "prefetch_comparison": {
+        "radii": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "runs": {
+          "0": {
+            "prefetch_radius": 0,
+            "total_ms": 316.910300,
+            "mean_ms": 26.409192,
+            "max_ms": 38.127600,
+            "tiles_decoded": 104,
+            "cancelled": 0,
+            "visible_hit_rate": 0.458333,
+            "overall_hit_rate": 0.458333,
+            "run": {
+              "prefetch_radius": 0,
+              "pans": 12,
+              "visible_tiles_requested": 192,
+              "total_ms": 316.910300,
+              "mean_ms": 26.409192,
+              "max_ms": 38.127600,
+              "latencies_ms": [
+                38.127600,
+                18.903700,
+                21.058800,
+                20.991600,
+                22.556700,
+                26.018500,
+                29.673900,
+                24.334000,
+                30.397600,
+                27.114300,
+                25.281400,
+                32.452200
+              ],
+              "tiles_decoded": 104,
+              "bytes_read": 3564366,
+              "scheduler": {
+                "submitted": 104,
+                "accepted": 104,
+                "dispatched": 104,
+                "cancelled": 0,
+                "discarded_stale": 0,
+                "rejected_full": 0,
+                "cancellation_rate": 0.000000
+              },
+              "discarded_results": 0,
+              "recovered_results": 0,
+              "cache": {
+                "hits": 88,
+                "misses": 104,
+                "evictions": 0,
+                "decoded_tiles": 104,
+                "peak_bytes": 27262976,
+                "hit_rate": 0.458333,
+                "visible_hit_rate": 0.458333,
+                "speculative_hit_rate": null,
+                "visible_hits": 88,
+                "visible_misses": 104
+              },
+              "memory": {
+                "heap_peak_bytes": 34541256,
+                "working_set_peak_bytes": 47153152,
+                "working_set_delta_bytes": 37715968
+              }
+            }
+          },
+          "1": {
+            "prefetch_radius": 1,
+            "total_ms": 353.797900,
+            "mean_ms": 29.483158,
+            "max_ms": 68.368700,
+            "tiles_decoded": 154,
+            "cancelled": 7,
+            "visible_hit_rate": 0.494792,
+            "overall_hit_rate": 0.413146,
+            "run": {
+              "prefetch_radius": 1,
+              "pans": 12,
+              "visible_tiles_requested": 192,
+              "total_ms": 353.797900,
+              "mean_ms": 29.483158,
+              "max_ms": 68.368700,
+              "latencies_ms": [
+                68.368700,
+                34.358900,
+                27.546000,
+                23.967100,
+                26.352500,
+                23.194600,
+                30.775400,
+                19.423800,
+                29.625900,
+                21.729900,
+                20.282500,
+                28.172600
+              ],
+              "tiles_decoded": 154,
+              "bytes_read": 5340331,
+              "scheduler": {
+                "submitted": 169,
+                "accepted": 169,
+                "dispatched": 162,
+                "cancelled": 7,
+                "discarded_stale": 2,
+                "rejected_full": 0,
+                "cancellation_rate": 0.041420
+              },
+              "discarded_results": 2,
+              "recovered_results": 81,
+              "cache": {
+                "hits": 176,
+                "misses": 250,
+                "evictions": 26,
+                "decoded_tiles": 156,
+                "peak_bytes": 33554432,
+                "hit_rate": 0.413146,
+                "visible_hit_rate": 0.494792,
+                "speculative_hit_rate": 0.346154,
+                "visible_hits": 95,
+                "visible_misses": 97
+              },
+              "memory": {
+                "heap_peak_bytes": 43985736,
+                "working_set_peak_bytes": 47910912,
+                "working_set_delta_bytes": 34664448
+              }
+            }
+          },
+          "2": {
+            "prefetch_radius": 2,
+            "total_ms": 262.715600,
+            "mean_ms": 21.892967,
+            "max_ms": 50.805900,
+            "tiles_decoded": 135,
+            "cancelled": 269,
+            "visible_hit_rate": 0.520833,
+            "overall_hit_rate": 0.300532,
+            "run": {
+              "prefetch_radius": 2,
+              "pans": 12,
+              "visible_tiles_requested": 192,
+              "total_ms": 262.715600,
+              "mean_ms": 21.892967,
+              "max_ms": 50.805900,
+              "latencies_ms": [
+                50.805900,
+                26.094100,
+                19.449900,
+                20.653100,
+                13.830200,
+                24.936100,
+                11.365000,
+                21.890000,
+                19.529400,
+                18.171000,
+                18.051800,
+                17.939100
+              ],
+              "tiles_decoded": 135,
+              "bytes_read": 4712378,
+              "scheduler": {
+                "submitted": 438,
+                "accepted": 438,
+                "dispatched": 143,
+                "cancelled": 269,
+                "discarded_stale": 0,
+                "rejected_full": 0,
+                "cancellation_rate": 0.614155
+              },
+              "discarded_results": 0,
+              "recovered_results": 85,
+              "cache": {
+                "hits": 226,
+                "misses": 526,
+                "evictions": 7,
+                "decoded_tiles": 135,
+                "peak_bytes": 33554432,
+                "hit_rate": 0.300532,
+                "visible_hit_rate": 0.520833,
+                "speculative_hit_rate": 0.225000,
+                "visible_hits": 100,
+                "visible_misses": 92
+              },
+              "memory": {
+                "heap_peak_bytes": 43990606,
+                "working_set_peak_bytes": 47910912,
+                "working_set_delta_bytes": 43659264
+              }
+            }
+          },
+          "3": {
+            "prefetch_radius": 3,
+            "total_ms": 264.201600,
+            "mean_ms": 22.016800,
+            "max_ms": 35.903600,
+            "tiles_decoded": 139,
+            "cancelled": 592,
+            "visible_hit_rate": 0.536458,
+            "overall_hit_rate": 0.240517,
+            "run": {
+              "prefetch_radius": 3,
+              "pans": 12,
+              "visible_tiles_requested": 192,
+              "total_ms": 264.201600,
+              "mean_ms": 22.016800,
+              "max_ms": 35.903600,
+              "latencies_ms": [
+                35.903600,
+                35.426400,
+                16.894900,
+                19.816000,
+                18.398100,
+                18.135300,
+                20.008800,
+                17.727600,
+                21.856400,
+                20.556500,
+                21.986200,
+                17.491800
+              ],
+              "tiles_decoded": 139,
+              "bytes_read": 4830859,
+              "scheduler": {
+                "submitted": 793,
+                "accepted": 793,
+                "dispatched": 147,
+                "cancelled": 592,
+                "discarded_stale": 0,
+                "rejected_full": 0,
+                "cancellation_rate": 0.746532
+              },
+              "discarded_results": 0,
+              "recovered_results": 87,
+              "cache": {
+                "hits": 279,
+                "misses": 881,
+                "evictions": 11,
+                "decoded_tiles": 139,
+                "peak_bytes": 33554432,
+                "hit_rate": 0.240517,
+                "visible_hit_rate": 0.536458,
+                "speculative_hit_rate": 0.181818,
+                "visible_hits": 103,
+                "visible_misses": 89
+              },
+              "memory": {
+                "heap_peak_bytes": 43764750,
+                "working_set_peak_bytes": 47910912,
+                "working_set_delta_bytes": 43900928
+              }
+            }
+          }
+        },
+        "prefetch_reduced_total_latency": true,
+        "best_radius": 2,
+        "note": "each radius is the same pan sequence over the same file in the same process; the visible hit rate counts only the tiles the user was looking at, because a prefetch that misses is a guess that has not come true, not a cache failure"
+      },
+      "edit_and_save": {
+        "region": {
+          "x": 8192,
+          "y": 8192,
+          "width": 64,
+          "height": 64
+        },
+        "read_ms": 9.291800,
+        "commit_ms": 296.350900,
+        "dirty_tiles": 1,
+        "commit": {
+          "tiles_rewritten": 1,
+          "tiles_copied": 4095,
+          "file_size": 140431735
+        },
+        "payload_identity": {
+          "identical_tiles": 4095,
+          "changed_tiles": 1,
+          "untouched_payloads_byte_identical": true
+        },
+        "pixels_read_back_exact": true
+      }
+    }
+  },
+  "process": {
+    "elapsed_ms": 155627.718600,
+    "peak_working_set_bytes": 47910912,
+    "peak_heap_bytes": 43764750,
+    "allocations": 17925986
+  }
+}

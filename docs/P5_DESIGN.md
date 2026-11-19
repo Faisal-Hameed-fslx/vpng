@@ -216,7 +216,11 @@ are listed because each one changes the design, not because they are hard.
    not part of the environment.
 2. **Prefetch policy.** Ring radius and direction weighting. The first
    implementation should expose them as parameters and measure them.
-   **Still open** — this is stage 4.
+   **Decided (stage 4):** the radius, the direction reach and the
+   direction bonus are parameters with defaults, and the benchmark sweeps
+   the radius from 0 to 3. The measurement is in `docs/P5_REPORT.md` §3.3:
+   radius 2 is best at 16K, radius 0 is best at 2K, so the parameters stay
+   exposed and no "prefetch always helps" claim is made.
 3. **The cache budget for viewing.** P4's cache budget is an editing
    budget. A viewing cache may want a different one, and the two may
    coexist (the editing engine's dirty tiles must never be evicted by a
@@ -258,13 +262,18 @@ check between each, and one heavy job at a time on this host.
    *every* format and tile geometry part is not yet covered and is
    recorded as such.
 4. **Prefetch.** The policy, the parameters, the measurement.
-   **Not started.**
+   **Done** — `crates/vpng-view/src/viewport.rs`, 12 tests. The ring's
+   radius is a parameter and the benchmark sweeps it (0 to 3) instead of
+   assuming a value. The finding is workload-dependent: prefetch helps at
+   16K and does not help at 2K, and both runs are kept.
 5. **The benchmark.** The acceptance test as a runnable program, producing
    the raw JSON, with the sequential baseline measured in the same run.
-   **Not started.**
+   **Done** — `vpng-view-bench`, writing `benchmarks/p5_view_results.json`
+   (16K) and `benchmarks/p5_view_results_small.json` (2K).
 6. **The report.** `docs/P5_REPORT.md`, with every figure bound to the raw
    data by a check in `benchmarks/verify_reports.py`, exactly as P3.5 and
    P4 did.
-   **Not started.**
+   **Done** — the verifier's `check_p5()` re-derives each quoted figure
+   from the raw JSON and asserts that the report contains it.
 
 Each step ends with a compile check and a test run before the next begins.

@@ -21,6 +21,16 @@ use crate::scheduler::{Request, Scheduler};
 pub trait TileDecoder {
     /// Decode one tile into pixels.
     fn decode(&mut self, tile: usize) -> Result<Vec<u8>>;
+
+    /// The number of bytes this decoder has read so far.
+    ///
+    /// The default is zero, for a decoder that reads from somewhere other
+    /// than a file. A file-backed decoder reports its reader's count, so
+    /// the engine can state the I/O volume it caused rather than estimate
+    /// it from the tile count.
+    fn bytes_read(&self) -> u64 {
+        0
+    }
 }
 
 /// A decoded tile.

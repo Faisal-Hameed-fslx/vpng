@@ -223,6 +223,28 @@ fn a_promoted_request_becomes_more_urgent() {
 }
 
 #[test]
+fn a_visible_request_is_refused_when_the_queue_is_full_of_visible_requests() {
+    let mut scheduler = Scheduler::new(2);
+
+    scheduler.submit(request(&scheduler, 1, RequestClass::Visible, 0));
+    scheduler.submit(request(&scheduler, 2, RequestClass::Visible, 0));
+
+    // The queue is full, and everything in it is visible. There is no
+    // less urgent request to displace, so the third one is refused:
+    // dropping a tile the user is looking at to make room for a
+    // different tile the user is looking at would help nobody. The caller
+    // sizes the queue for its viewport.
+    assert_eq!(
+        scheduler.submit(request(&scheduler, 3, RequestClass::Visible, 0)),
+        SubmitOutcome::RejectedFull
+    );
+    assert_eq!(scheduler.len(), 2);
+    assert!(scheduler.contains(1));
+    assert!(scheduler.contains(2));
+    assert!(!scheduler.contains(3));
+}
+
+#[test]
 fn the_counters_add_up() {
     let mut scheduler = Scheduler::new(4);
 

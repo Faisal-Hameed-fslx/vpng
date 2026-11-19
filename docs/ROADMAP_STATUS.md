@@ -18,7 +18,7 @@
 | Default host | `x86_64-pc-windows-gnu` |
 | Active toolchain | overridden by `E:\VPNG\rust-toolchain.toml` |
 | `cargo build --workspace` | **exit 0**, `Finished dev profile ... in 3.85s` |
-| `cargo test --workspace --all-targets` | **exit 0**, `337 passed; 0 failed` |
+| `cargo test --workspace --all-targets` | **exit 0**, `350 passed; 0 failed` |
 | `cargo fmt --all --check` | **exit 0**, no diffs |
 | `cargo clippy --workspace --all-targets` | **exit 0**, zero warnings |
 
@@ -32,10 +32,10 @@ No Visual Studio is required: the GNU host ships `rust-lld` and a
 | P0 — repository audit and specification | unambiguous field sizes; executable serialization tests; reproducible build env | **PASS** | `vpng-container` 19 tests pass (header is exactly 64 bytes, directory entry exactly 40 bytes, round-trips exact, checksum detects a flipped byte). Build environment recorded in §1 and `docs/REPOSITORY_AUDIT.md`. |
 | P1 — minimal valid container | exact round-trip all formats; golden files; tile-only decode; malformed tests | **PASS** | `roundtrip.rs` 7 pass, `golden.rs` 5 pass, `malformed.rs` 12 pass, `vpng-decoder` 8 pass. Structural integrity checking (`vpng check`) is implemented and tested. See §3 for the CLI end-to-end run. |
 | P2 — baseline codecs | palette, RLE, predictor, LZ77, entropy | **PARTIAL** | Palette (id 1) implemented with byte-level golden vectors, whole-file golden fixture, and property tests (§3.1, A06); RLE (id 2) implemented with byte-level golden vectors, a whole-file golden fixture, and conformance tests (§3.2, A07); Predictor+entropy (id 3) implemented with seven spatial predictors, per-row measured-cost selection, an adaptive arithmetic coder, byte-level golden vectors, a whole-file golden fixture, and conformance/property tests (§3.3, A08). LZ77 (id 4), predictor+dictionary (id 5), and context-adaptive entropy (id 6) remain reserved and are rejected on decode. Cost-based per-tile selection with a Raw fallback is implemented and tested. |
-| P3 — adaptive tiling, region decode | region == crop; coverage validation; bounded cache; parallel decode | **PARTIAL** | Fixed-grid region decode and exact-coverage validation pass (`region_decode_equals_full_decode_crop`). A **bounded byte-budget LRU tile cache** now exists and is tested (`the_cache_evicts_when_the_budget_is_exceeded`; A14). The **parallel decode engine** now exists too (`crates/vpng-view`: a bounded scheduler and a worker pool that produces byte-identical tiles to the sequential decoder), but its throughput has not been measured, so the parallel half of this gate is not yet closed. Adaptive (variable-size) tiling is still not started. |
+| P3 — adaptive tiling, region decode | region == crop; coverage validation; bounded cache; parallel decode | **PARTIAL** | Fixed-grid region decode and exact-coverage validation pass (`region_decode_equals_full_decode_crop`). A **bounded byte-budget LRU tile cache** now exists and is tested (`the_cache_evicts_when_the_budget_is_exceeded`; A14). The **parallel decode engine** now exists and is measured: `crates/vpng-view` decodes a 16K viewport in 63.56 ms against the sequential baseline's 118.96 ms, and its tiles are byte-identical to the sequential decoder's (`docs/P5_REPORT.md` §3.1, Q11). The parallel half of this gate is closed by measurement. Adaptive (variable-size) tiling is still not started. |
 | P4 — editing engine | localized edit; payload reuse; crash safety; undo/redo | **PASS** | The engine is implemented in `crates/vpng-editing` (51 tests). A localized edit decodes 1 tile of 64 and modifies 1; 63 of 64 payloads are preserved byte for byte and 1 is rewritten; BEGIN/COMMIT/ABORT, atomic copy-on-write save, and two injected failure points all preserve the original; undo/redo restore the pixels exactly. A successful commit is a **new baseline**: undo and redo cannot cross it, while a failed commit preserves the whole editing state. The design decisions it resolved are ADR-0012 (atomic replacement, §18.9/§18.10) and ADR-0013 (cache eviction, §18.13). Evidence: `docs/P4_EDITING_ENGINE_REPORT.md`, `benchmarks/p4_editing_results.json`. |
 | P5 — preview and multiresolution | thumbnail, pyramid | **NOT STARTED** | |
-| P6 — 16K and memory engineering | 16K stress; streaming; budgets | **PARTIAL** | A tile-by-tile streaming writer and a 12-case memory matrix now exist: 4096², 8192² and 16384² × {gray8, rgb8, rgba8, rgba16}, **12 PASS / 0 FAIL / 0 BLOCKED**. The 16384×16384 RGBA16 case (2 GiB of canonical pixels) writes in an 8.8 MB heap peak and edits with a 13.2 MB resident-set growth, against a 64 MB target. A bounded cache and a bounded history are implemented. The parallel engine (`crates/vpng-view`) exists but has not yet been measured on a 16K workload, so the parallel limits this gate asks for are not closed. Evidence: `docs/P4_MEMORY_VALIDATION.md`, `benchmarks/p4_memory_results.json`. |
+| P6 — 16K and memory engineering | 16K stress; streaming; budgets | **PARTIAL** | A tile-by-tile streaming writer and a 12-case memory matrix now exist: 4096², 8192² and 16384² × {gray8, rgb8, rgba8, rgba16}, **12 PASS / 0 FAIL / 0 BLOCKED**. The 16384×16384 RGBA16 case (2 GiB of canonical pixels) writes in an 8.8 MB heap peak and edits with a 13.2 MB resident-set growth, against a 64 MB target. A bounded cache and a bounded history are implemented. The parallel engine is now measured on a 16K workload: a full viewing run peaks at 47.9 MB of resident set and 43.8 MB of heap against the 64 MB target (`docs/P5_REPORT.md` §3.5). Evidence: `docs/P4_MEMORY_VALIDATION.md`, `benchmarks/p4_memory_results.json`, and `benchmarks/p5_view_results.json`. |
 | P7 — compression research | controlled experiments | **PARTIAL** | Eleven codecs were measured on identical pixels and identical tile layouts: the four stable codecs, four context-adaptive residual models (CARC A–D), an LZ77 dictionary codec and three hybrids, with pinned golden vectors for each. Every image was also measured against PNG, WebP lossless and JPEG XL lossless, so every column of the comparison shares one denominator. The results are in `benchmarks/p3_5_raw_results.json` (per-image, per-tile, per-category, per-resolution, aggregate and worst-case) and `benchmarks/p3_5_comparison.csv`. The **750-image corpus and statistical reporting do not exist**; the study is a 9-image seed. Evidence: `docs/P3_5_COMPRESSION_RESEARCH_REPORT.md`. |
 | P8 — 10 MB target evaluation | exact accounting; honest failure | **PARTIAL** | Exact size accounting passes (`size_accounting_is_exact`); refusal is honest and typed (`--max-size 1024` → exit 6 reporting the smallest lossless size 240,148). A 9-image seed corpus exists, but the 750-image target is unmet, so the per-category success distribution is unmeasured. |
 | P9 — Python API | bindings around Rust | **NOT STARTED** | CLI-driver tooling only. |
@@ -52,7 +52,7 @@ already been done.
 |---|---|---|---|
 | P3.5 + P4 — compression and editing | the two gates just closed | P3.5 (recorded as P7) and P4 | **verified; committed** (`c821f25`) |
 | P4.1 — specification and compatibility closure | resolve `default_codec`; verify the Linux fuzzing CI path | P10 | **CLOSED** (2026-11-18): the specification clarification is committed (`b692227`) and the Linux coverage-guided fuzz job ran three times — clean, then a real defect that is fixed and pinned, then a clean re-verification (runs 44264162940, 44266490454, 44274770109) |
-| P5 — streaming and parallel decoding | open a 16K image and navigate it without a full-image allocation | P6 (streaming, parallel limits) and the parallel-decode part of P3 | **IN PROGRESS** — design in `docs/P5_DESIGN.md`; stage 1 (the streaming reader, `crates/vpng-source`), stage 2 (the bounded scheduler with viewport priority and cancellation, `crates/vpng-view`) and stage 3 (the parallel worker pool, `crates/vpng-view`) are done; the prefetch policy and the acceptance benchmark are left |
+| P5 — streaming and parallel decoding | open a 16K image and navigate it without a full-image allocation | P6 (streaming, parallel limits) and the parallel-decode part of P3 | **CLOSED** (2026-11-19): all six stages are done. The 16K RGBA8 acceptance case **ran** (it is not BLOCKED): the first viewport takes 63.56 ms against the sequential baseline's 118.96 ms, the whole run peaks at 47.9 MB of resident set against the 64 MB target, and a 64×64 edit rewrites 1 tile of 4,096. Prefetch is measured, not assumed: it helps at 16K (best radius 2) and does not help at 2K, and both runs are kept. Evidence: `docs/P5_REPORT.md`, `benchmarks/p5_view_results.json`, `benchmarks/p5_view_results_small.json` |
 | P6 — multiresolution preview pyramid | fast zooming, progressive presentation | P5 | NOT STARTED |
 | P7 — adaptive tiling | variable tile dimensions and spatially adaptive layouts | P3 | NOT STARTED |
 | P8 — production validation | the 750-image corpus, multiple platforms, 16K workloads | P8 | PARTIAL (seed corpus only) |
@@ -299,7 +299,7 @@ profiles, `x86_64-pc-windows-gnu`.
 | `vpng-fuzzing` `tests/fuzz_smoke.rs` | 3 | ok |
 | `vpng-fuzzing` `tests/fuzz_regressions.rs` | 3 | ok |
 | `vpng-source` unit | 11 | ok |
-| `vpng-view` unit | 25 | ok |
+| `vpng-view` unit | 38 | ok |
 | `vpng-research` bin | 0 | ok |
 | `vpng-testkit` unit | 2 | ok |
 | `tests/default_codec.rs` | 7 | ok |
@@ -314,7 +314,7 @@ profiles, `x86_64-pc-windows-gnu`.
 | `vpng-validation` unit | 2 | ok |
 | `vpng-validation` bins | 0 | ok |
 | Doc-tests | 0 | ok |
-| **Total** | **337** | **337 passed, 0 failed** |
+| **Total** | **350** | **350 passed, 0 failed** |
 
 The 115 new tests are: 52 codec tests (22 LZ77, 14 CARC, 12 hybrids, plus
 the registry and entropy-stage tests), 51 editing tests, 3 fuzzing tests,
@@ -370,7 +370,8 @@ tests (181 → 283); the pre-commit correction pass added 6 editing tests
 conformance tests (289 → 296); the coverage-guided fuzzing fix added 2 header
 unit tests and 3 regression tests that replay the fuzzer's crash artifact
 (296 → 301); the P5 streaming reader added 11 tests (301 → 312); the P5
-scheduler added 17 (312 → 329); the P5 worker pool added 8 (329 → 337).
+scheduler added 17 (312 → 329); the P5 worker pool added 8 (329 → 337); the P5
+prefetch policy added 12 viewport tests and 1 scheduler test (337 → 350).
 
 ## 7. Not yet measured (explicitly no claims)
 
@@ -421,17 +422,25 @@ repository.
 
 ## 8. Next phase
 
-P3 and P6 continue in parallel, and neither blocks the other:
+P5 (streaming and parallel decoding) is **closed**: all six stages are
+done, the 16K acceptance case ran, and the evidence is in
+`docs/P5_REPORT.md` with every quoted figure checked against the raw JSON
+by `benchmarks/verify_reports.py`. The work continues in this order:
 
-* **P3** — adaptive (variable-size) tiling and parallel independent tile
-  decode. The bounded cache that the gate asks for now exists; the grid is
-  still fixed.
-* **P6** — parallel decode limits and the remaining streaming work, plus
-  the preview/multiresolution surface P5 needs.
+* **P6** — the multiresolution preview pyramid. P5's engine reads one
+  level of an image at a time; a pyramid needs a second grid of tiles, so
+  it is a format revision with a migration policy and compatibility tests.
+* **P7** — adaptive (variable-size) tiling. The grid is still fixed at
+  256 × 256, and a spatially adaptive layout would change both the
+  compression and the shape of a viewport's tile set. The prefetch policy
+  would have to be re-measured on it.
 * **P2** — the stable codec ids 4–6 are still reserved. The P3.5 study
   says **not** to promote any of the research codecs on the current
   evidence; a promotion needs a specification update, a version bump, a
   migration policy and compatibility tests, in that order.
+* **The parallel-decode coverage matrix.** The parallel-vs-sequential
+  byte-identity test covers one file; the format-and-geometry matrix for
+  parallel decode is the next correctness item.
 
 Two housekeeping items were carried forward from this milestone. One is now
 closed and one is still open:

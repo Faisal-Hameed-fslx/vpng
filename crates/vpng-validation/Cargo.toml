@@ -14,8 +14,10 @@ vpng-codecs.workspace = true
 vpng-decoder.workspace = true
 vpng-encoder.workspace = true
 vpng-editing.workspace = true
+vpng-source.workspace = true
 vpng-testkit.workspace = true
 vpng-tiling.workspace = true
+vpng-view.workspace = true
 
 [[bin]]
 name = "vpng-memory"
@@ -24,3 +26,7 @@ path = "src/bin/vpng-memory.rs"
 [[bin]]
 name = "vpng-editing-bench"
 path = "src/bin/vpng-editing-bench.rs"
+
+[[bin]]
+name = "vpng-view-bench"
+path = "src/bin/vpng-view-bench.rs"

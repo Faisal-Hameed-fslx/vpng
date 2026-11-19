@@ -8,6 +8,78 @@ separately as major.minor in the header.
 
 ### Added
 
+* **P5 is closed — the 16K acceptance case ran.** The raw data is
+  `benchmarks/p5_view_results.json` (16K) and
+  `benchmarks/p5_view_results_small.json` (2K), and the report is
+  `docs/P5_REPORT.md`, with every quoted figure checked against the raw
+  JSON by `benchmarks/verify_reports.py`.
+  * **A 16384 × 16384 RGBA8 image** — 1 GiB of canonical pixels, a
+    140,431,266-byte file with 4,096 tiles — was written, opened, panned
+    across, edited and saved, on this host, in one process. It did not
+    have to be reported BLOCKED.
+  * **The first viewport takes 63.56 ms**, against **118.96 ms** for the
+    sequential baseline measured in the same run: **1.87× faster**.
+  * **Only the viewport's tiles are decoded**: 16 of 4,096, counted. The
+    parallel pixels are byte-identical to the sequential decoder's for all
+    16 of them.
+  * **There is no read amplification.** The pool's workers read 540,792
+    bytes of payload; the header and the directory are read once; the
+    baseline reads 704,700 bytes in total — exactly 163,908 + 540,792.
+  * **Memory stays inside the target**: the whole run peaks at 47.9 MB of
+    resident set and 43.8 MB of heap, against the 64 MB target.
+  * **A pan costs 26.53 ms mean** with prefetch at radius 2, against
+    34.66 ms without it. The cancellation rate is 0.6222; one decoded
+    result was discarded because the user panned away, and **83 were kept**
+    because the new viewport wanted the same tiles.
+  * **Prefetch is measured, not promised.** The radius sweep shows it
+    helping at 16K (best radius 2, a 17.1% reduction in panned latency)
+    and **not** helping at 2K (best radius 0). Both runs are kept.
+  * **The P4 property is unchanged**: a 64×64 edit rewrites 1 tile of
+    4,096, the other 4,095 payloads keep their bytes exactly, and the
+    pixels read back exactly.
+
+* **The predictive prefetch and the viewport plan (`crates/vpng-view`).**
+  The part that decides *which* tiles to ask for, not just in what order.
+  * **The viewport.** A rectangle of the image, the tiles it covers, and
+    their distance from its centre. The nearest tile is decoded first.
+  * **The prefetch ring.** The tiles just outside the visible rectangle
+    are the ones that come next if the user pans a little. The ring's
+    width is a parameter, not a constant: the benchmark measures radii 0
+    to 3 and reports them all, including the one that lost.
+  * **The direction of travel is preferred.** When the user pans right,
+    the tiles to the right are wanted before the tiles to the left. The
+    preference is folded into the distance the scheduler sorts by, so it
+    is one number and not a second ordering rule that could disagree with
+    the first.
+  * **The ring is clipped to the image**, and a prefetch is never allowed
+    to push a visible tile out of the bounded queue.
+  * **A tile that is being decoded for an old viewport is kept when the
+    new viewport wants it too.** The pixels do not depend on the viewport,
+    so a result that lands after a pan is kept rather than thrown away —
+    and the keep is counted separately from the discard.
+  * **The visible demand is counted apart from the speculative one.** A
+    prefetch that misses is a guess that has not come true, not a cache
+    failure, so the two hit rates are reported apart.
+  * 13 new tests, including the ring's exact membership, the clipping,
+    the direction preference and the queue's behaviour under pressure.
+
+* **The P5 acceptance benchmark (`vpng-view-bench`).** One run produces
+  one report: the file is written (or reused) and the four scenarios run
+  in the same process, so every figure describes the same machine and the
+  same file.
+  * **The first viewport**, against the sequential baseline measured in
+    the same run.
+  * **The pan**: the panned latency, the cancellation rate, and the
+    results that were discarded or recovered.
+  * **The prefetch**, as a sweep over the ring's radius, with the hit
+    rates for the visible and the speculative demand apart.
+  * **The localized edit**: that saving still rewrites only the tiles it
+    touches, that the untouched payloads are byte-identical, and that the
+    pixels come back exactly.
+  * **The memory figures say what they include**, next to every number.
+  * The pixels the pool produced are compared, byte for byte, with the
+    pixels the ordinary decoder produces for the same tiles.
+
 * **The parallel worker pool (`crates/vpng-view`).** The parallel engine:
   a fixed set of worker threads that take requests from the scheduler,
   decode them, and publish the results into the bounded cache.
@@ -259,7 +331,7 @@ separately as major.minor in the header.
   findings**, 3.9 s in the release profile. The *deterministic* harness found
   no library defect; the *coverage-guided* fuzzer, run in CI on Linux, found
   one (see **Fixed** below).
-* The test suite is **337 passed / 0 failed** (was 181).
+* The test suite is **350 passed / 0 failed** (was 181).
 
 ### Known limitations
 

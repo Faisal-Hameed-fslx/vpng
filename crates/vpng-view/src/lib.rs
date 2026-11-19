@@ -40,6 +40,9 @@ mod pool_tests;
 mod scheduler;
 #[cfg(test)]
 mod tests;
+mod viewport;
+#[cfg(test)]
+mod viewport_tests;
 
 pub use driver::{DecodedTile, Driver, Step, TileDecoder};
 pub use file_decoder::{FileDecoder, FileDecoderFactory};
@@ -47,3 +50,4 @@ pub use pool::{DecoderFactory, Pool, PoolOutcome, PoolStats};
 pub use scheduler::{
     Counters, Generation, Request, RequestClass, RequestSpec, Scheduler, SubmitOutcome,
 };
+pub use viewport::{Direction, PlanEntry, PlanReport, PrefetchPolicy, ViewPlan, Viewport};

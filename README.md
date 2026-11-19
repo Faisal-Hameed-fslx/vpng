@@ -5,11 +5,12 @@ A lossless, adaptive, tiled, random-access image format and editing engine.
 **Primary requirement:** exact pixel reconstruction.
 **Secondary target:** fit eligible images within 10 MB — measured, never promised.
 **Status:** v0.1 container implemented, compiled, and tested; the editing engine
-(P4) and the compression research (P3.5) have landed. `cargo build
---workspace` and `cargo test --workspace --all-targets` both pass (337 tests,
-0 failures) on `stable-x86_64-pc-windows-gnu` rustc 1.100.0. Large-image stress
-runs, a 16K memory matrix, an editing benchmark, and a seed-corpus measurement
-are recorded in `docs/BENCHMARKS.md`. See `docs/ROADMAP_STATUS.md`.
+(P4), the compression research (P3.5) and the interactive engine (P5) have
+landed. `cargo build --workspace` and `cargo test --workspace --all-targets`
+both pass (350 tests, 0 failures) on `stable-x86_64-pc-windows-gnu` rustc
+1.100.0. Large-image stress runs, a 16K memory matrix, an editing benchmark, a
+16K viewing benchmark and a seed-corpus measurement are recorded in
+`docs/BENCHMARKS.md` and `docs/P5_REPORT.md`. See `docs/ROADMAP_STATUS.md`.
 
 ## What works today
 
@@ -27,10 +28,17 @@ are recorded in `docs/BENCHMARKS.md`. See `docs/ROADMAP_STATUS.md`.
   while a failed commit preserves the whole editing state.
 * A CLI: `encode`, `decode`, `info`, `check`, `verify`, `decode-region`,
   `extract-tile`.
+* An **interactive engine** (`crates/vpng-view`): a bounded scheduler with
+  viewport priority and cancellation, a parallel worker pool whose tiles are
+  byte-identical to the sequential decoder's, and a predictive prefetch
+  whose radius is measured rather than assumed. The 16K RGBA8 acceptance
+  case **ran**: the first viewport takes 63.56 ms against the sequential
+  baseline's 118.96 ms, and the whole viewing run peaks at 47.9 MB of
+  resident set against the 64 MB target. See `docs/P5_REPORT.md`.
 * Conformance tests: exhaustive round-trip, region-vs-crop, malformed-input
   sweeps, a bounded mutation sweep, golden files, the `default_codec`
   clarification, and a deterministic fuzzing harness over seven targets.
-  337 tests, all passing.
+  350 tests, all passing.
 * Layered integrity: `info` (structure only), `check` (every payload CRC32C),
   `verify` (exact pixels against a reference).
 * Measured evidence: large-image stress (up to a 15360×8640 photo and
@@ -68,10 +76,13 @@ graphical editor** yet. Each phase has a row in the status table.
 
 ## What is being built next
 
-The interactive engine (P5) is in its third stage: a streaming reader
-(`crates/vpng-source`), a bounded scheduler with viewport priority and
-cancellation, and a parallel worker pool whose output is byte-identical to the
-sequential decoder's. The prefetch policy and the acceptance benchmark are left.
+The multiresolution preview pyramid (P6) and adaptive tiling (P7). The
+interactive engine (P5) is done: a streaming reader (`crates/vpng-source`), a
+bounded scheduler with viewport priority and cancellation, a parallel worker
+pool whose output is byte-identical to the sequential decoder's, a predictive
+prefetch, and a measured acceptance benchmark. Prefetch is a measured
+trade-off, not a promise: it helps at 16K (best radius 2) and does not help at
+2K, and both runs are kept in `docs/P5_REPORT.md` §3.3.
 
 The roadmap also carries a **feature backlog** — a preview pyramid, Python
 bindings, a graphical editor, a WebAssembly package, HTTP Range streaming,

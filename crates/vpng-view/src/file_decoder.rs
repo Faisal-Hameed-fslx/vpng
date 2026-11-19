@@ -42,6 +42,10 @@ impl TileDecoder for FileDecoder {
     fn decode(&mut self, tile: usize) -> Result<Vec<u8>> {
         self.reader.decode_tile(tile, &self.limits)
     }
+
+    fn bytes_read(&self) -> u64 {
+        self.reader.bytes_read()
+    }
 }
 
 /// Makes one [`FileDecoder`] per worker.

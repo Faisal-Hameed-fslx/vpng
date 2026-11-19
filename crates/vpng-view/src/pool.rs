@@ -33,7 +33,7 @@ use vpng_cache::{CacheStats, TileCache};
 use vpng_core::{Error, Result};
 
 use crate::driver::TileDecoder;
-use crate::scheduler::{Counters, Generation, RequestSpec, Scheduler, SubmitOutcome};
+use crate::scheduler::{Counters, Generation, RequestClass, RequestSpec, Scheduler, SubmitOutcome};
 
 /// A source of decoders: one per worker.
 ///
@@ -84,6 +84,16 @@ struct Shared {
     cache: TileCache,
     /// The tiles currently being decoded.
     in_flight: HashSet<usize>,
+    /// The generation that last wanted each in-flight tile.
+    ///
+    /// A tile that is being decoded for an old viewport may be wanted
+    /// again by the new one — the user panned back, or the new viewport
+    /// overlaps the old one. The pixels do not depend on the viewport, so
+    /// the result is worth keeping; this map is how the worker knows.
+    wanted: HashMap<usize, u64>,
+    /// The tiles whose decode was thrown away because the viewport moved
+    /// on.
+    discarded_tiles: HashSet<usize>,
     /// The tiles whose decode failed, with the reason.
     failures: HashMap<usize, String>,
     /// The decodes that completed.
@@ -92,6 +102,18 @@ struct Shared {
     failed: u64,
     /// The results thrown away because the viewport moved on.
     discarded: u64,
+    /// The results that landed after a pan but were wanted again.
+    recovered: u64,
+    /// The bytes the workers have read from their sources.
+    bytes_read: u64,
+    /// The visible requests the cache satisfied.
+    visible_hits: u64,
+    /// The visible requests the cache did not hold.
+    visible_misses: u64,
+    /// The speculative requests the cache satisfied.
+    speculative_hits: u64,
+    /// The speculative requests the cache did not hold.
+    speculative_misses: u64,
     /// Whether the workers should stop.
     shutdown: bool,
 }
@@ -115,12 +137,52 @@ pub struct PoolStats {
     pub failed: u64,
     /// The results thrown away because the viewport moved on.
     pub discarded: u64,
+    /// The results that landed after a pan but were wanted again, and were
+    /// therefore kept.
+    pub recovered: u64,
+    /// The bytes the workers have read from their sources.
+    pub bytes_read: u64,
+    /// The visible requests the cache satisfied.
+    pub visible_hits: u64,
+    /// The visible requests the cache did not hold.
+    pub visible_misses: u64,
+    /// The speculative requests the cache satisfied.
+    pub speculative_hits: u64,
+    /// The speculative requests the cache did not hold.
+    pub speculative_misses: u64,
     /// The tiles being decoded right now.
     pub in_flight: u64,
     /// The scheduler's counters.
     pub scheduler: Counters,
     /// The cache's counters.
     pub cache: CacheStats,
+}
+
+impl PoolStats {
+    /// The share of the *visible* requests the cache satisfied.
+    ///
+    /// The speculative requests are counted apart, because a prefetch that
+    /// misses is not a failure: it is a guess that has not come true yet.
+    /// The visible hit rate is the figure that says whether the cache is
+    /// doing its job.
+    pub fn visible_hit_rate(&self) -> Option<f64> {
+        let total = self.visible_hits + self.visible_misses;
+        if total == 0 {
+            None
+        } else {
+            Some(self.visible_hits as f64 / total as f64)
+        }
+    }
+
+    /// The share of the speculative requests the cache satisfied.
+    pub fn speculative_hit_rate(&self) -> Option<f64> {
+        let total = self.speculative_hits + self.speculative_misses;
+        if total == 0 {
+            None
+        } else {
+            Some(self.speculative_hits as f64 / total as f64)
+        }
+    }
 }
 
 /// A pool of worker threads that decode tiles.
@@ -154,10 +216,18 @@ impl Pool {
             scheduler: Scheduler::new(queue_capacity),
             cache: TileCache::new(cache_bytes)?,
             in_flight: HashSet::new(),
+            wanted: HashMap::new(),
+            discarded_tiles: HashSet::new(),
             failures: HashMap::new(),
             completed: 0,
             failed: 0,
             discarded: 0,
+            recovered: 0,
+            bytes_read: 0,
+            visible_hits: 0,
+            visible_misses: 0,
+            speculative_hits: 0,
+            speculative_misses: 0,
             shutdown: false,
         };
 
@@ -232,23 +302,36 @@ impl Pool {
         let mut shared = self.lock();
 
         // A request from an older viewport is refused before anything
-        // else: the viewport it was made for is gone.
+        // else: the viewport it was made for is gone. The scheduler
+        // counts the refusal.
         if spec.generation != shared.scheduler.generation() {
-            let outcome = shared.scheduler.submit(spec);
-            return match outcome {
-                SubmitOutcome::RejectedStale => PoolOutcome::RejectedStale,
-                _ => PoolOutcome::RejectedStale,
-            };
+            shared.scheduler.submit(spec);
+            return PoolOutcome::RejectedStale;
         }
 
         // The cache lookup counts a hit or a miss, so the hit rate
-        // measures how much of the demand the cache satisfied.
-        if shared.cache.note_access(spec.tile) {
+        // measures how much of the demand the cache satisfied. The
+        // visible demand is counted apart from the speculative one: a
+        // prefetch that misses is a guess that has not come true, not a
+        // failure of the cache.
+        let hit = shared.cache.note_access(spec.tile);
+        match (spec.class, hit) {
+            (RequestClass::Visible, true) => shared.visible_hits += 1,
+            (RequestClass::Visible, false) => shared.visible_misses += 1,
+            (_, true) => shared.speculative_hits += 1,
+            (_, false) => shared.speculative_misses += 1,
+        }
+        if hit {
             return PoolOutcome::Cached;
         }
 
-        // One decode per tile.
+        // One decode per tile. The tile is already being decoded — but
+        // the decode may be for an older viewport, and the pixels do not
+        // depend on the viewport. The tile is marked as wanted under the
+        // current generation, so the worker keeps the result when it
+        // lands instead of throwing it away.
         if shared.in_flight.contains(&spec.tile) {
+            shared.wanted.insert(spec.tile, spec.generation);
             return PoolOutcome::AlreadyInFlight;
         }
 
@@ -264,6 +347,7 @@ impl Pool {
         if matches!(pool_outcome, PoolOutcome::Queued | PoolOutcome::Promoted) {
             // A new attempt replaces the old failure, if there was one.
             shared.failures.remove(&spec.tile);
+            shared.wanted.insert(spec.tile, spec.generation);
         }
 
         drop(shared);
@@ -314,6 +398,12 @@ impl Pool {
             if let Some(reason) = shared.failures.get(&tile) {
                 return Err(Error::corrupt(format!(
                     "tile {tile} could not be decoded: {reason}"
+                )));
+            }
+            if shared.discarded_tiles.contains(&tile) {
+                return Err(Error::internal(format!(
+                    "tile {tile} was decoded and thrown away: the viewport moved on before it \
+                     landed"
                 )));
             }
             if shared.scheduler.is_empty() && shared.in_flight.is_empty() {
@@ -367,6 +457,12 @@ impl Pool {
             completed: shared.completed,
             failed: shared.failed,
             discarded: shared.discarded,
+            recovered: shared.recovered,
+            bytes_read: shared.bytes_read,
+            visible_hits: shared.visible_hits,
+            visible_misses: shared.visible_misses,
+            speculative_hits: shared.speculative_hits,
+            speculative_misses: shared.speculative_misses,
             in_flight: shared.in_flight.len() as u64,
             scheduler: *shared.scheduler.counters(),
             cache: shared.cache.stats(),
@@ -455,8 +551,10 @@ fn worker_loop<D: TileDecoder>(inner: Arc<Inner>, mut decoder: D) {
 
         // The decode, with the lock released.
         let started = Instant::now();
+        let bytes_before = decoder.bytes_read();
         let result = decoder.decode(request.tile);
         let elapsed = started.elapsed();
+        let bytes_after = decoder.bytes_read();
 
         // Publish the result.
         let mut shared = inner
@@ -464,20 +562,39 @@ fn worker_loop<D: TileDecoder>(inner: Arc<Inner>, mut decoder: D) {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         shared.in_flight.remove(&request.tile);
+        shared.bytes_read += bytes_after.saturating_sub(bytes_before);
         match result {
             Ok(pixels) => {
                 shared.cache.record_decode(elapsed);
-                if shared.scheduler.is_current(request.generation) {
+
+                // The result is kept when the viewport that asked for it is
+                // still current, or when the current viewport wants the
+                // same tile: the pixels do not depend on the viewport, so
+                // a tile the user has panned back onto is still the right
+                // tile.
+                let current = shared.scheduler.generation();
+                let still_wanted = shared.wanted.get(&request.tile) == Some(&current);
+                shared.wanted.remove(&request.tile);
+
+                if shared.scheduler.is_current(request.generation) || still_wanted {
                     shared.cache.insert(request.tile, pixels);
                     shared.completed += 1;
+                    if !shared.scheduler.is_current(request.generation) {
+                        // The decode was for an older viewport, but the
+                        // tile is wanted again: the pixels were kept.
+                        shared.recovered += 1;
+                    }
                 } else {
                     // The viewport moved on while this tile was being
-                    // decoded. The pixels are not wanted.
+                    // decoded, and nothing wants the tile any more. The
+                    // pixels are not wanted.
                     shared.scheduler.record_discarded_stale();
                     shared.discarded += 1;
+                    shared.discarded_tiles.insert(request.tile);
                 }
             }
             Err(err) => {
+                shared.wanted.remove(&request.tile);
                 shared.failures.insert(request.tile, err.to_string());
                 shared.failed += 1;
             }
