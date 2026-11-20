@@ -26,6 +26,7 @@ const VALUE_OPTIONS: &[&str] = &[
     "input-format",
     "cache-bytes",
     "jobs",
+    "workers",
 ];
 
 /// Long options that are simple flags.

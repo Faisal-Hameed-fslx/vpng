@@ -18,7 +18,9 @@ use convert::FileKind;
 use vpng_container::{canonical_digest, to_hex, Header};
 use vpng_core::{Error, Limits, Rect, Result};
 use vpng_decoder::Document;
-use vpng_encoder::{encode, EncodeOptions};
+use vpng_encoder::parallel::ParallelOptions;
+use vpng_encoder::stream::encode_to_file;
+use vpng_encoder::EncodeOptions;
 
 fn main() -> ExitCode {
     let argv: Vec<String> = std::env::args().skip(1).collect();
@@ -170,13 +172,31 @@ fn cmd_encode(args: &Args) -> Result<()> {
         options = options.with_max_size(vpng_core::checked_mul(mib, 1024 * 1024)?);
     }
 
-    let report = encode(&image, &options)?;
-    std::fs::write(&output, &report.bytes)?;
+    // The streaming writer is used rather than the batch encoder, so the
+    // finished file is never held in memory: it is written straight to
+    // disk, through a temporary name that is renamed over the target.
+    //
+    // The worker count changes the speed and not the bytes: the encoder's
+    // per-tile work is independent and the tiles are consumed in tile
+    // order, so one worker and N workers write the same file. That is
+    // checked over 144 encode cases in `vpng-encoder` and by the 16K
+    // benchmark, whose SHA-256 is the proof.
+    let workers = match args.get_u32("workers")? {
+        Some(0) => return Err(Error::invalid("--workers must be non-zero")),
+        Some(count) => count as usize,
+        None => std::thread::available_parallelism()
+            .map(|value| value.get())
+            .unwrap_or(1),
+    };
+    let parallel = ParallelOptions::default().with_workers(workers);
 
+    let report = encode_to_file(&image, &options, &parallel, std::path::Path::new(&output))?;
+
+    let pixel_count = image.width() as u64 * image.height() as u64;
     let digest = to_hex(&canonical_digest(&image));
     if args.has("json") {
         println!(
-            "{{\"output\":\"{}\",\"input\":\"{}\",\"width\":{},\"height\":{},\"format\":\"{}\",\"tiles\":{},\"file_size\":{},\"ratio\":{:.4},\"bpp\":{:.4},\"canonical_sha256\":\"{}\"}}",
+            "{{\"output\":\"{}\",\"input\":\"{}\",\"width\":{},\"height\":{},\"format\":\"{}\",\"tiles\":{},\"file_size\":{},\"ratio\":{:.4},\"bpp\":{:.4},\"workers\":{},\"canonical_sha256\":\"{}\"}}",
             escape(&output),
             escape(&input),
             image.width(),
@@ -185,20 +205,22 @@ fn cmd_encode(args: &Args) -> Result<()> {
             report.tile_count,
             report.file_size,
             report.compression_ratio(),
-            report.bytes_per_pixel(image.width() as u64 * image.height() as u64),
+            report.file_size as f64 / pixel_count as f64,
+            workers,
             digest
         );
     } else {
         println!("encoded {input} -> {output}");
         println!(
-            "  {}x{} {}  {} tiles  {} bytes  ratio {:.3}x  {:.3} B/px",
+            "  {}x{} {}  {} tiles  {} bytes  ratio {:.3}x  {:.3} B/px  {} workers",
             image.width(),
             image.height(),
             image.format(),
             report.tile_count,
             report.file_size,
             report.compression_ratio(),
-            report.bytes_per_pixel(image.width() as u64 * image.height() as u64)
+            report.file_size as f64 / pixel_count as f64,
+            workers
         );
         println!("  canonical sha256 {digest}");
     }
@@ -447,6 +469,9 @@ OPTIONS:
     --codec <name>         Codec: auto (default), raw, palette, rle, predictor
     --max-size <size>      Decimal byte ceiling, e.g. 10MB (ADR-0006)
     --max-size-mib <n>     Binary MiB ceiling
+    --workers <n>          Encoder worker threads (default: the logical CPU count).
+                           The worker count changes the speed and not the bytes:
+                           one worker and N workers write the same file.
     --input-format <kind>  png | raw | vpng (default: by extension)
     --format <name>        Pixel format for raw I/O, e.g. rgba8, rgb16
     --width <n> --height <n>  Dimensions for raw input
