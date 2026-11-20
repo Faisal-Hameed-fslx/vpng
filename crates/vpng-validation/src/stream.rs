@@ -347,3 +347,83 @@ pub struct VerificationReport {
     /// Whether the header carries the expected version.
     pub header_magic_ok: bool,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use vpng_core::PixelFormat;
+    use vpng_encoder::parallel::ParallelOptions;
+    use vpng_encoder::source::PixelSource;
+    use vpng_encoder::stream::encode_to_file;
+    use vpng_tiling::TileGeometry;
+
+    /// A source that produces the same pattern [`fill_tile`] does.
+    struct PatternSource {
+        format: PixelFormat,
+    }
+
+    impl PixelSource for PatternSource {
+        fn width(&self) -> u32 {
+            320
+        }
+
+        fn height(&self) -> u32 {
+            240
+        }
+
+        fn format(&self) -> PixelFormat {
+            self.format
+        }
+
+        fn tile_pixels(&self, _index: usize, geom: &TileGeometry, out: &mut Vec<u8>) -> Result<()> {
+            fill_tile(geom.x, geom.y, geom.width, geom.height, self.format, out);
+            Ok(())
+        }
+    }
+
+    /// The library's streaming writer and this crate's writer must produce
+    /// the same file for the same pixels.
+    ///
+    /// This crate's writer is the one the P4 memory figures were measured
+    /// with, so the equality is what makes it safe to replace it with the
+    /// library's writer later: the file does not change, so the evidence
+    /// does not go stale.
+    #[test]
+    fn the_library_writer_and_the_validation_writer_agree() {
+        let limits = Limits::default();
+        let format = PixelFormat::rgba8();
+        let directory = std::env::temp_dir().join(format!(
+            "vpng-writer-agreement-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+
+        let validation_path = directory.join("validation.vpng");
+        let library_path = directory.join("library.vpng");
+
+        write_streaming(&validation_path, 320, 240, format, 64, &limits, None).unwrap();
+
+        encode_to_file(
+            &PatternSource { format },
+            &EncodeOptions::default().with_tile_size(64, 64),
+            &ParallelOptions::default().with_workers(4),
+            &library_path,
+        )
+        .unwrap();
+
+        let validation_bytes = std::fs::read(&validation_path).unwrap();
+        let library_bytes = std::fs::read(&library_path).unwrap();
+        assert_eq!(
+            vpng_container::sha256(&validation_bytes),
+            vpng_container::sha256(&library_bytes),
+            "the two writers produced different files"
+        );
+        assert_eq!(validation_bytes, library_bytes);
+
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+}

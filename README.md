@@ -5,12 +5,14 @@ A lossless, adaptive, tiled, random-access image format and editing engine.
 **Primary requirement:** exact pixel reconstruction.
 **Secondary target:** fit eligible images within 10 MB — measured, never promised.
 **Status:** v0.1 container implemented, compiled, and tested; the editing engine
-(P4), the compression research (P3.5) and the interactive engine (P5) have
-landed. `cargo build --workspace` and `cargo test --workspace --all-targets`
-both pass (351 tests, 0 failures) on `stable-x86_64-pc-windows-gnu` rustc
+(P4), the compression research (P3.5), the interactive engine (P5) and the
+parallel/streaming encoder (P5.1) have landed. `cargo build --workspace` and
+`cargo test --workspace --all-targets`
+both pass (358 tests, 0 failures) on `stable-x86_64-pc-windows-gnu` rustc
 1.100.0. Large-image stress runs, a 16K memory matrix, an editing benchmark, a
-16K viewing benchmark and a seed-corpus measurement are recorded in
-`docs/BENCHMARKS.md` and `docs/P5_REPORT.md`. See `docs/ROADMAP_STATUS.md`.
+16K viewing benchmark, a 16K encoding benchmark and a seed-corpus measurement
+are recorded in `docs/BENCHMARKS.md`, `docs/P5_REPORT.md` and
+`docs/P5_ENCODER_REPORT.md`. See `docs/ROADMAP_STATUS.md`.
 
 ## What works today
 
@@ -35,10 +37,18 @@ both pass (351 tests, 0 failures) on `stable-x86_64-pc-windows-gnu` rustc
   case **ran**: the first viewport takes 63.56 ms against the sequential
   baseline's 118.96 ms, and the whole viewing run peaks at 47.9 MB of
   resident set against the 64 MB target. See `docs/P5_REPORT.md`.
+* A **parallel and streaming encoder** (`crates/vpng-encoder`): a
+  `PixelSource` hands the encoder one tile at a time, so a 16K image is
+  encoded without ever being in memory, and worker threads encode chunks of
+  tiles while a coordinator consumes them in tile order. Eight workers cut
+  the 16K encode 4.27× (128962.99 ms → 30174.82 ms), and **every worker
+  count wrote the same file** — one SHA-256, checked over 144 encode cases.
+  The whole run peaks at 19.3 MB of resident set against the 64 MB target.
+  See `docs/P5_ENCODER_REPORT.md`.
 * Conformance tests: exhaustive round-trip, region-vs-crop, malformed-input
   sweeps, a bounded mutation sweep, golden files, the `default_codec`
   clarification, and a deterministic fuzzing harness over seven targets.
-  351 tests, all passing.
+  358 tests, all passing.
 * Layered integrity: `info` (structure only), `check` (every payload CRC32C),
   `verify` (exact pixels against a reference).
 * Measured evidence: large-image stress (up to a 15360×8640 photo and
@@ -76,13 +86,25 @@ graphical editor** yet. Each phase has a row in the status table.
 
 ## What is being built next
 
-The multiresolution preview pyramid (P6) and adaptive tiling (P7). The
-interactive engine (P5) is done: a streaming reader (`crates/vpng-source`), a
-bounded scheduler with viewport priority and cancellation, a parallel worker
+The **measurement foundation**, then the **750-image corpus**, then the
+container revisions. The order follows the agreed plan: faster tooling
+first, so every later benchmark is affordable and trustworthy.
+
+The interactive engine (P5) is done: a streaming reader (`crates/vpng-source`),
+a bounded scheduler with viewport priority and cancellation, a parallel worker
 pool whose output is byte-identical to the sequential decoder's, a predictive
 prefetch, and a measured acceptance benchmark. Prefetch is a measured
 trade-off, not a promise: it helps at 16K (best radius 2) and does not help at
 2K, and both runs are kept in `docs/P5_REPORT.md` §3.3.
+
+The parallel and streaming encoder (P5.1) is done too: the encoder now scales
+across workers without changing a single byte of the file it writes. That is
+what makes the 750-image corpus affordable, and it is the reason the corpus
+comes before the container revisions rather than after them.
+
+After that come the multiresolution preview pyramid (P6) and adaptive tiling
+(P7), which are container revisions and are done back to back so the
+container version is bumped once.
 
 The roadmap also carries a **feature backlog** — a preview pyramid, Python
 bindings, a graphical editor, a WebAssembly package, HTTP Range streaming,

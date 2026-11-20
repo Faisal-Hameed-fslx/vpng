@@ -1,4 +1,4 @@
-//! `vpng-encoder` — turn a [`CanonicalImage`] into a complete `.vpng` file.
+//! `vpng-encoder` — turn canonical pixels into a complete `.vpng` file.
 //!
 //! The encoder is deliberately simple: uniform tiles, payloads written back to
 //! back after the directory. Every size and offset is computed with checked
@@ -14,12 +14,26 @@
 //! The encoder never drops information to satisfy a size request. If the output
 //! cannot fit `max_size`, it returns [`vpng_core::ErrorKind::SizeLimitExceeded`]
 //! and reports the smallest lossless size it found.
+//!
+//! # Parallel and streaming encoding
+//!
+//! [`parallel::encode_parallel`] encodes the tiles on several threads, and
+//! [`stream::encode_to_file`] writes a file without ever holding the whole
+//! image. Both are **byte-identical** to [`encode`]: the per-tile work sees
+//! only the tile's own pixels and geometry, so the file's bytes depend on the
+//! tiles, never on the order the workers finished in. That rule is checked by
+//! the test suite over every pixel format, several sizes and several tile
+//! geometries.
 
 #![forbid(unsafe_code)]
 
+pub mod parallel;
+pub mod source;
+pub mod stream;
+
 use vpng_codecs::{get_codec, EncodeContext, CODEC_AUTO, CODEC_RAW, IMPLEMENTED_CODEC_IDS};
 use vpng_container::{crc32c, Directory, DirectoryEntry, Header, HEADER_SIZE};
-use vpng_core::{CanonicalImage, Error, ErrorKind, Limits, Result};
+use vpng_core::{CanonicalImage, Dimensions, Error, ErrorKind, Limits, PixelFormat, Result};
 use vpng_tiling::{TileGeometry, TileGrid};
 
 /// Nominal tile edge for the reference implementation (256 x 256).
@@ -110,13 +124,26 @@ impl EncodeReport {
     }
 }
 
+/// One encoded tile: its codec, its payload and its canonical size.
+pub(crate) struct TilePayload {
+    pub(crate) codec_id: u8,
+    pub(crate) bytes: Vec<u8>,
+    pub(crate) uncompressed_length: u32,
+}
+
 /// Encode `image` into a complete `.vpng` byte stream.
 pub fn encode(image: &CanonicalImage, options: &EncodeOptions) -> Result<EncodeReport> {
-    let limits = options.limits;
-    let format = image.format();
     let dims = image.dimensions();
+    let grid = plan_grid(dims, options)?;
+    let payloads =
+        parallel::encode_all_tiles(image, &grid, options, &parallel::ParallelOptions::default())?;
+    assemble(dims, image.format(), options, &grid, payloads)
+}
 
-    limits.validate_dimensions(dims, "encode input")?;
+/// Build the tile grid and check everything that must hold before any work
+/// starts, so a bad option fails cleanly rather than partway through a file.
+pub(crate) fn plan_grid(dims: Dimensions, options: &EncodeOptions) -> Result<TileGrid> {
+    options.limits.validate_dimensions(dims, "encode input")?;
 
     if options.tile_width == 0 || options.tile_height == 0 {
         return Err(Error::invalid("tile dimensions must be non-zero"));
@@ -135,7 +162,7 @@ pub fn encode(image: &CanonicalImage, options: &EncodeOptions) -> Result<EncodeR
         dims.height,
     )?;
     let tile_count = grid.tile_count()?;
-    limits.validate_tile_count(tile_count)?;
+    options.limits.validate_tile_count(tile_count)?;
 
     // A forced codec must be supported before any work starts, so an unknown id
     // fails cleanly rather than partway through a file.
@@ -143,55 +170,51 @@ pub fn encode(image: &CanonicalImage, options: &EncodeOptions) -> Result<EncodeR
         let _ = get_codec(options.codec_id)?;
     }
 
+    Ok(grid)
+}
+
+/// Assemble the container from the encoded tiles.
+///
+/// This is the single place where offsets, checksums and the header are
+/// computed. The serial encoder and the parallel encoder both use it, which
+/// is why they cannot disagree about the bytes.
+pub(crate) fn assemble(
+    dims: Dimensions,
+    format: PixelFormat,
+    options: &EncodeOptions,
+    grid: &TileGrid,
+    payloads: Vec<TilePayload>,
+) -> Result<EncodeReport> {
+    let tile_count = grid.tile_count()?;
     let directory_size = Directory::total_size(tile_count)?;
     let mut cursor = vpng_core::checked_add(HEADER_SIZE as u64, directory_size as u64)?;
 
     let mut entries: Vec<DirectoryEntry> = Vec::with_capacity(tile_count as usize);
-    let mut payloads: Vec<Vec<u8>> = Vec::with_capacity(tile_count as usize);
     let mut chosen_codecs: Vec<u8> = Vec::with_capacity(tile_count as usize);
-    let mut tile_buffer: Vec<u8> = Vec::new();
+    let mut compressed_lengths: Vec<u64> = Vec::with_capacity(tile_count as usize);
+    let mut uncompressed_lengths: Vec<u32> = Vec::with_capacity(tile_count as usize);
 
-    for geom in grid.iter() {
-        if geom.width > u16::MAX as u32 || geom.height > u16::MAX as u32 {
-            return Err(Error::unsupported(
-                "a tile's pixel width or height does not fit the 16-bit directory fields",
-            ));
-        }
-
-        extract_tile(image, &geom, &mut tile_buffer)?;
-        let uncompressed_len = u32::try_from(tile_buffer.len())
-            .map_err(|_| Error::resource_limit("tile uncompressed size exceeds u32"))?;
-
-        // The context carries the tile's *actual* geometry: a tile in the last
-        // column or row is smaller than the nominal grid, and a codec that
-        // needs the pixel width (the predictor) must see the real one.
-        let enc_ctx = EncodeContext {
-            limits,
-            format,
-            tile_width: geom.width as u16,
-            tile_height: geom.height as u16,
-        };
-
-        let (codec_id, payload) = select_payload(&tile_buffer, &enc_ctx, options)?;
-        let checksum = crc32c(&payload);
+    for (geom, payload) in grid.iter().zip(payloads.iter()) {
+        let checksum = crc32c(&payload.bytes);
 
         entries.push(DirectoryEntry {
             x: geom.x,
             y: geom.y,
             width: geom.width as u16,
             height: geom.height as u16,
-            codec_id,
+            codec_id: payload.codec_id,
             predictor_id: 0,
             flags: 0,
             payload_offset: cursor,
-            compressed_length: payload.len() as u64,
-            uncompressed_length: uncompressed_len,
+            compressed_length: payload.bytes.len() as u64,
+            uncompressed_length: payload.uncompressed_length,
             payload_checksum: checksum,
         });
 
-        cursor = vpng_core::checked_add(cursor, payload.len() as u64)?;
-        payloads.push(payload);
-        chosen_codecs.push(codec_id);
+        cursor = vpng_core::checked_add(cursor, payload.bytes.len() as u64)?;
+        chosen_codecs.push(payload.codec_id);
+        compressed_lengths.push(payload.bytes.len() as u64);
+        uncompressed_lengths.push(payload.uncompressed_length);
     }
 
     let directory = Directory::new(entries);
@@ -220,7 +243,7 @@ pub fn encode(image: &CanonicalImage, options: &EncodeOptions) -> Result<EncodeR
     header.write_to(&mut bytes)?;
     bytes.extend_from_slice(&directory_bytes);
     for payload in &payloads {
-        bytes.extend_from_slice(payload);
+        bytes.extend_from_slice(&payload.bytes);
     }
 
     if bytes.len() as u64 != cursor {
@@ -243,16 +266,8 @@ pub fn encode(image: &CanonicalImage, options: &EncodeOptions) -> Result<EncodeR
         tile_count,
         file_size: cursor,
         codec_ids: chosen_codecs,
-        compressed_lengths: payloads.iter().map(|p| p.len() as u64).collect(),
-        uncompressed_lengths: {
-            let mut lengths = Vec::with_capacity(tile_count as usize);
-            for geom in grid.iter() {
-                lengths.push(
-                    (geom.width as u64 * geom.height as u64 * format.bytes_per_pixel()) as u32,
-                );
-            }
-            lengths
-        },
+        compressed_lengths,
+        uncompressed_lengths,
     })
 }
 

@@ -1,0 +1,96 @@
+{
+  "report": {
+    "parameters": {
+      "width": 16384,
+      "height": 16384,
+      "format": "RGBA8",
+      "tile_size": 256,
+      "worker_counts": [
+        1,
+        2,
+        4,
+        8
+      ],
+      "chunk_tiles": 4
+    },
+    "memory_scope": {
+      "included": "the process's resident set (working set) and the allocator's tracked heap during the measured phase, including the tiles in flight, the encoded payloads waiting to be written and the container metadata",
+      "excluded": "the file on disk, the operating system's file cache, the memory of other processes, and the benchmark driver's own memory",
+      "streaming_scenario": "measured before the agreement scenario ran, because the operating system's resident-set high-water mark cannot be reset and the batch encoder deliberately holds a whole image"
+    },
+    "scenarios": {
+      "streaming": {
+        "runs": [
+          {
+            "workers": 1,
+            "encode_ms": 128962.988700,
+            "speedup_vs_one_worker": 1.000000,
+            "file_size_bytes": 140431266,
+            "tiles": 4096,
+            "payload_bytes": 140267358,
+            "framing_bytes": 163908,
+            "sha256": "9cc5a3e266b53553bc0e871be471857cc8387085f71727d18dffa4c533e1fa62"
+          },
+          {
+            "workers": 2,
+            "encode_ms": 70712.859900,
+            "speedup_vs_one_worker": 1.823756,
+            "file_size_bytes": 140431266,
+            "tiles": 4096,
+            "payload_bytes": 140267358,
+            "framing_bytes": 163908,
+            "sha256": "9cc5a3e266b53553bc0e871be471857cc8387085f71727d18dffa4c533e1fa62"
+          },
+          {
+            "workers": 4,
+            "encode_ms": 49681.194000,
+            "speedup_vs_one_worker": 2.595811,
+            "file_size_bytes": 140431266,
+            "tiles": 4096,
+            "payload_bytes": 140267358,
+            "framing_bytes": 163908,
+            "sha256": "9cc5a3e266b53553bc0e871be471857cc8387085f71727d18dffa4c533e1fa62"
+          },
+          {
+            "workers": 8,
+            "encode_ms": 30174.816300,
+            "speedup_vs_one_worker": 4.273862,
+            "file_size_bytes": 140431266,
+            "tiles": 4096,
+            "payload_bytes": 140267358,
+            "framing_bytes": 163908,
+            "sha256": "9cc5a3e266b53553bc0e871be471857cc8387085f71727d18dffa4c533e1fa62"
+          }
+        ],
+        "all_worker_counts_identical": true,
+        "sha256": "9cc5a3e266b53553bc0e871be471857cc8387085f71727d18dffa4c533e1fa62",
+        "memory": {
+          "peak_working_set_bytes": 19296256,
+          "peak_heap_bytes": 13198153
+        },
+        "note": "every worker count wrote the same file: the digest is the proof, not an assertion"
+      },
+      "batch_agreement": {
+        "width": 4096,
+        "height": 4096,
+        "batch_ms": 15633.553700,
+        "streaming_ms": 4029.725900,
+        "batch_file_size_bytes": 27333060,
+        "streaming_file_size_bytes": 27333060,
+        "batch_sha256": "5654d436780a76f30a7ecdc752aa8d82d58ae2a11b71ab4c687bdc616b403503",
+        "streaming_sha256": "5654d436780a76f30a7ecdc752aa8d82d58ae2a11b71ab4c687bdc616b403503",
+        "identical": true,
+        "note": "the batch encoder holds the whole image and the whole file; the streaming writer holds neither; they must agree byte for byte",
+        "memory": {
+          "peak_working_set_bytes": 128991232,
+          "peak_heap_bytes": 121800840
+        }
+      }
+    }
+  },
+  "process": {
+    "elapsed_ms": 300211.438600,
+    "peak_working_set_bytes": 128991232,
+    "peak_heap_bytes": 121800840
+  }
+}

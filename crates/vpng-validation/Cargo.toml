@@ -8,6 +8,7 @@ authors = ["VPNG contributors"]
 description = "Memory validation and editing benchmarks for the VPNG editing engine."
 
 [dependencies]
+sha2.workspace = true
 vpng-core.workspace = true
 vpng-container.workspace = true
 vpng-codecs.workspace = true
@@ -30,3 +31,7 @@ path = "src/bin/vpng-editing-bench.rs"
 [[bin]]
 name = "vpng-view-bench"
 path = "src/bin/vpng-view-bench.rs"
+
+[[bin]]
+name = "vpng-encode-bench"
+path = "src/bin/vpng-encode-bench.rs"

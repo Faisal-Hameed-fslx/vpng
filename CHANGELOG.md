@@ -8,6 +8,37 @@ separately as major.minor in the header.
 
 ### Added
 
+* **The parallel encoder and the streaming writer (`crates/vpng-encoder`).**
+  The encoder now scales, and the streaming writer is a library feature
+  rather than a benchmark helper.
+  * **The encoder's per-tile work is independent.** `select_payload` sees
+    only the tile's own pixels and geometry, so the same tile always
+    produces the same payload. That is what makes parallelism safe.
+  * **One worker and N workers produce the same file, byte for byte.**
+    The serial encoder, the parallel encoder and the streaming writer all
+    build the container through **one** assembly function, so they cannot
+    disagree about offsets, checksums or the header. The 16K benchmark
+    records the SHA-256 of every file it writes: all four worker counts
+    produced the same digest.
+  * **A pixel source, not a whole image.** The new `PixelSource` trait
+    lets a caller hand the encoder one tile at a time, so a 16K image can
+    be encoded without ever being in memory.
+  * **The streaming writer is parallel.** The workers encode chunks of
+    tiles and the coordinator consumes them in tile order, so the payloads
+    are laid out exactly as the serial encoder lays them out. A bounded
+    window of chunks in flight keeps the memory bound, whatever the image
+    size.
+  * **The file is written atomically.** The streaming writer writes to a
+    temporary name in the target's own directory and renames it over the
+    target, so a reader never sees a half-written image and a failed
+    encode leaves no partial file behind.
+  * 6 new integration tests over 144 encode cases: every pixel format ×
+    six sizes × three tile geometries, comparing the batch encoder, the
+    parallel encoder and the streamed file byte for byte; the worker count
+    and the chunk size varied from 1 to 16; a generated source that never
+    holds an image; and a size-limit failure and a failing source, both of
+    which must leave no file behind.
+
 * **The parallel-decode coverage matrix.**
   `crates/vpng-view/tests/parallel_matrix.rs` checks **144 cases** — all
   eight v0.1 pixel formats × six representative sizes × three tile
@@ -338,7 +369,7 @@ separately as major.minor in the header.
   findings**, 3.9 s in the release profile. The *deterministic* harness found
   no library defect; the *coverage-guided* fuzzer, run in CI on Linux, found
   one (see **Fixed** below).
-* The test suite is **351 passed / 0 failed** (was 181).
+* The test suite is **358 passed / 0 failed** (was 181).
 
 ### Known limitations
 

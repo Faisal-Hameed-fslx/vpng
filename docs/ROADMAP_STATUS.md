@@ -18,7 +18,7 @@
 | Default host | `x86_64-pc-windows-gnu` |
 | Active toolchain | overridden by `E:\VPNG\rust-toolchain.toml` |
 | `cargo build --workspace` | **exit 0**, `Finished dev profile ... in 3.85s` |
-| `cargo test --workspace --all-targets` | **exit 0**, `351 passed; 0 failed` |
+| `cargo test --workspace --all-targets` | **exit 0**, `358 passed; 0 failed` |
 | `cargo fmt --all --check` | **exit 0**, no diffs |
 | `cargo clippy --workspace --all-targets` | **exit 0**, zero warnings |
 
@@ -63,6 +63,7 @@ already been done.
 | P3.5 + P4 — compression and editing | the two gates just closed | P3.5 (recorded as P7) and P4 | **verified; committed** (`c821f25`) |
 | P4.1 — specification and compatibility closure | resolve `default_codec`; verify the Linux fuzzing CI path | P10 | **CLOSED** (2026-11-18): the specification clarification is committed (`b692227`) and the Linux coverage-guided fuzz job ran three times — clean, then a real defect that is fixed and pinned, then a clean re-verification (runs 44264162940, 44266490454, 44274770109) |
 | P5 — streaming and parallel decoding | open a 16K image and navigate it without a full-image allocation | P6 (streaming, parallel limits) and the parallel-decode part of P3 | **CLOSED** (2026-11-19): all six stages are done. The 16K RGBA8 acceptance case **ran** (it is not BLOCKED): the first viewport takes 63.56 ms against the sequential baseline's 118.96 ms, the whole run peaks at 47.9 MB of resident set against the 64 MB target, and a 64×64 edit rewrites 1 tile of 4,096. Prefetch is measured, not assumed: it helps at 16K (best radius 2) and does not help at 2K, and both runs are kept. Evidence: `docs/P5_REPORT.md`, `benchmarks/p5_view_results.json`, `benchmarks/p5_view_results_small.json` |
+| P5.1 — the parallel and streaming encoder | make the encoder fast enough that every later benchmark is affordable, and prove that making it fast does not change the file | P6 (the encoder's half) and the v0.18/v0.19 release rows | **CLOSED** (2026-11-20): the 16K RGBA8 acceptance case **ran** (it is not BLOCKED). The encoder's per-tile work is independent, so the parallel driver encodes chunks of tiles on worker threads while a coordinator consumes them **in tile order**; the serial, parallel and streaming paths all assemble the container through one function. Eight workers cut the 16K encode from **128962.99 ms to 30174.82 ms (4.27×)**, and **all four worker counts wrote the same file** — one SHA-256, `9cc5a3e266b53553…`. The streaming writer holds the whole run to **19,296,256 B** of resident set on a 1 GiB image, against the 64 MB target. A `PixelSource` trait means the image is never in memory. Evidence: `docs/P5_ENCODER_REPORT.md`, `benchmarks/p5_encode_results.json` |
 | P6 — multiresolution preview pyramid | fast zooming, progressive presentation | P5 | NOT STARTED |
 | P7 — adaptive tiling | variable tile dimensions and spatially adaptive layouts | P3 | NOT STARTED |
 | P8 — production validation | the 750-image corpus, multiple platforms, 16K workloads | P8 | PARTIAL (seed corpus only) |
@@ -304,6 +305,7 @@ profiles, `x86_64-pc-windows-gnu`.
 | `vpng-decoder` unit | 8 | ok |
 | `vpng-editing` unit | 51 | ok |
 | `vpng-encoder` unit | 9 | ok |
+| `vpng-encoder` `tests/parallel_identity.rs` | 6 | ok (144 encode cases) |
 | `vpng-fuzzing` unit | 0 | ok |
 | `vpng-fuzzing` bin `vpng-fuzz-mutate` | 0 | ok |
 | `vpng-fuzzing` `tests/fuzz_smoke.rs` | 3 | ok |
@@ -322,10 +324,10 @@ profiles, `x86_64-pc-windows-gnu`.
 | `tests/rle.rs` | 6 | ok |
 | `tests/roundtrip.rs` | 7 | ok |
 | `vpng-tiling` unit | 6 | ok |
-| `vpng-validation` unit | 2 | ok |
+| `vpng-validation` unit | 3 | ok |
 | `vpng-validation` bins | 0 | ok |
 | Doc-tests | 0 | ok |
-| **Total** | **351** | **351 passed, 0 failed** |
+| **Total** | **358** | **358 passed, 0 failed** |
 
 The 115 new tests are: 52 codec tests (22 LZ77, 14 CARC, 12 hybrids, plus
 the registry and entropy-stage tests), 51 editing tests, 3 fuzzing tests,
@@ -384,7 +386,9 @@ unit tests and 3 regression tests that replay the fuzzer's crash artifact
 scheduler added 17 (312 → 329); the P5 worker pool added 8 (329 → 337); the P5
 prefetch policy added 12 viewport tests and 1 scheduler test (337 → 350); the
 parallel-decode coverage matrix added 1 integration test over 144 cases
-(350 → 351).
+(350 → 351); the parallel-encoder identity suite added 6 integration tests
+over 144 encode cases (351 → 357); the writer-agreement test added 1 more
+(357 → 358).
 
 ## 7. Not yet measured (explicitly no claims)
 
@@ -432,6 +436,21 @@ What is **still** not claimed:
   correctness matrix covers 144 cases (8 formats × 6 sizes × 3 tile
   geometries), but how the *latency* moves with the tile size, the viewport
   size and the worker count is not measured.
+* **No linear-scaling claim for the parallel encoder.** Eight workers cut
+  the 16K encode 4.27× (128962.99 ms → 30174.82 ms), not 8×, on a 10-core
+  mobile part that was also running the rest of the toolchain. The scaling
+  is sub-linear and the report says so.
+* **No statistical confidence in the encoder figures either.** Each worker
+  count is one run. An earlier run measured the one-worker case at 176812 ms
+  against this run's 128962.99 ms, before the scratch-buffer reuse was
+  added — the variance is visible and is not smoothed away.
+* **No claim that the encoder is fast.** 30174.82 ms for a 1 GiB image is
+  not fast in the absolute sense; the claim is only that more workers make
+  it faster and do not change the file.
+* **No claim about a disk failure partway through the streaming write.** A
+  failed *encode* removes the temporary file and leaves the target
+  untouched; a failure during the final rename is the operating system's
+  business.
 * **No edit-latency claim against another editor.** The editing timings
   are measurements on this host with no baseline to compare against.
 * **No coverage-guided fuzzing result *on this host*.** The deterministic
@@ -559,8 +578,8 @@ not just a list.
 | v0.15 | GPU-ready payloads | the lossless payload stays normative; the GPU payload is an optional sibling, and the size of both is reported so the trade is visible rather than implied | **yes** — the payload kinds | P15 | NOT STARTED |
 | v0.16 | shared dictionaries | a dictionary shared across the tiles of one layer, measured against the per-tile dictionary on the same corpus | **yes** — the payload context | P7 | NOT STARTED |
 | v0.17 | context modelling | promote a research context model to a stable id **only** if it beats the stable predictor on the full corpus; the evidence is the comparison table, not the seed | **yes** — the codec table | P7, P2 | NOT STARTED |
-| v0.18 | parallel encoding | parallel encoding must not change the bytes: the same file must come out of one thread and of four, byte for byte | no | P5, P2 | NOT STARTED |
-| v0.19 | streaming encoder | the streaming writer chooses codecs per tile as it goes, and produces exactly the file the batch encoder produces | no | P5, P2 | NOT STARTED |
+| v0.18 | parallel encoding | parallel encoding must not change the bytes: the same file must come out of one thread and of four, byte for byte | no | P5.1, P2 | **DONE** (the parallel encoder landed with P5.1: one worker and N workers produce the same file, verified by digest over 144 encode cases and by the 16K benchmark's four worker counts) |
+| v0.19 | streaming encoder | the streaming writer chooses codecs per tile as it goes, and produces exactly the file the batch encoder produces | no | P5.1, P2 | **DONE** (the streaming writer is a library feature in `vpng-encoder` now, and produces the batch encoder's file byte for byte; a `PixelSource` lets the image be encoded without ever being in memory) |
 | v0.20 | corpus-driven defaults | the auto codec's thresholds come from the corpus rather than from a guess; the change is measured on the whole corpus, and the seed-only numbers are reported as seed-only | no | P8, P7 | NOT STARTED |
 | v0.21 | closing the gap to JPEG XL | rANS with a shared dictionary and a trained per-category model, measured against the JPEG XL lossless baseline of 0.2189× on the corpus | **yes** — the codec table | P7, P2 | NOT STARTED |
 | v0.22 | metadata chunks | metadata is stored compressed and its compressed size is accounted for exactly, so the file's size accounting stays exact | **yes** — the chunk layout | P10 | NOT STARTED |

@@ -131,6 +131,71 @@ def check_p5() -> None:
           "the report does not record that prefetch can fail to help")
 
 
+def check_encode() -> None:
+    """Check the parallel-encoder report against the raw data."""
+    report = (REPO / "docs/P5_ENCODER_REPORT.md").read_text(encoding="utf-8")
+    raw = json.loads((REPO / "benchmarks/p5_encode_results.json").read_text(encoding="utf-8"))
+    r = raw["report"]
+    streaming = r["scenarios"]["streaming"]
+
+    def quoted(value, fmt) -> None:
+        text = format(value, fmt)
+        check(text in report, f"the encoder report does not contain the figure {text!r}")
+
+    # The central claim: every worker count wrote the same file.
+    check(
+        streaming["all_worker_counts_identical"],
+        "the worker counts did not all produce the same file",
+    )
+    digests = {run["sha256"] for run in streaming["runs"]}
+    check(len(digests) == 1, "the streamed files have different digests")
+    check(streaming["sha256"] in digests, "the summary digest does not match a run")
+
+    # Every run's figures must be quoted in the report.
+    for run in streaming["runs"]:
+        quoted(run["encode_ms"], ".2f")
+        quoted(run["speedup_vs_one_worker"], ".2f")
+        quoted(run["file_size_bytes"], ",")
+        quoted(run["sha256"], "")
+
+    # The batch encoder and the streaming writer must agree.
+    agreement = r["scenarios"]["batch_agreement"]
+    check(agreement["identical"], "the batch encoder and the streaming writer disagree")
+    check(
+        agreement["batch_sha256"] == agreement["streaming_sha256"],
+        "the batch and streaming digests differ",
+    )
+    check(
+        agreement["batch_file_size_bytes"] == agreement["streaming_file_size_bytes"],
+        "the batch and streaming file sizes differ",
+    )
+    quoted(agreement["batch_ms"], ".2f")
+    quoted(agreement["streaming_ms"], ".2f")
+    quoted(agreement["batch_file_size_bytes"], ",")
+    quoted(agreement["batch_sha256"], "")
+
+    # The memory the streaming encoder used must stay inside the target. The
+    # process-wide peak is NOT checked: it includes the agreement scenario,
+    # whose batch encoder deliberately holds a whole image in memory.
+    streaming_memory = streaming["memory"]
+    check(
+        streaming_memory["peak_working_set_bytes"] <= 64 * 1024 * 1024,
+        "the streaming encoder's resident set exceeds the 64 MB target",
+    )
+    check(
+        streaming_memory["peak_heap_bytes"] <= 64 * 1024 * 1024,
+        "the streaming encoder's heap exceeds the 64 MB target",
+    )
+    quoted(streaming_memory["peak_working_set_bytes"], ",")
+    quoted(streaming_memory["peak_heap_bytes"], ",")
+
+    # The report must say that the digests are the proof.
+    check(
+        "sha256" in report.lower() or "digest" in report.lower(),
+        "the encoder report does not mention the digest",
+    )
+
+
 def main() -> int:
     raw = json.loads((REPO / "benchmarks/p3_5_raw_results.json").read_text(encoding="utf-8"))
     report = (REPO / "docs/P3_5_COMPRESSION_RESEARCH_REPORT.md").read_text(encoding="utf-8")
@@ -360,6 +425,9 @@ def main() -> int:
 
     # ---- the P5 viewing deliverable -----------------------------------------
     check_p5()
+
+    # ---- the parallel-encoder deliverable ------------------------------------
+    check_encode()
 
     if problems:
         print(f"{len(problems)} problem(s):")
