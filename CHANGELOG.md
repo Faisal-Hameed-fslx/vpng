@@ -8,6 +8,71 @@ separately as major.minor in the header.
 
 ### Added
 
+* **The multi-run photographic benchmark and the latency matrix
+  (`crates/vpng-validation`).** The measurement foundation: every case is
+  repeated, and the report gives the **median** and the **p95**, not a
+  single figure.
+  * **The 16K photographic case ran** — it did not have to be reported
+    BLOCKED. The corpus's own 15,360 × 8,640 RGB photograph (398,131,200
+    canonical bytes) was encoded **120 times** and viewed repeatedly on one
+    host, in one process: three tile sizes × four worker counts × ten runs.
+  * **The headline result is that a single run cannot be trusted.** The
+    run-to-run spread is **18.5% to 52.4% of the median**. That is why
+    every earlier benchmark in this repository — all of them single runs —
+    could not tell two configurations apart.
+  * **More workers are faster and do not change the bytes.** At tile size
+    256 the encode goes from **78793.67 ms to 12811.94 ms (6.15×)** at
+    eight workers, and each tile size has **one SHA-256 across all forty
+    of its runs**. The scaling is sub-linear and the report says so.
+  * **The tile size, not the thread count, dominates interactive latency.**
+    A pan at tile size 1024 costs **125.87 ms** against **21.44 ms** at
+    256, because a pan across a boundary must decode a whole tile — 3,145,728
+    pixels against 65,536.
+  * **The parallel pool runs out of work at a large tile size.** At 1024 the
+    viewport needs two tiles, so four workers take 135.85 ms and eight take
+    **158.89 ms** — the bigger pool is slower. At 256 the same viewport
+    needs 20 tiles and eight workers give **4.36×** over the sequential
+    baseline's 141.16 ms.
+  * **One worker and a pool is slower than no pool.** 205.60 ms against the
+    sequential path's 141.16 ms at tile size 256: the pool's machinery
+    costs more than it saves when there is nothing to parallelise.
+  * **The photograph.** The corpus's native 16K image (15360 × 8640 RGB,
+    398,131,200 canonical bytes) is converted to canonical pixels **once**
+    by `benchmarks/corpus/canonical_cache.py`, cached under a key derived
+    from the source file's SHA-256, with a sidecar that records both
+    digests so a stale cache is detected rather than trusted. The
+    benchmark reads that file tile by tile through a `PixelSource`, so the
+    image is never in memory.
+  * **The matrix.** The tile size (256, 512, 1024) and the worker count
+    (1, 2, 4, 8) are both swept, ten runs per case, against the sequential
+    decoder measured in the same run.
+  * **The percentiles are defined, not assumed.** The median is the middle
+    sample, or the mean of the two middle ones when the count is even; the
+    p95 is the **nearest-rank** percentile; the standard deviation is the
+    sample one. The rules are written into the raw JSON beside the numbers
+    and pinned by unit tests.
+  * **The bytes are checked.** Every encode records the SHA-256 of the file
+    it wrote. A configuration that changed a byte would be reported as a
+    defect, not as a faster result.
+  * **The tables are generated, not transcribed.**
+    `benchmarks/render_bench_tables.py` renders the report's tables
+    straight from the raw JSON, and `check_bench()` in
+    `benchmarks/verify_reports.py` checks that every figure the report
+    contains is the figure the data holds.
+  * **The repetition rule is now the repository's rule.** `docs/BENCHMARKS.md`
+    §Method states it, with the reason: the same one-worker 16K encode
+    measured 176,812 ms in one run and 128,963 ms in the next, and a
+    single run could not tell those two apart.
+
+* **The command line's `encode` streams and parallelises.** `vpng encode`
+  used to build the whole `.vpng` file in memory and then write it; it now
+  uses the streaming writer, so the output is written straight to disk
+  through a temporary name that is renamed over the target. `--workers N`
+  exposes the parallel encoder (default: the logical CPU count). **The
+  worker count changes the speed and not the bytes**, and three new
+  integration tests in `crates/vpng-cli/tests/encode_workers.rs` check it
+  from the command line's own side.
+
 * **The parallel encoder and the streaming writer (`crates/vpng-encoder`).**
   The encoder now scales, and the streaming writer is a library feature
   rather than a benchmark helper.
@@ -369,7 +434,7 @@ separately as major.minor in the header.
   findings**, 3.9 s in the release profile. The *deterministic* harness found
   no library defect; the *coverage-guided* fuzzer, run in CI on Linux, found
   one (see **Fixed** below).
-* The test suite is **358 passed / 0 failed** (was 181).
+* The test suite is **368 passed / 0 failed** (was 181).
 
 ### Known limitations
 

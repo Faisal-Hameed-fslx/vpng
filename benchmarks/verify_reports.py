@@ -196,6 +196,112 @@ def check_encode() -> None:
     )
 
 
+def check_bench() -> None:
+    """Check the multi-run photographic baseline report against the raw data."""
+    report = (REPO / "docs/P5_BENCH_REPORT.md").read_text(encoding="utf-8")
+    raw = json.loads((REPO / "benchmarks/p5_bench_results.json").read_text(encoding="utf-8"))
+    r = raw["report"]
+    s = r["scenarios"]
+
+    def quoted(value, fmt) -> None:
+        text = format(value, fmt)
+        check(text in report, f"the benchmark report does not contain the figure {text!r}")
+
+    # The source is the photograph, and the report says how big it is.
+    quoted(r["source"]["canonical_bytes"], ",")
+    quoted(r["source"]["width"], ",")
+    quoted(r["source"]["height"], ",")
+    check(
+        r["source"]["canonical_bytes"] == r["source"]["file_bytes"],
+        "the canonical file is not the size the image should be",
+    )
+
+    # Every case was repeated: the user's floor is five runs.
+    runs = r["parameters"]["runs"]
+    check(runs >= 5, f"only {runs} runs per case; the floor is 5")
+    quoted(runs, "d")
+
+    # ---- the encode matrix ---------------------------------------------------
+    by_tile: dict[int, list[dict]] = {}
+    for row in s["encode_matrix"]:
+        by_tile.setdefault(row["tile_size"], []).append(row)
+        check(row["runs"] == runs, f"the encode case t{row['tile_size']} ran {row['runs']} times")
+        stats = row["stats"]
+        check(
+            stats["count"] == runs,
+            f"the encode case t{row['tile_size']} w{row['workers']} has {stats['count']} samples",
+        )
+        check(
+            stats["min_ms"] <= stats["median_ms"] <= stats["max_ms"],
+            f"the encode case t{row['tile_size']} w{row['workers']} has an impossible order",
+        )
+        check(
+            stats["median_ms"] <= stats["p95_ms"] <= stats["max_ms"],
+            f"the encode case t{row['tile_size']} w{row['workers']} has an impossible p95",
+        )
+        quoted(stats["median_ms"], ".2f")
+        quoted(stats["p95_ms"], ".2f")
+        quoted(stats["mean_ms"], ".2f")
+        quoted(stats["stdev_ms"], ".2f")
+        quoted(row["file_size_bytes"], ",")
+        quoted(row["sha256"], "")
+
+    # The worker count must not change the file: within a tile size every
+    # worker count has to have written the same bytes.
+    for tile_size, rows in by_tile.items():
+        digests = {row["sha256"] for row in rows}
+        check(
+            len(digests) == 1,
+            f"tile size {tile_size}: the worker counts wrote different files",
+        )
+
+    # ---- the compression summary --------------------------------------------
+    for row in s["compression"]:
+        quoted(row["file_size_bytes"], ",")
+        quoted(row["canonical_bytes"], ",")
+        quoted(row["tiles"], ",")
+        quoted(row["ratio"], ".3f")
+        quoted(row["sha256"], "")
+        check(
+            row["all_runs_identical"],
+            f"tile size {row['tile_size']}: the runs did not all write the same file",
+        )
+        check(
+            row["file_size_bytes"] > 0,
+            f"tile size {row['tile_size']}: the file is empty",
+        )
+
+    # ---- the viewing matrix --------------------------------------------------
+    for row in s["first_viewport_matrix"]:
+        quoted(row["open_stats"]["median_ms"], ".2f")
+        quoted(row["decode_stats"]["median_ms"], ".2f")
+        quoted(row["time_to_pixels_stats"]["median_ms"], ".2f")
+        quoted(row["time_to_pixels_stats"]["p95_ms"], ".2f")
+        quoted(row["visible_tiles"], "d")
+
+    # ---- the pan matrix ------------------------------------------------------
+    for row in s["pan_matrix"]:
+        quoted(row["pan_stats"]["median_ms"], ".2f")
+        quoted(row["pan_stats"]["p95_ms"], ".2f")
+        quoted(row["sweep_total_stats"]["median_ms"], ".2f")
+        quoted(row["pans_per_run"], "d")
+
+    # ---- the sequential baseline ---------------------------------------------
+    for row in s["sequential_baseline"]:
+        quoted(row["stats"]["median_ms"], ".2f")
+        quoted(row["stats"]["p95_ms"], ".2f")
+        quoted(row["visible_tiles"], "d")
+
+    # The report has to say what the percentiles mean and what the memory
+    # scope is.
+    check("nearest-rank" in report.lower(), "the report does not define the p95 rule")
+    check("median" in report.lower(), "the report does not mention the median")
+    check("included" in report.lower() and "excluded" in report.lower(),
+          "the report does not state the memory scope")
+    check("sha256" in report.lower() or "digest" in report.lower(),
+          "the report does not mention the digest")
+
+
 def main() -> int:
     raw = json.loads((REPO / "benchmarks/p3_5_raw_results.json").read_text(encoding="utf-8"))
     report = (REPO / "docs/P3_5_COMPRESSION_RESEARCH_REPORT.md").read_text(encoding="utf-8")
@@ -428,6 +534,9 @@ def main() -> int:
 
     # ---- the parallel-encoder deliverable ------------------------------------
     check_encode()
+
+    # ---- the multi-run photographic baseline ---------------------------------
+    check_bench()
 
     if problems:
         print(f"{len(problems)} problem(s):")

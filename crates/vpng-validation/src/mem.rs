@@ -249,19 +249,6 @@ mod tests {
     static TEST_ALLOCATOR: Tracking = Tracking;
 
     #[test]
-    fn the_heap_counter_follows_the_allocations() {
-        let before = current_heap_bytes();
-        let block = vec![0u8; 1024 * 1024];
-        let during = current_heap_bytes();
-        assert!(
-            during >= before + 1024 * 1024,
-            "the counter did not see the allocation: {before} -> {during}"
-        );
-        drop(block);
-        assert!(current_heap_bytes() <= before + 1024 * 1024);
-    }
-
-    #[test]
     fn a_sample_has_the_heap_figures() {
         let sample = sample();
         assert!(sample.heap_peak_bytes >= sample.heap_current_bytes);

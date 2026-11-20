@@ -1,0 +1,1154 @@
+{
+  "report": {
+    "tool": "vpng-photo-bench",
+    "parameters": {
+      "width": 15360,
+      "height": 8640,
+      "format": "RGB8",
+      "tile_sizes": [
+        256,
+        512,
+        1024
+      ],
+      "worker_counts": [
+        1,
+        2,
+        4,
+        8
+      ],
+      "runs": 10,
+      "viewport_width": 1024,
+      "viewport_height": 1024,
+      "chunk_tiles": 4,
+      "cache_bytes": 33554432,
+      "queue_capacity": 256
+    },
+    "source": {
+      "path": "corpus-data\\cache\\7479807165b6411a-1006677.raw",
+      "width": 15360,
+      "height": 8640,
+      "format": "RGB8",
+      "canonical_bytes": 398131200,
+      "file_bytes": 398131200
+    },
+    "statistics": {
+      "method": "each case is repeated and the median and the p95 are reported; the mean and the sample standard deviation are reported beside them",
+      "p95_rule": "nearest rank: the smallest sample at or above the 95th percentile, so with ten samples the p95 is the largest of the ten",
+      "median_rule": "the middle sample, or the mean of the two middle samples when the count is even",
+      "stdev_rule": "the sample standard deviation, with n - 1 in the denominator"
+    },
+    "memory_scope": {
+      "included": "the canonical pixel file is read from disk, tile by tile, and is never held in memory; the figures in this report are latencies, and the working-set bound of the encoder is measured separately in docs/P5_ENCODER_REPORT.md with a source that generates tiles on demand",
+      "excluded": "the file on disk, the operating system's page cache, the memory of other processes, and the benchmark driver's own memory"
+    },
+    "scenarios": {
+      "encode_matrix": [
+        {
+          "tile_size": 256,
+          "workers": 1,
+          "runs": 10,
+          "samples_ms": [
+            72952.306500,
+            85216.079900,
+            89621.852600,
+            71422.431100,
+            65579.547800,
+            76451.607800,
+            81135.732200,
+            65240.760300,
+            82704.653500,
+            81745.398000
+          ],
+          "stats": {
+            "count": 10,
+            "min_ms": 65240.760300,
+            "max_ms": 89621.852600,
+            "mean_ms": 77207.036970,
+            "median_ms": 78793.670000,
+            "p95_ms": 89621.852600,
+            "stdev_ms": 8266.753506
+          },
+          "file_size_bytes": 124197035,
+          "sha256": "d029a7ebc1e0347cb3399ab6f9de9653da5853c96b38d95cddc3b8bb45a14dbf"
+        },
+        {
+          "tile_size": 256,
+          "workers": 2,
+          "runs": 10,
+          "samples_ms": [
+            54965.123600,
+            46954.525900,
+            36177.037400,
+            42657.219800,
+            46509.948400,
+            47521.599700,
+            44869.204000,
+            55815.379800,
+            60914.339600,
+            56640.836600
+          ],
+          "stats": {
+            "count": 10,
+            "min_ms": 36177.037400,
+            "max_ms": 60914.339600,
+            "mean_ms": 49302.521480,
+            "median_ms": 47238.062800,
+            "p95_ms": 60914.339600,
+            "stdev_ms": 7569.995419
+          },
+          "file_size_bytes": 124197035,
+          "sha256": "d029a7ebc1e0347cb3399ab6f9de9653da5853c96b38d95cddc3b8bb45a14dbf"
+        },
+        {
+          "tile_size": 256,
+          "workers": 4,
+          "runs": 10,
+          "samples_ms": [
+            29144.478000,
+            27427.347500,
+            28339.756800,
+            28381.970300,
+            29932.022000,
+            27101.850000,
+            26219.218500,
+            20958.688400,
+            22298.811800,
+            22652.507500
+          ],
+          "stats": {
+            "count": 10,
+            "min_ms": 20958.688400,
+            "max_ms": 29932.022000,
+            "mean_ms": 26245.665080,
+            "median_ms": 27264.598750,
+            "p95_ms": 29932.022000,
+            "stdev_ms": 3153.693493
+          },
+          "file_size_bytes": 124197035,
+          "sha256": "d029a7ebc1e0347cb3399ab6f9de9653da5853c96b38d95cddc3b8bb45a14dbf"
+        },
+        {
+          "tile_size": 256,
+          "workers": 8,
+          "runs": 10,
+          "samples_ms": [
+            12846.754600,
+            14358.292100,
+            15215.079300,
+            12978.405500,
+            12756.860600,
+            12776.283600,
+            12709.929200,
+            12722.653500,
+            12777.121300,
+            12897.530100
+          ],
+          "stats": {
+            "count": 10,
+            "min_ms": 12709.929200,
+            "max_ms": 15215.079300,
+            "mean_ms": 13203.890980,
+            "median_ms": 12811.937950,
+            "p95_ms": 15215.079300,
+            "stdev_ms": 862.178883
+          },
+          "file_size_bytes": 124197035,
+          "sha256": "d029a7ebc1e0347cb3399ab6f9de9653da5853c96b38d95cddc3b8bb45a14dbf"
+        },
+        {
+          "tile_size": 512,
+          "workers": 1,
+          "runs": 10,
+          "samples_ms": [
+            76613.539100,
+            69830.693600,
+            58425.413200,
+            86146.691300,
+            84364.353700,
+            86302.160900,
+            81192.564700,
+            89305.173600,
+            84084.677200,
+            76296.281300
+          ],
+          "stats": {
+            "count": 10,
+            "min_ms": 58425.413200,
+            "max_ms": 89305.173600,
+            "mean_ms": 79256.154860,
+            "median_ms": 82638.620950,
+            "p95_ms": 89305.173600,
+            "stdev_ms": 9367.614811
+          },
+          "file_size_bytes": 123142966,
+          "sha256": "0f902a7f0d3a4b3ecb559daac64e7a5aae98693980b6a1ddb6405e671ba32a11"
+        },
+        {
+          "tile_size": 512,
+          "workers": 2,
+          "runs": 10,
+          "samples_ms": [
+            47469.747300,
+            46990.544900,
+            45400.777500,
+            34241.297100,
+            30545.333500,
+            32667.638400,
+            38854.935400,
+            34036.688500,
+            31936.018500,
+            34657.513800
+          ],
+          "stats": {
+            "count": 10,
+            "min_ms": 30545.333500,
+            "max_ms": 47469.747300,
+            "mean_ms": 37680.049490,
+            "median_ms": 34449.405450,
+            "p95_ms": 47469.747300,
+            "stdev_ms": 6555.495188
+          },
+          "file_size_bytes": 123142966,
+          "sha256": "0f902a7f0d3a4b3ecb559daac64e7a5aae98693980b6a1ddb6405e671ba32a11"
+        },
+        {
+          "tile_size": 512,
+          "workers": 4,
+          "runs": 10,
+          "samples_ms": [
+            20778.316300,
+            24909.147300,
+            24733.698000,
+            25432.654300,
+            22885.527300,
+            27157.136400,
+            29611.682000,
+            24813.789400,
+            24898.155800,
+            25850.162500
+          ],
+          "stats": {
+            "count": 10,
+            "min_ms": 20778.316300,
+            "max_ms": 29611.682000,
+            "mean_ms": 25107.026930,
+            "median_ms": 24903.651550,
+            "p95_ms": 29611.682000,
+            "stdev_ms": 2336.523827
+          },
+          "file_size_bytes": 123142966,
+          "sha256": "0f902a7f0d3a4b3ecb559daac64e7a5aae98693980b6a1ddb6405e671ba32a11"
+        },
+        {
+          "tile_size": 512,
+          "workers": 8,
+          "runs": 10,
+          "samples_ms": [
+            20286.827300,
+            17682.594400,
+            17338.547500,
+            18248.108400,
+            16773.681000,
+            14857.556000,
+            15319.354700,
+            19495.371400,
+            18031.884200,
+            18361.359500
+          ],
+          "stats": {
+            "count": 10,
+            "min_ms": 14857.556000,
+            "max_ms": 20286.827300,
+            "mean_ms": 17639.528440,
+            "median_ms": 17857.239300,
+            "p95_ms": 20286.827300,
+            "stdev_ms": 1682.009706
+          },
+          "file_size_bytes": 123142966,
+          "sha256": "0f902a7f0d3a4b3ecb559daac64e7a5aae98693980b6a1ddb6405e671ba32a11"
+        },
+        {
+          "tile_size": 1024,
+          "workers": 1,
+          "runs": 10,
+          "samples_ms": [
+            96275.808500,
+            75023.530900,
+            66612.868500,
+            75425.497200,
+            81893.421500,
+            68222.137500,
+            86803.811900,
+            94257.723000,
+            96997.275300,
+            95093.250500
+          ],
+          "stats": {
+            "count": 10,
+            "min_ms": 66612.868500,
+            "max_ms": 96997.275300,
+            "mean_ms": 83660.532480,
+            "median_ms": 84348.616700,
+            "p95_ms": 96997.275300,
+            "stdev_ms": 11852.823209
+          },
+          "file_size_bytes": 122613341,
+          "sha256": "268434304fca43f7c8d9ef7540c3264bbd3fdc7feb5503105b2d36c3bdce689e"
+        },
+        {
+          "tile_size": 1024,
+          "workers": 2,
+          "runs": 10,
+          "samples_ms": [
+            43918.958100,
+            45112.379900,
+            38162.265200,
+            37092.833700,
+            35441.780200,
+            44831.953800,
+            47847.256400,
+            48551.307100,
+            45155.694300,
+            37357.587900
+          ],
+          "stats": {
+            "count": 10,
+            "min_ms": 35441.780200,
+            "max_ms": 48551.307100,
+            "mean_ms": 42347.201660,
+            "median_ms": 44375.455950,
+            "p95_ms": 48551.307100,
+            "stdev_ms": 4837.618174
+          },
+          "file_size_bytes": 122613341,
+          "sha256": "268434304fca43f7c8d9ef7540c3264bbd3fdc7feb5503105b2d36c3bdce689e"
+        },
+        {
+          "tile_size": 1024,
+          "workers": 4,
+          "runs": 10,
+          "samples_ms": [
+            26089.698200,
+            27808.420800,
+            24844.904700,
+            23748.320800,
+            25986.557800,
+            25584.672700,
+            24494.113500,
+            24211.316300,
+            23459.681600,
+            23234.075000
+          ],
+          "stats": {
+            "count": 10,
+            "min_ms": 23234.075000,
+            "max_ms": 27808.420800,
+            "mean_ms": 24946.176140,
+            "median_ms": 24669.509100,
+            "p95_ms": 27808.420800,
+            "stdev_ms": 1426.752658
+          },
+          "file_size_bytes": 122613341,
+          "sha256": "268434304fca43f7c8d9ef7540c3264bbd3fdc7feb5503105b2d36c3bdce689e"
+        },
+        {
+          "tile_size": 1024,
+          "workers": 8,
+          "runs": 10,
+          "samples_ms": [
+            17216.615400,
+            15883.702700,
+            15665.393400,
+            14619.609000,
+            16741.077300,
+            17695.264800,
+            17084.801700,
+            15760.634700,
+            15680.091800,
+            15713.824200
+          ],
+          "stats": {
+            "count": 10,
+            "min_ms": 14619.609000,
+            "max_ms": 17695.264800,
+            "mean_ms": 16206.101500,
+            "median_ms": 15822.168700,
+            "p95_ms": 17695.264800,
+            "stdev_ms": 938.544223
+          },
+          "file_size_bytes": 122613341,
+          "sha256": "268434304fca43f7c8d9ef7540c3264bbd3fdc7feb5503105b2d36c3bdce689e"
+        }
+      ],
+      "compression": [
+        {
+          "tile_size": 256,
+          "tiles": 2040,
+          "canonical_bytes": 398131200,
+          "file_size_bytes": 124197035,
+          "payload_bytes": 124115367,
+          "ratio": 3.205642,
+          "sha256": "d029a7ebc1e0347cb3399ab6f9de9653da5853c96b38d95cddc3b8bb45a14dbf",
+          "all_runs_identical": true
+        },
+        {
+          "tile_size": 512,
+          "tiles": 510,
+          "canonical_bytes": 398131200,
+          "file_size_bytes": 123142966,
+          "payload_bytes": 123122498,
+          "ratio": 3.233081,
+          "sha256": "0f902a7f0d3a4b3ecb559daac64e7a5aae98693980b6a1ddb6405e671ba32a11",
+          "all_runs_identical": true
+        },
+        {
+          "tile_size": 1024,
+          "tiles": 135,
+          "canonical_bytes": 398131200,
+          "file_size_bytes": 122613341,
+          "payload_bytes": 122607873,
+          "ratio": 3.247046,
+          "sha256": "268434304fca43f7c8d9ef7540c3264bbd3fdc7feb5503105b2d36c3bdce689e",
+          "all_runs_identical": true
+        }
+      ],
+      "first_viewport_matrix": [
+        {
+          "tile_size": 256,
+          "workers": 1,
+          "runs": 10,
+          "visible_tiles": 20,
+          "open_stats": {
+            "count": 10,
+            "min_ms": 0.289000,
+            "max_ms": 2.778000,
+            "mean_ms": 0.605140,
+            "median_ms": 0.363100,
+            "p95_ms": 2.778000,
+            "stdev_ms": 0.764685
+          },
+          "decode_stats": {
+            "count": 10,
+            "min_ms": 203.614000,
+            "max_ms": 214.799500,
+            "mean_ms": 206.374210,
+            "median_ms": 205.191600,
+            "p95_ms": 214.799500,
+            "stdev_ms": 3.496635
+          },
+          "time_to_pixels_stats": {
+            "count": 10,
+            "min_ms": 203.954300,
+            "max_ms": 215.154200,
+            "mean_ms": 206.979350,
+            "median_ms": 205.595250,
+            "p95_ms": 215.154200,
+            "stdev_ms": 3.635713
+          }
+        },
+        {
+          "tile_size": 256,
+          "workers": 2,
+          "runs": 10,
+          "visible_tiles": 20,
+          "open_stats": {
+            "count": 10,
+            "min_ms": 0.326600,
+            "max_ms": 0.712900,
+            "mean_ms": 0.440530,
+            "median_ms": 0.371000,
+            "p95_ms": 0.712900,
+            "stdev_ms": 0.140166
+          },
+          "decode_stats": {
+            "count": 10,
+            "min_ms": 102.551300,
+            "max_ms": 106.610400,
+            "mean_ms": 104.096430,
+            "median_ms": 103.005800,
+            "p95_ms": 106.610400,
+            "stdev_ms": 1.698258
+          },
+          "time_to_pixels_stats": {
+            "count": 10,
+            "min_ms": 102.877900,
+            "max_ms": 107.014000,
+            "mean_ms": 104.536960,
+            "median_ms": 103.534100,
+            "p95_ms": 107.014000,
+            "stdev_ms": 1.717731
+          }
+        },
+        {
+          "tile_size": 256,
+          "workers": 4,
+          "runs": 10,
+          "visible_tiles": 20,
+          "open_stats": {
+            "count": 10,
+            "min_ms": 0.440200,
+            "max_ms": 1.015200,
+            "mean_ms": 0.541910,
+            "median_ms": 0.459700,
+            "p95_ms": 1.015200,
+            "stdev_ms": 0.188032
+          },
+          "decode_stats": {
+            "count": 10,
+            "min_ms": 51.718000,
+            "max_ms": 53.143100,
+            "mean_ms": 52.563160,
+            "median_ms": 52.615900,
+            "p95_ms": 53.143100,
+            "stdev_ms": 0.403032
+          },
+          "time_to_pixels_stats": {
+            "count": 10,
+            "min_ms": 52.175700,
+            "max_ms": 54.158300,
+            "mean_ms": 53.105070,
+            "median_ms": 53.104850,
+            "p95_ms": 54.158300,
+            "stdev_ms": 0.532407
+          }
+        },
+        {
+          "tile_size": 256,
+          "workers": 8,
+          "runs": 10,
+          "visible_tiles": 20,
+          "open_stats": {
+            "count": 10,
+            "min_ms": 0.584300,
+            "max_ms": 0.853500,
+            "mean_ms": 0.661810,
+            "median_ms": 0.636650,
+            "p95_ms": 0.853500,
+            "stdev_ms": 0.077560
+          },
+          "decode_stats": {
+            "count": 10,
+            "min_ms": 30.678300,
+            "max_ms": 33.373500,
+            "mean_ms": 31.733960,
+            "median_ms": 31.715950,
+            "p95_ms": 33.373500,
+            "stdev_ms": 0.848801
+          },
+          "time_to_pixels_stats": {
+            "count": 10,
+            "min_ms": 31.290500,
+            "max_ms": 34.031100,
+            "mean_ms": 32.395770,
+            "median_ms": 32.346550,
+            "p95_ms": 34.031100,
+            "stdev_ms": 0.883886
+          }
+        },
+        {
+          "tile_size": 512,
+          "workers": 1,
+          "runs": 10,
+          "visible_tiles": 6,
+          "open_stats": {
+            "count": 10,
+            "min_ms": 0.191000,
+            "max_ms": 1.804100,
+            "mean_ms": 0.556960,
+            "median_ms": 0.385400,
+            "p95_ms": 1.804100,
+            "stdev_ms": 0.494833
+          },
+          "decode_stats": {
+            "count": 10,
+            "min_ms": 183.205100,
+            "max_ms": 230.410800,
+            "mean_ms": 200.315720,
+            "median_ms": 197.377900,
+            "p95_ms": 230.410800,
+            "stdev_ms": 16.387932
+          },
+          "time_to_pixels_stats": {
+            "count": 10,
+            "min_ms": 183.602300,
+            "max_ms": 230.928300,
+            "mean_ms": 200.872680,
+            "median_ms": 197.764500,
+            "p95_ms": 230.928300,
+            "stdev_ms": 16.650357
+          }
+        },
+        {
+          "tile_size": 512,
+          "workers": 2,
+          "runs": 10,
+          "visible_tiles": 6,
+          "open_stats": {
+            "count": 10,
+            "min_ms": 0.267100,
+            "max_ms": 0.705700,
+            "mean_ms": 0.394970,
+            "median_ms": 0.322200,
+            "p95_ms": 0.705700,
+            "stdev_ms": 0.150810
+          },
+          "decode_stats": {
+            "count": 10,
+            "min_ms": 125.358600,
+            "max_ms": 137.706600,
+            "mean_ms": 129.796660,
+            "median_ms": 129.367400,
+            "p95_ms": 137.706600,
+            "stdev_ms": 3.733804
+          },
+          "time_to_pixels_stats": {
+            "count": 10,
+            "min_ms": 125.689700,
+            "max_ms": 138.229800,
+            "mean_ms": 130.191630,
+            "median_ms": 130.004600,
+            "p95_ms": 138.229800,
+            "stdev_ms": 3.772619
+          }
+        },
+        {
+          "tile_size": 512,
+          "workers": 4,
+          "runs": 10,
+          "visible_tiles": 6,
+          "open_stats": {
+            "count": 10,
+            "min_ms": 0.348100,
+            "max_ms": 0.459300,
+            "mean_ms": 0.394130,
+            "median_ms": 0.376750,
+            "p95_ms": 0.459300,
+            "stdev_ms": 0.043590
+          },
+          "decode_stats": {
+            "count": 10,
+            "min_ms": 82.822300,
+            "max_ms": 85.530400,
+            "mean_ms": 83.634030,
+            "median_ms": 83.416950,
+            "p95_ms": 85.530400,
+            "stdev_ms": 0.894284
+          },
+          "time_to_pixels_stats": {
+            "count": 10,
+            "min_ms": 83.229700,
+            "max_ms": 85.878500,
+            "mean_ms": 84.028160,
+            "median_ms": 83.828000,
+            "p95_ms": 85.878500,
+            "stdev_ms": 0.877483
+          }
+        },
+        {
+          "tile_size": 512,
+          "workers": 8,
+          "runs": 10,
+          "visible_tiles": 6,
+          "open_stats": {
+            "count": 10,
+            "min_ms": 0.502900,
+            "max_ms": 0.789900,
+            "mean_ms": 0.621240,
+            "median_ms": 0.601350,
+            "p95_ms": 0.789900,
+            "stdev_ms": 0.086417
+          },
+          "decode_stats": {
+            "count": 10,
+            "min_ms": 44.624200,
+            "max_ms": 57.880300,
+            "mean_ms": 48.180090,
+            "median_ms": 46.463650,
+            "p95_ms": 57.880300,
+            "stdev_ms": 4.491876
+          },
+          "time_to_pixels_stats": {
+            "count": 10,
+            "min_ms": 45.247000,
+            "max_ms": 58.434900,
+            "mean_ms": 48.801330,
+            "median_ms": 47.076800,
+            "p95_ms": 58.434900,
+            "stdev_ms": 4.511185
+          }
+        },
+        {
+          "tile_size": 1024,
+          "workers": 1,
+          "runs": 10,
+          "visible_tiles": 2,
+          "open_stats": {
+            "count": 10,
+            "min_ms": 0.140300,
+            "max_ms": 2.402300,
+            "mean_ms": 0.391880,
+            "median_ms": 0.174200,
+            "p95_ms": 2.402300,
+            "stdev_ms": 0.706611
+          },
+          "decode_stats": {
+            "count": 10,
+            "min_ms": 241.651400,
+            "max_ms": 286.887900,
+            "mean_ms": 255.624440,
+            "median_ms": 250.359500,
+            "p95_ms": 286.887900,
+            "stdev_ms": 15.626593
+          },
+          "time_to_pixels_stats": {
+            "count": 10,
+            "min_ms": 241.843100,
+            "max_ms": 287.068700,
+            "mean_ms": 256.016320,
+            "median_ms": 250.536250,
+            "p95_ms": 287.068700,
+            "stdev_ms": 15.426057
+          }
+        },
+        {
+          "tile_size": 1024,
+          "workers": 2,
+          "runs": 10,
+          "visible_tiles": 2,
+          "open_stats": {
+            "count": 10,
+            "min_ms": 0.171500,
+            "max_ms": 0.572800,
+            "mean_ms": 0.268310,
+            "median_ms": 0.229600,
+            "p95_ms": 0.572800,
+            "stdev_ms": 0.120706
+          },
+          "decode_stats": {
+            "count": 10,
+            "min_ms": 127.656900,
+            "max_ms": 157.247400,
+            "mean_ms": 138.659080,
+            "median_ms": 133.924750,
+            "p95_ms": 157.247400,
+            "stdev_ms": 12.168737
+          },
+          "time_to_pixels_stats": {
+            "count": 10,
+            "min_ms": 127.996400,
+            "max_ms": 157.444300,
+            "mean_ms": 138.927390,
+            "median_ms": 134.250250,
+            "p95_ms": 157.444300,
+            "stdev_ms": 12.115562
+          }
+        },
+        {
+          "tile_size": 1024,
+          "workers": 4,
+          "runs": 10,
+          "visible_tiles": 2,
+          "open_stats": {
+            "count": 10,
+            "min_ms": 0.221400,
+            "max_ms": 0.369500,
+            "mean_ms": 0.278300,
+            "median_ms": 0.266950,
+            "p95_ms": 0.369500,
+            "stdev_ms": 0.049701
+          },
+          "decode_stats": {
+            "count": 10,
+            "min_ms": 125.726600,
+            "max_ms": 170.396900,
+            "mean_ms": 140.856600,
+            "median_ms": 135.563400,
+            "p95_ms": 170.396900,
+            "stdev_ms": 15.381691
+          },
+          "time_to_pixels_stats": {
+            "count": 10,
+            "min_ms": 126.045600,
+            "max_ms": 170.644000,
+            "mean_ms": 141.134900,
+            "median_ms": 135.846400,
+            "p95_ms": 170.644000,
+            "stdev_ms": 15.394718
+          }
+        },
+        {
+          "tile_size": 1024,
+          "workers": 8,
+          "runs": 10,
+          "visible_tiles": 2,
+          "open_stats": {
+            "count": 10,
+            "min_ms": 0.316700,
+            "max_ms": 0.843200,
+            "mean_ms": 0.456150,
+            "median_ms": 0.374700,
+            "p95_ms": 0.843200,
+            "stdev_ms": 0.176294
+          },
+          "decode_stats": {
+            "count": 10,
+            "min_ms": 140.064900,
+            "max_ms": 177.382200,
+            "mean_ms": 159.294000,
+            "median_ms": 158.530650,
+            "p95_ms": 177.382200,
+            "stdev_ms": 14.934199
+          },
+          "time_to_pixels_stats": {
+            "count": 10,
+            "min_ms": 140.595600,
+            "max_ms": 178.063600,
+            "mean_ms": 159.750150,
+            "median_ms": 158.893050,
+            "p95_ms": 178.063600,
+            "stdev_ms": 14.882122
+          }
+        }
+      ],
+      "pan_matrix": [
+        {
+          "tile_size": 256,
+          "workers": 1,
+          "runs": 10,
+          "pans_per_run": 12,
+          "pan_stats": {
+            "count": 120,
+            "min_ms": 95.637200,
+            "max_ms": 199.683700,
+            "mean_ms": 109.556721,
+            "median_ms": 102.026850,
+            "p95_ms": 195.320500,
+            "stdev_ms": 26.335567
+          },
+          "sweep_total_stats": {
+            "count": 10,
+            "min_ms": 1306.123200,
+            "max_ms": 1332.593900,
+            "mean_ms": 1314.928580,
+            "median_ms": 1314.592650,
+            "p95_ms": 1332.593900,
+            "stdev_ms": 7.451858
+          }
+        },
+        {
+          "tile_size": 256,
+          "workers": 2,
+          "runs": 10,
+          "pans_per_run": 12,
+          "pan_stats": {
+            "count": 120,
+            "min_ms": 48.305700,
+            "max_ms": 109.303400,
+            "mean_ms": 56.460323,
+            "median_ms": 52.364300,
+            "p95_ms": 98.152900,
+            "stdev_ms": 13.341521
+          },
+          "sweep_total_stats": {
+            "count": 10,
+            "min_ms": 661.175000,
+            "max_ms": 712.899400,
+            "mean_ms": 677.891830,
+            "median_ms": 676.648650,
+            "p95_ms": 712.899400,
+            "stdev_ms": 14.292989
+          }
+        },
+        {
+          "tile_size": 256,
+          "workers": 4,
+          "runs": 10,
+          "pans_per_run": 12,
+          "pan_stats": {
+            "count": 120,
+            "min_ms": 29.108900,
+            "max_ms": 55.850600,
+            "mean_ms": 33.172842,
+            "median_ms": 31.378800,
+            "p95_ms": 51.244600,
+            "stdev_ms": 6.042951
+          },
+          "sweep_total_stats": {
+            "count": 10,
+            "min_ms": 391.120900,
+            "max_ms": 408.226100,
+            "mean_ms": 398.492360,
+            "median_ms": 397.139250,
+            "p95_ms": 408.226100,
+            "stdev_ms": 5.582435
+          }
+        },
+        {
+          "tile_size": 256,
+          "workers": 8,
+          "runs": 10,
+          "pans_per_run": 12,
+          "pan_stats": {
+            "count": 120,
+            "min_ms": 19.635100,
+            "max_ms": 53.963300,
+            "mean_ms": 22.547410,
+            "median_ms": 21.440500,
+            "p95_ms": 31.383000,
+            "stdev_ms": 4.143587
+          },
+          "sweep_total_stats": {
+            "count": 10,
+            "min_ms": 261.730800,
+            "max_ms": 306.065100,
+            "mean_ms": 271.312650,
+            "median_ms": 267.959000,
+            "p95_ms": 306.065100,
+            "stdev_ms": 13.074382
+          }
+        },
+        {
+          "tile_size": 512,
+          "workers": 1,
+          "runs": 10,
+          "pans_per_run": 12,
+          "pan_stats": {
+            "count": 120,
+            "min_ms": 79.700200,
+            "max_ms": 283.629000,
+            "mean_ms": 116.629165,
+            "median_ms": 108.376350,
+            "p95_ms": 177.120400,
+            "stdev_ms": 33.367751
+          },
+          "sweep_total_stats": {
+            "count": 10,
+            "min_ms": 1159.081200,
+            "max_ms": 1800.809400,
+            "mean_ms": 1399.837550,
+            "median_ms": 1298.710750,
+            "p95_ms": 1800.809400,
+            "stdev_ms": 218.701667
+          }
+        },
+        {
+          "tile_size": 512,
+          "workers": 2,
+          "runs": 10,
+          "pans_per_run": 12,
+          "pan_stats": {
+            "count": 120,
+            "min_ms": 78.834800,
+            "max_ms": 132.260800,
+            "mean_ms": 87.713921,
+            "median_ms": 84.126200,
+            "p95_ms": 120.867800,
+            "stdev_ms": 11.403501
+          },
+          "sweep_total_stats": {
+            "count": 10,
+            "min_ms": 1027.990200,
+            "max_ms": 1085.740900,
+            "mean_ms": 1052.792240,
+            "median_ms": 1052.654200,
+            "p95_ms": 1085.740900,
+            "stdev_ms": 17.292029
+          }
+        },
+        {
+          "tile_size": 512,
+          "workers": 4,
+          "runs": 10,
+          "pans_per_run": 12,
+          "pan_stats": {
+            "count": 120,
+            "min_ms": 40.053200,
+            "max_ms": 92.792800,
+            "mean_ms": 48.067064,
+            "median_ms": 44.022700,
+            "p95_ms": 82.453900,
+            "stdev_ms": 11.561089
+          },
+          "sweep_total_stats": {
+            "count": 10,
+            "min_ms": 558.523700,
+            "max_ms": 610.694000,
+            "mean_ms": 577.071710,
+            "median_ms": 572.898800,
+            "p95_ms": 610.694000,
+            "stdev_ms": 14.784978
+          }
+        },
+        {
+          "tile_size": 512,
+          "workers": 8,
+          "runs": 10,
+          "pans_per_run": 12,
+          "pan_stats": {
+            "count": 120,
+            "min_ms": 40.004300,
+            "max_ms": 64.863800,
+            "mean_ms": 44.495970,
+            "median_ms": 43.417750,
+            "p95_ms": 51.688300,
+            "stdev_ms": 3.761840
+          },
+          "sweep_total_stats": {
+            "count": 10,
+            "min_ms": 520.984800,
+            "max_ms": 550.128100,
+            "mean_ms": 534.281860,
+            "median_ms": 532.770700,
+            "p95_ms": 550.128100,
+            "stdev_ms": 10.880307
+          }
+        },
+        {
+          "tile_size": 1024,
+          "workers": 1,
+          "runs": 10,
+          "pans_per_run": 12,
+          "pan_stats": {
+            "count": 120,
+            "min_ms": 0.000200,
+            "max_ms": 527.808400,
+            "mean_ms": 157.097710,
+            "median_ms": 231.695200,
+            "p95_ms": 324.121500,
+            "stdev_ms": 138.282879
+          },
+          "sweep_total_stats": {
+            "count": 10,
+            "min_ms": 1618.295800,
+            "max_ms": 2189.716700,
+            "mean_ms": 1885.288550,
+            "median_ms": 1841.378200,
+            "p95_ms": 2189.716700,
+            "stdev_ms": 206.776768
+          }
+        },
+        {
+          "tile_size": 1024,
+          "workers": 2,
+          "runs": 10,
+          "pans_per_run": 12,
+          "pan_stats": {
+            "count": 120,
+            "min_ms": 0.000100,
+            "max_ms": 189.067100,
+            "mean_ms": 80.338996,
+            "median_ms": 123.924450,
+            "p95_ms": 151.874100,
+            "stdev_ms": 68.927942
+          },
+          "sweep_total_stats": {
+            "count": 10,
+            "min_ms": 895.296400,
+            "max_ms": 1044.648400,
+            "mean_ms": 964.196190,
+            "median_ms": 958.189050,
+            "p95_ms": 1044.648400,
+            "stdev_ms": 43.962969
+          }
+        },
+        {
+          "tile_size": 1024,
+          "workers": 4,
+          "runs": 10,
+          "pans_per_run": 12,
+          "pan_stats": {
+            "count": 120,
+            "min_ms": 0.000100,
+            "max_ms": 194.330100,
+            "mean_ms": 88.096148,
+            "median_ms": 132.653250,
+            "p95_ms": 179.142800,
+            "stdev_ms": 76.035377
+          },
+          "sweep_total_stats": {
+            "count": 10,
+            "min_ms": 977.024800,
+            "max_ms": 1206.543100,
+            "mean_ms": 1057.318650,
+            "median_ms": 1047.546650,
+            "p95_ms": 1206.543100,
+            "stdev_ms": 69.634453
+          }
+        },
+        {
+          "tile_size": 1024,
+          "workers": 8,
+          "runs": 10,
+          "pans_per_run": 12,
+          "pan_stats": {
+            "count": 120,
+            "min_ms": 0.000200,
+            "max_ms": 165.960300,
+            "mean_ms": 80.524681,
+            "median_ms": 125.873550,
+            "p95_ms": 158.092600,
+            "stdev_ms": 68.919192
+          },
+          "sweep_total_stats": {
+            "count": 10,
+            "min_ms": 909.829000,
+            "max_ms": 1039.317000,
+            "mean_ms": 966.510370,
+            "median_ms": 955.148850,
+            "p95_ms": 1039.317000,
+            "stdev_ms": 50.182922
+          }
+        }
+      ],
+      "sequential_baseline": [
+        {
+          "tile_size": 256,
+          "runs": 10,
+          "visible_tiles": 20,
+          "stats": {
+            "count": 10,
+            "min_ms": 136.961200,
+            "max_ms": 184.794100,
+            "mean_ms": 148.683030,
+            "median_ms": 141.158200,
+            "p95_ms": 184.794100,
+            "stdev_ms": 15.583061
+          }
+        },
+        {
+          "tile_size": 512,
+          "runs": 10,
+          "visible_tiles": 6,
+          "stats": {
+            "count": 10,
+            "min_ms": 248.719400,
+            "max_ms": 271.597000,
+            "mean_ms": 256.029340,
+            "median_ms": 254.082600,
+            "p95_ms": 271.597000,
+            "stdev_ms": 7.978317
+          }
+        },
+        {
+          "tile_size": 1024,
+          "runs": 10,
+          "visible_tiles": 2,
+          "stats": {
+            "count": 10,
+            "min_ms": 232.053700,
+            "max_ms": 261.484600,
+            "mean_ms": 239.802250,
+            "median_ms": 236.505800,
+            "p95_ms": 261.484600,
+            "stdev_ms": 8.561123
+          }
+        }
+      ]
+    }
+  },
+  "process": {
+    "elapsed_ms": 5077170.702800,
+    "peak_working_set_bytes": 192806912,
+    "peak_heap_bytes": 193771436
+  }
+}

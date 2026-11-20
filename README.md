@@ -8,7 +8,7 @@ A lossless, adaptive, tiled, random-access image format and editing engine.
 (P4), the compression research (P3.5), the interactive engine (P5) and the
 parallel/streaming encoder (P5.1) have landed. `cargo build --workspace` and
 `cargo test --workspace --all-targets`
-both pass (358 tests, 0 failures) on `stable-x86_64-pc-windows-gnu` rustc
+both pass (368 tests, 0 failures) on `stable-x86_64-pc-windows-gnu` rustc
 1.100.0. Large-image stress runs, a 16K memory matrix, an editing benchmark, a
 16K viewing benchmark, a 16K encoding benchmark and a seed-corpus measurement
 are recorded in `docs/BENCHMARKS.md`, `docs/P5_REPORT.md` and
@@ -44,18 +44,24 @@ are recorded in `docs/BENCHMARKS.md`, `docs/P5_REPORT.md` and
   the 16K encode 4.27× (128962.99 ms → 30174.82 ms), and **every worker
   count wrote the same file** — one SHA-256, checked over 144 encode cases.
   The whole run peaks at 19.3 MB of resident set against the 64 MB target.
-  See `docs/P5_ENCODER_REPORT.md`.
+  `vpng encode` uses it, with `--workers N`. See `docs/P5_ENCODER_REPORT.md`.
+* A **measurement foundation** (`crates/vpng-validation`): every benchmark
+  case is repeated ten times and reported with a **median** and a **p95**,
+  not a single figure, against a sequential baseline measured in the same
+  run, on a real photograph, over a tile-size × worker-count matrix. The
+  rules are written down in `docs/BENCHMARKS.md` §Method and pinned by unit
+  tests. See `docs/P5_BENCH_REPORT.md`.
 * Conformance tests: exhaustive round-trip, region-vs-crop, malformed-input
   sweeps, a bounded mutation sweep, golden files, the `default_codec`
   clarification, and a deterministic fuzzing harness over seven targets.
-  358 tests, all passing.
+  368 tests, all passing.
 * Layered integrity: `info` (structure only), `check` (every payload CRC32C),
   `verify` (exact pixels against a reference).
 * Measured evidence: large-image stress (up to a 15360×8640 photo and
   16384×16384 pixels) with sampled peak RSS and exactness checks, a 12-case
   16K memory matrix (all PASS, against a 64 MB target), an editing benchmark,
-  and a 9-image seed corpus compared against PNG, WebP lossless and JPEG XL
-  lossless. See `docs/BENCHMARKS.md`.
+  a multi-run photographic latency matrix, and a 9-image seed corpus compared
+  against PNG, WebP lossless and JPEG XL lossless. See `docs/BENCHMARKS.md`.
 * A **compression study** of eleven codecs on identical pixels and identical
   tile layouts: the four stable codecs, four context-adaptive residual models
   (CARC A–D), an LZ77 dictionary codec and three hybrids, each with a pinned

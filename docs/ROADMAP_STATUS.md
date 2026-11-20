@@ -18,7 +18,7 @@
 | Default host | `x86_64-pc-windows-gnu` |
 | Active toolchain | overridden by `E:\VPNG\rust-toolchain.toml` |
 | `cargo build --workspace` | **exit 0**, `Finished dev profile ... in 3.85s` |
-| `cargo test --workspace --all-targets` | **exit 0**, `358 passed; 0 failed` |
+| `cargo test --workspace --all-targets` | **exit 0**, `368 passed; 0 failed` |
 | `cargo fmt --all --check` | **exit 0**, no diffs |
 | `cargo clippy --workspace --all-targets` | **exit 0**, zero warnings |
 
@@ -64,6 +64,7 @@ already been done.
 | P4.1 — specification and compatibility closure | resolve `default_codec`; verify the Linux fuzzing CI path | P10 | **CLOSED** (2026-11-18): the specification clarification is committed (`b692227`) and the Linux coverage-guided fuzz job ran three times — clean, then a real defect that is fixed and pinned, then a clean re-verification (runs 44264162940, 44266490454, 44274770109) |
 | P5 — streaming and parallel decoding | open a 16K image and navigate it without a full-image allocation | P6 (streaming, parallel limits) and the parallel-decode part of P3 | **CLOSED** (2026-11-19): all six stages are done. The 16K RGBA8 acceptance case **ran** (it is not BLOCKED): the first viewport takes 63.56 ms against the sequential baseline's 118.96 ms, the whole run peaks at 47.9 MB of resident set against the 64 MB target, and a 64×64 edit rewrites 1 tile of 4,096. Prefetch is measured, not assumed: it helps at 16K (best radius 2) and does not help at 2K, and both runs are kept. Evidence: `docs/P5_REPORT.md`, `benchmarks/p5_view_results.json`, `benchmarks/p5_view_results_small.json` |
 | P5.1 — the parallel and streaming encoder | make the encoder fast enough that every later benchmark is affordable, and prove that making it fast does not change the file | P6 (the encoder's half) and the v0.18/v0.19 release rows | **CLOSED** (2026-11-20): the 16K RGBA8 acceptance case **ran** (it is not BLOCKED). The encoder's per-tile work is independent, so the parallel driver encodes chunks of tiles on worker threads while a coordinator consumes them **in tile order**; the serial, parallel and streaming paths all assemble the container through one function. Eight workers cut the 16K encode from **128962.99 ms to 30174.82 ms (4.27×)**, and **all four worker counts wrote the same file** — one SHA-256, `9cc5a3e266b53553…`. The streaming writer holds the whole run to **19,296,256 B** of resident set on a 1 GiB image, against the 64 MB target. A `PixelSource` trait means the image is never in memory. Evidence: `docs/P5_ENCODER_REPORT.md`, `benchmarks/p5_encode_results.json` |
+| P5.2 — the multi-run photographic baseline | make every later comparison trustworthy: a repeated, photographic, matrixed measurement to compare P6 and P7 against | the v0.20 and v0.8 corpus rows, and P6/P7's baselines | **CLOSED** (2026-11-20): the 16K photographic case **ran** (it is not BLOCKED). The corpus's own 15,360 × 8,640 RGB photograph (398,131,200 canonical bytes) was encoded **120 times** — three tile sizes × four worker counts × ten runs — and viewed repeatedly in one process. Every case reports a **median** and a **nearest-rank p95**, against a sequential baseline measured in the same run, with the rules written into the raw JSON and pinned by unit tests. The finding that matters: the run-to-run spread is **18.5% to 52.4% of the median**, so a single run cannot be trusted. Eight workers cut the encode 6.15× (78793.67 ms → 12811.94 ms) and **every worker count wrote the same file** — one SHA-256 per tile size across all forty of its runs. The tile size dominates interactive latency: a pan costs 125.87 ms at 1024 against 21.44 ms at 256. Evidence: `docs/P5_BENCH_REPORT.md`, `benchmarks/p5_bench_results.json` |
 | P6 — multiresolution preview pyramid | fast zooming, progressive presentation | P5 | NOT STARTED |
 | P7 — adaptive tiling | variable tile dimensions and spatially adaptive layouts | P3 | NOT STARTED |
 | P8 — production validation | the 750-image corpus, multiple platforms, 16K workloads | P8 | PARTIAL (seed corpus only) |
@@ -299,6 +300,7 @@ profiles, `x86_64-pc-windows-gnu`.
 | Suite | Tests | Result |
 |-------|------:|--------|
 | `vpng-cli` unit | 11 | ok |
+| `vpng-cli` `tests/encode_workers.rs` | 3 | ok |
 | `vpng-codecs` unit | 110 | ok |
 | `vpng-container` unit | 21 | ok |
 | `vpng-core` unit | 19 | ok |
@@ -324,14 +326,27 @@ profiles, `x86_64-pc-windows-gnu`.
 | `tests/rle.rs` | 6 | ok |
 | `tests/roundtrip.rs` | 7 | ok |
 | `vpng-tiling` unit | 6 | ok |
-| `vpng-validation` unit | 3 | ok |
+| `vpng-validation` unit | 9 | ok |
+| `vpng-validation` `tests/mem_tracking.rs` | 2 | ok |
 | `vpng-validation` bins | 0 | ok |
 | Doc-tests | 0 | ok |
-| **Total** | **358** | **358 passed, 0 failed** |
+| **Total** | **368** | **368 passed, 0 failed** |
 
 The 115 new tests are: 52 codec tests (22 LZ77, 14 CARC, 12 hybrids, plus
 the registry and entropy-stage tests), 51 editing tests, 3 fuzzing tests,
 2 memory-accounting tests and 7 `default_codec` conformance tests.
+
+Since that count was taken, ten more have been added: 6 in
+`crates/vpng-validation/src/photo_bench.rs` (the median, the nearest-rank
+p95, the sample standard deviation, the order-independence of the summary,
+and the raw-file tile reader), 3 in
+`crates/vpng-cli/tests/encode_workers.rs` (the worker count does not change
+the file; the command line's file reads back; `--workers 0` is rejected),
+and 1 in `crates/vpng-validation/tests/mem_tracking.rs`. The allocator's
+counter test moved out of the library's test binary into its own
+integration-test binary: the counters are process-wide, so the test raced
+with every other test in the same process and failed roughly nine times in
+ten.
 
 ## 6. Defects found and fixed this phase
 
@@ -388,7 +403,10 @@ prefetch policy added 12 viewport tests and 1 scheduler test (337 → 350); the
 parallel-decode coverage matrix added 1 integration test over 144 cases
 (350 → 351); the parallel-encoder identity suite added 6 integration tests
 over 144 encode cases (351 → 357); the writer-agreement test added 1 more
-(357 → 358).
+(357 → 358); the command line's worker-count tests added 3, the
+multi-run benchmark harness added 6, and the allocator's counter test
+moved into its own binary with a peak test beside it, for 10 more
+(358 → 368).
 
 ## 7. Not yet measured (explicitly no claims)
 
@@ -431,22 +449,43 @@ What is **still** not claimed:
   files — the standalone no-prefetch pan (415.94 ms) and the sweep's
   radius-0 run (316.91 ms) are the same measurement on the same file and
   differ by roughly a quarter — so the comparisons are taken from the
-  sweep, which runs the radii back to back in one process.
+  sweep, which runs the radii back to back in one process. **P5.2 has now
+  measured how big that variance is: the run-to-run spread is 18.5% to
+  52.4% of the median** (`docs/P5_BENCH_REPORT.md` §3.5), so the single-run
+  P5 figures are read as indicative, not as measurements.
 * **No latency matrix for the parallel engine.** The byte-identity
   correctness matrix covers 144 cases (8 formats × 6 sizes × 3 tile
-  geometries), but how the *latency* moves with the tile size, the viewport
-  size and the worker count is not measured.
+  geometries). **P5.2 has now measured the latency** over the tile size
+  (256, 512, 1024) and the worker count (1, 2, 4, 8), with ten runs per
+  case, against the sequential baseline in the same run. What is still
+  missing is the **viewport size** as a third axis, and any content other
+  than one photograph.
+* **No cold-read measurement.** The P5.2 matrix reads the photograph
+  through the operating system's page cache after the first pass, so its
+  figures are warm-cache figures.
+* **No memory claim in the P5.2 figures.** That report measures latencies;
+  the encoder's working-set bound is P5.1's, measured separately with a
+  source that never touches the page cache.
+* **No claim that the pool helps at every size.** At tile size 1024 the
+  viewport needs two tiles, so eight workers are *slower* than four
+  (158.89 ms against 135.85 ms). A viewer must not use the pool when
+  there is nothing to parallelise.
 * **No linear-scaling claim for the parallel encoder.** Eight workers cut
   the 16K encode 4.27× (128962.99 ms → 30174.82 ms), not 8×, on a 10-core
   mobile part that was also running the rest of the toolchain. The scaling
-  is sub-linear and the report says so.
+  is sub-linear and the report says so. **On the photograph, with ten runs
+  per case, the figure is 6.15× (78793.67 ms → 12811.94 ms) at tile size
+  256** — still sub-linear, and still not a claim about a dedicated server.
 * **No statistical confidence in the encoder figures either.** Each worker
   count is one run. An earlier run measured the one-worker case at 176812 ms
   against this run's 128962.99 ms, before the scratch-buffer reuse was
-  added — the variance is visible and is not smoothed away.
+  added — the variance is visible and is not smoothed away. **P5.2 has
+  since measured the encoder properly**: ten runs per case, with the spread
+  reported as a percentage of the median, in `docs/P5_BENCH_REPORT.md` §3.
 * **No claim that the encoder is fast.** 30174.82 ms for a 1 GiB image is
   not fast in the absolute sense; the claim is only that more workers make
-  it faster and do not change the file.
+  it faster and do not change the file. On the photograph, 12811.94 ms for
+  398,131,200 canonical bytes is the same kind of claim and no more.
 * **No claim about a disk failure partway through the streaming write.** A
   failed *encode* removes the temporary file and leaves the target
   untouched; a failure during the final rename is the operating system's

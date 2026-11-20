@@ -18,6 +18,36 @@ is valid until it is measured here, with the raw run preserved.
    and exactness; CPU model, OS build string, and internal allocation peaks are
    still missing.
 
+### Repetition, from 2026-11-20
+
+A single run is a sample, not a measurement. The P5.2 milestone (below) is the
+first in this repository to meet these rules, and every later run is expected
+to follow them:
+
+1. **Every case is repeated** — ten runs by default, five at the minimum.
+   Every sample is reported, not just the summary.
+2. **The median and the p95 are reported**, not a mean and not a single
+   figure. The median is the middle sample, or the mean of the two middle
+   samples when the count is even. The p95 is the **nearest-rank**
+   percentile: the smallest sample at or above the 95th percentile, so with
+   ten samples it is the largest of the ten. The rule is written into the
+   raw JSON beside the numbers, so a reader never has to guess.
+3. **The sample standard deviation** is reported beside them, with n − 1 in
+   the denominator.
+4. **Every figure has a baseline** measured in the same run, on the same
+   file, in the same process.
+5. **The spread is stated as a percentage of the median.** A configuration
+   whose run-to-run spread is larger than the difference between two
+   configurations cannot be compared, and the report says so rather than
+   letting the reader draw the conclusion.
+6. **The bytes are checked.** Every encode records the SHA-256 of the file
+   it wrote; a configuration that changed the bytes is reported as a defect,
+   not as a faster result.
+
+The reason the rule exists is in this repository's own history: the same
+one-worker 16K encode measured 176,812 ms in one run and 128,963 ms in the
+next, a 37% swing. A single run could not tell those two apart.
+
 ## Baselines
 
 Compare exact pixel data against PNG, WebP lossless, JPEG XL lossless, FLIF where

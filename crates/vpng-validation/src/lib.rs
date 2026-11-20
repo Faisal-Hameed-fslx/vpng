@@ -14,9 +14,12 @@
 //! * [`encode_bench`] — the parallel-encoder benchmark scenarios: the speed
 //!   of each worker count, and the SHA-256 that proves every worker count
 //!   wrote the same file.
+//! * [`photo_bench`] — the multi-run photographic benchmark: a latency
+//!   matrix over the tile size and the worker count, every case repeated,
+//!   with the median and the p95.
 //! * [`json`] — a minimal JSON writer for the reports.
 //!
-//! The four binaries are:
+//! The five binaries are:
 //!
 //! * `vpng-memory` — one validation case per process, so the process's
 //!   resident-set high-water mark belongs to that case alone. A driver
@@ -24,6 +27,8 @@
 //! * `vpng-editing-bench` — the editing scenarios, in one report.
 //! * `vpng-view-bench` — the viewing scenarios, in one report.
 //! * `vpng-encode-bench` — the parallel-encoder scenarios, in one report.
+//! * `vpng-photo-bench` — the multi-run photographic latency matrix, in one
+//!   report.
 
 #![deny(missing_docs)]
 
@@ -31,5 +36,6 @@ pub mod bench;
 pub mod encode_bench;
 pub mod json;
 pub mod mem;
+pub mod photo_bench;
 pub mod stream;
 pub mod view_bench;

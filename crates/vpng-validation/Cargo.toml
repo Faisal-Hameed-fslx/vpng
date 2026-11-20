@@ -35,3 +35,7 @@ path = "src/bin/vpng-view-bench.rs"
 [[bin]]
 name = "vpng-encode-bench"
 path = "src/bin/vpng-encode-bench.rs"
+
+[[bin]]
+name = "vpng-photo-bench"
+path = "src/bin/vpng-photo-bench.rs"
