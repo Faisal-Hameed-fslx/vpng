@@ -15,7 +15,7 @@ use vpng_encoder::parallel::{encode_parallel, ParallelOptions};
 use vpng_encoder::source::PixelSource;
 use vpng_encoder::stream::encode_to_file;
 use vpng_encoder::{encode, EncodeOptions};
-use vpng_tiling::TileGeometry;
+use vpng_tiling::TileRect;
 
 /// Every format v0.1 enables.
 const FORMATS: [PixelFormat; 8] = [
@@ -243,17 +243,17 @@ impl PixelSource for GeneratedSource {
     fn tile_pixels(
         &self,
         _index: usize,
-        geom: &TileGeometry,
+        rect: &TileRect,
         out: &mut Vec<u8>,
     ) -> vpng_core::Result<()> {
         let bpp = self.format.bytes_per_pixel() as usize;
         out.clear();
-        out.resize(geom.width as usize * geom.height as usize * bpp, 0);
-        for row in 0..geom.height {
-            for column in 0..geom.width {
-                let base = (row as usize * geom.width as usize + column as usize) * bpp;
+        out.resize(rect.width as usize * rect.height as usize * bpp, 0);
+        for row in 0..rect.height {
+            for column in 0..rect.width {
+                let base = (row as usize * rect.width as usize + column as usize) * bpp;
                 for c in 0..bpp {
-                    out[base + c] = (((geom.x + column) * 7 + (geom.y + row) * 13 + c as u32 * 29)
+                    out[base + c] = (((rect.x + column) * 7 + (rect.y + row) * 13 + c as u32 * 29)
                         & 0xff) as u8;
                 }
             }
@@ -342,7 +342,7 @@ fn a_failing_source_propagates_the_error_and_leaves_no_file() {
         fn tile_pixels(
             &self,
             index: usize,
-            _: &TileGeometry,
+            _: &TileRect,
             _: &mut Vec<u8>,
         ) -> vpng_core::Result<()> {
             if index == 3 {

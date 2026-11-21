@@ -3,8 +3,18 @@
 //! A [`TileGrid`] is fully determined by a nominal tile size and the image
 //! dimensions. Edge tiles are clipped to the image. Coverage is exact by
 //! construction: every pixel belongs to exactly one tile.
+//!
+//! A [`Partition`] is the general form: a rectangle and the tiles that cover
+//! it exactly. A uniform grid is a partition, and adaptive (variable-size)
+//! tiling is a partition whose tiles differ in size. Every consumer that
+//! needs to know "which tiles does this region touch?" asks the partition, so
+//! uniform and adaptive files travel the same code path.
 
 #![forbid(unsafe_code)]
+
+pub mod partition;
+
+pub use partition::{Partition, TileRect};
 
 use vpng_core::{Dimensions, Error, Rect, Result};
 
@@ -99,6 +109,24 @@ impl TileGrid {
             width: self.image_width,
             height: self.image_height,
         }
+    }
+
+    /// The rectangle the grid covers.
+    pub fn region(&self) -> Rect {
+        Rect {
+            x: 0,
+            y: 0,
+            width: self.image_width,
+            height: self.image_height,
+        }
+    }
+
+    /// The grid as an exact [`Partition`].
+    ///
+    /// The partition's tiles are in the grid's row-major order, so a tile's
+    /// position in the partition is its row-major index.
+    pub fn partition(&self) -> Result<Partition> {
+        Partition::uniform(self)
     }
 
     pub fn columns(&self) -> u32 {

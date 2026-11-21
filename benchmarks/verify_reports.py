@@ -406,6 +406,242 @@ def check_corpus() -> None:
           "the corpus report does not mention the licences")
 
 
+def check_preview() -> None:
+    """Check the Phase B preview-pyramid report against the raw data."""
+    report = (REPO / "docs/P6_P7_REPORT.md").read_text(encoding="utf-8")
+    raw = json.loads((REPO / "benchmarks/p6_preview_results.json").read_text(encoding="utf-8"))
+    r = raw["report"]
+    s = r["scenarios"]
+
+    def quoted(value, fmt) -> None:
+        text = format(value, fmt)
+        check(text in report, f"the preview report does not contain the figure {text!r}")
+
+    # ---- the source -----------------------------------------------------------
+    quoted(r["source"]["canonical_bytes"], ",")
+    quoted(r["source"]["width"], ",")
+    quoted(r["source"]["height"], ",")
+    check(
+        r["source"]["canonical_bytes"] == r["source"]["file_bytes"],
+        "the canonical file is not the size the image should be",
+    )
+
+    # Every case was repeated: the floor is five runs.
+    runs = r["parameters"]["runs"]
+    check(runs >= 5, f"only {runs} runs per case; the floor is 5")
+    quoted(runs, "d")
+
+    # ---- the two encodes ------------------------------------------------------
+    base = s["encode_base"]
+    pyramid = s["encode_pyramid"]
+    for row in (base, pyramid):
+        stats = row["stats"]
+        check(
+            stats["count"] == runs,
+            f"the encode case {row['label']} has {stats['count']} samples, not {runs}",
+        )
+        check(
+            stats["min_ms"] <= stats["median_ms"] <= stats["max_ms"],
+            f"the encode case {row['label']} has an impossible order",
+        )
+        check(
+            stats["median_ms"] <= stats["p95_ms"] <= stats["max_ms"],
+            f"the encode case {row['label']} has an impossible p95",
+        )
+        check(
+            row["all_runs_identical"],
+            f"the encode case {row['label']} did not write the same file every run",
+        )
+        quoted(stats["median_ms"], ".2f")
+        quoted(stats["p95_ms"], ".2f")
+        quoted(stats["mean_ms"], ".2f")
+        quoted(stats["stdev_ms"], ".2f")
+        quoted(row["file_size_bytes"], ",")
+        quoted(row["sha256"], "")
+
+    # The v0.1 file must be the one the P5.2 baseline wrote: the pyramid work
+    # must not have moved a single byte of the default path.
+    p5 = json.loads((REPO / "benchmarks/p5_bench_results.json").read_text(encoding="utf-8"))
+    p5_256 = [
+        row
+        for row in p5["report"]["scenarios"]["compression"]
+        if row["tile_size"] == 256
+    ]
+    check(len(p5_256) == 1, "the P5.2 baseline does not have one tile-256 row")
+    if p5_256:
+        check(
+            p5_256[0]["sha256"] == base["sha256"],
+            "the v0.1 file the preview benchmark wrote is not the P5.2 baseline file",
+        )
+        check(
+            p5_256[0]["file_size_bytes"] == base["file_size_bytes"],
+            "the v0.1 file size moved since the P5.2 baseline",
+        )
+
+    # The pyramid holds more than one level, and the flag agrees with it.
+    check(pyramid["level_count"] > 1, "the pyramid file has one level")
+    check(
+        len(pyramid["level_tile_counts"]) == pyramid["level_count"],
+        "the pyramid's level counts do not match its level count",
+    )
+    check(
+        sum(pyramid["level_tile_counts"]) == pyramid["tile_count"],
+        "the pyramid's level tile counts do not add up to its tile count",
+    )
+    # The previews cost bytes: the pyramid file is bigger than its base level.
+    check(
+        pyramid["file_size_bytes"] > pyramid["base_only_file_size_bytes"],
+        "the pyramid file is not bigger than its base level alone",
+    )
+    quoted(pyramid["level_count"], "d")
+    quoted(pyramid["tile_count"], ",")
+    quoted(pyramid["base_only_file_size_bytes"], ",")
+
+    # ---- the viewports --------------------------------------------------------
+    for row in (s["first_viewport_base"], s["first_viewport_pyramid"]):
+        quoted(row["time_to_pixels_stats"]["median_ms"], ".2f")
+        quoted(row["time_to_pixels_stats"]["p95_ms"], ".2f")
+        quoted(row["visible_tiles"], "d")
+
+    # ---- the levels -----------------------------------------------------------
+    levels = s["level_decode"]
+    check(len(levels) == pyramid["level_count"], "the level rows do not match the pyramid")
+    previous = None
+    for row in levels:
+        quoted(row["stats"]["median_ms"], ".2f")
+        quoted(row["stats"]["p95_ms"], ".2f")
+        quoted(row["tiles"], ",")
+        check(
+            row["stats"]["count"] == runs,
+            f"level {row['level']} has {row['stats']['count']} samples, not {runs}",
+        )
+        if row["level"] == 0:
+            check(not row["derived"], "level 0 is marked as derived")
+        else:
+            check(row["derived"], f"level {row['level']} is not marked as derived")
+        if previous is not None:
+            check(
+                row["width"] < previous[0] and row["height"] < previous[1],
+                f"level {row['level']} is not strictly smaller than the level below it",
+            )
+        previous = (row["width"], row["height"])
+
+    # ---- the whole picture ----------------------------------------------------
+    full = s["full_decode_base"]
+    quoted(full["stats"]["median_ms"], ".2f")
+    quoted(full["stats"]["p95_ms"], ".2f")
+
+    # ---- the editing memory matrix, re-run after the partition refactor -------
+    memory = json.loads((REPO / "benchmarks/p6_memory_results.json").read_text(encoding="utf-8"))
+    summary = memory["summary"]
+    check(summary["pass"] == 12, f"the memory matrix passed {summary['pass']} cases, not 12")
+    check(summary["fail"] == 0, f"the memory matrix has {summary['fail']} failures")
+    check(summary["blocked"] == 0, f"the memory matrix has {summary['blocked']} blocked cases")
+    check(
+        "12 PASS / 0 FAIL / 0 BLOCKED" in report,
+        "the report does not state the memory matrix's 12/0/0 result",
+    )
+    target = memory["context"]["memory_target_bytes"]
+    check(target == 64 * 1024 * 1024, "the memory target is not 64 MB")
+    worst_delta = max(
+        case["edit"]["memory"]["working_set_delta_bytes"] for case in memory["cases"]
+    )
+    check(
+        worst_delta <= target,
+        "the worst edit in the memory matrix is over the target",
+    )
+    quoted(worst_delta, ",")
+    quoted(target, ",")
+    # Every case rewrites exactly one tile and copies the rest.
+    for case in memory["cases"]:
+        commit = case["edit"]["commit"]
+        check(
+            commit["tiles_rewritten"] == 1,
+            f"the memory case {case['case']['width']}x{case['case']['height']} "
+            f"{case['case']['format']} rewrote {commit['tiles_rewritten']} tiles, not 1",
+        )
+
+    # The report has to say what the percentiles mean and what the memory scope
+    # is, and it has to name the memory figures it does not claim.
+    check("nearest-rank" in report.lower(), "the report does not define the p95 rule")
+    check("included" in report.lower() and "excluded" in report.lower(),
+          "the report does not state the memory scope")
+    check("PASS" in report and "BLOCKED" in report,
+          "the report does not use the gate vocabulary")
+
+
+def check_adaptive() -> None:
+    """Check the Phase B adaptive-tiling report against the raw data."""
+    report = (REPO / "docs/P6_P7_REPORT.md").read_text(encoding="utf-8")
+    raw = json.loads((REPO / "benchmarks/p7_adaptive_results.json").read_text(encoding="utf-8"))
+    manifest = json.loads((REPO / "benchmarks/corpus_manifest.json").read_text(encoding="utf-8"))
+    summary = raw["summary"]
+    overall = summary["overall"]
+    images = raw["images"]
+
+    def quoted(value, fmt) -> None:
+        text = format(value, fmt)
+        check(text in report, f"the adaptive report does not contain the figure {text!r}")
+
+    # The corpus is the corpus: the same 750 images, the same manifest.
+    manifest_ids = {entry["id"] for entry in manifest["images"]}
+    result_ids = {image["id"] for image in images}
+    check(
+        manifest_ids == result_ids,
+        "the manifest and the adaptive measurement file do not hold the same images",
+    )
+    check(
+        len(images) == manifest["total_images"],
+        f"the adaptive measurement file holds {len(images)} images, the manifest says "
+        f"{manifest['total_images']}",
+    )
+    quoted(len(images), ",")
+
+    # Every image must have been encoded both ways and checked.
+    missing = [
+        image["id"]
+        for image in images
+        if "bytes" not in image.get("uniform", {}) or "bytes" not in image.get("adaptive", {})
+    ]
+    check(not missing, f"{len(missing)} images were not encoded both ways")
+    not_exact = [
+        image["id"]
+        for image in images
+        if image.get("adaptive", {}).get("exact") is not True
+    ]
+    check(not not_exact, f"{len(not_exact)} adaptive files are not pixel-exact")
+    failed_checks = [
+        image["id"]
+        for image in images
+        if image.get("adaptive", {}).get("check_exit", 0) != 0
+    ]
+    check(not failed_checks, f"{len(failed_checks)} adaptive files failed `vpng check`")
+
+    # The denominator is the same one the P5 corpus report used.
+    check(
+        raw["context"]["parameters"]["denominator"] == "canonical pixel bytes",
+        "the adaptive run did not use the canonical pixel bytes as its denominator",
+    )
+
+    # The headline figures.
+    quoted(overall["total_uniform_bytes"], ",")
+    quoted(overall["total_adaptive_bytes"], ",")
+    quoted(overall["adaptive_smaller"], "d")
+    quoted(overall["adaptive_larger"], "d")
+    quoted(overall["adaptive_equal"], "d")
+    quoted(overall["exact"], "d")
+
+    # Every category's medians.
+    for category, row in summary["categories"].items():
+        for name in ("uniform", "adaptive"):
+            median = row[name]["ratio"].get("median")
+            if median is not None:
+                quoted(median, ".3f")
+        quoted(row["count"], "d")
+        quoted(row["adaptive_smaller"], "d")
+        quoted(row["adaptive_larger"], "d")
+
+
 def main() -> int:
     raw = json.loads((REPO / "benchmarks/p3_5_raw_results.json").read_text(encoding="utf-8"))
     report = (REPO / "docs/P3_5_COMPRESSION_RESEARCH_REPORT.md").read_text(encoding="utf-8")
@@ -644,6 +880,10 @@ def main() -> int:
 
     # ---- the 750-image corpus ------------------------------------------------
     check_corpus()
+
+    # ---- Phase B: the preview pyramid and the adaptive partition ---------------
+    check_preview()
+    check_adaptive()
 
     if problems:
         print(f"{len(problems)} problem(s):")

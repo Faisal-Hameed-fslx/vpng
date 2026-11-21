@@ -276,11 +276,11 @@ pub fn verify_streamed_file(path: &Path, limits: &Limits) -> Result<Verification
     let mut expected: Vec<u8> = Vec::new();
     let mut checked_tiles = 0u32;
     let mut mismatches = 0u32;
-    let grid = *decoder.grid();
+    let partition = decoder.partition().clone();
     for index in 0..tile_count {
-        let geometry = grid
-            .geometry_for_index(index as usize)
-            .map_err(|e| Error::internal(format!("tile {index} has no geometry: {e}")))?;
+        let geometry = partition
+            .tile(index as usize)
+            .ok_or_else(|| Error::internal(format!("tile {index} has no geometry")))?;
         // Only the first, last and a middle tile are checked: decoding every
         // tile of a 16K image would measure the decoder, not the writer.
         if index != 0 && index != tile_count / 2 && index + 1 != tile_count {
@@ -355,7 +355,7 @@ mod tests {
     use vpng_encoder::parallel::ParallelOptions;
     use vpng_encoder::source::PixelSource;
     use vpng_encoder::stream::encode_to_file;
-    use vpng_tiling::TileGeometry;
+    use vpng_tiling::TileRect;
 
     /// A source that produces the same pattern [`fill_tile`] does.
     struct PatternSource {
@@ -375,7 +375,7 @@ mod tests {
             self.format
         }
 
-        fn tile_pixels(&self, _index: usize, geom: &TileGeometry, out: &mut Vec<u8>) -> Result<()> {
+        fn tile_pixels(&self, _index: usize, geom: &TileRect, out: &mut Vec<u8>) -> Result<()> {
             fill_tile(geom.x, geom.y, geom.width, geom.height, self.format, out);
             Ok(())
         }

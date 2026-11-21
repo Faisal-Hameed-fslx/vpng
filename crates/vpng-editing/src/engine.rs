@@ -149,9 +149,9 @@ impl<S: TileSource> Editor<S> {
         self.source.tile_count()
     }
 
-    /// The tile grid.
-    pub fn grid(&self) -> &vpng_tiling::TileGrid {
-        self.source.grid()
+    /// The original level's exact partition.
+    pub fn partition(&self) -> &vpng_tiling::Partition {
+        self.source.partition()
     }
 
     /// The cache's statistics.
@@ -209,8 +209,9 @@ impl<S: TileSource> Editor<S> {
             CanonicalImage::new_zeroed(rect.width, rect.height, self.format, &self.limits)?;
         let out_row = out.row_bytes()? as usize;
 
-        for geometry in self.source.grid().geometries_for_rect(rect)? {
-            let index = self.source.grid().index(geometry.col, geometry.row)?;
+        for position in self.source.partition().tiles_for(rect)? {
+            let index = self.tile_index(position)?;
+            let geometry = self.tile_geometry(index)?;
             let pixels = self.tile_pixels(index)?;
             self.blit(&pixels, &geometry, rect, &mut out, out_row)?;
         }
@@ -238,11 +239,12 @@ impl<S: TileSource> Editor<S> {
             )));
         }
 
-        let geometries = self.source.grid().geometries_for_rect(rect)?;
-        let mut snapshots: Vec<TileSnapshot> = Vec::with_capacity(geometries.len());
+        let positions = self.source.partition().tiles_for(rect)?;
+        let mut snapshots: Vec<TileSnapshot> = Vec::with_capacity(positions.len());
 
-        for geometry in geometries {
-            let index = self.source.grid().index(geometry.col, geometry.row)?;
+        for position in positions {
+            let index = self.tile_index(position)?;
+            let geometry = self.tile_geometry(index)?;
             let was_clean = !self.dirty.contains_key(&index);
 
             // The tile's pixels before this edit.
@@ -376,7 +378,6 @@ impl<S: TileSource> Editor<S> {
     /// user can try again or undo the edits.
     pub fn commit(&mut self, target: &Path, options: &CommitOptions) -> Result<CommitReport> {
         let header = *self.source.header();
-        let grid = *self.source.grid();
         let mut report = write_document(
             &mut self.source,
             &self.dirty,
@@ -384,7 +385,6 @@ impl<S: TileSource> Editor<S> {
             self.format,
             self.width,
             self.height,
-            &grid,
             &header,
             target,
             options,
@@ -438,6 +438,29 @@ impl<S: TileSource> Editor<S> {
         }
     }
 
+    /// The directory-entry index of one of the original level's tiles.
+    ///
+    /// The original level is always the first level in the directory, so its
+    /// tiles' positions in the partition are their entry indices.
+    fn tile_index(&self, position: usize) -> Result<usize> {
+        self.source
+            .base_level()
+            .entry_index(position)
+            .ok_or_else(|| Error::internal(format!("tile position {position} is out of range")))
+    }
+
+    /// The geometry of one tile, read from its directory entry.
+    ///
+    /// The entry is the authority on a tile's size and position, so the
+    /// engine never has to assume that the partition is a regular grid.
+    fn tile_geometry(&self, index: usize) -> Result<vpng_tiling::TileRect> {
+        let entry = self
+            .source
+            .tile_entry(index)
+            .ok_or_else(|| Error::internal(format!("tile {index} has no directory entry")))?;
+        vpng_tiling::TileRect::new(entry.x, entry.y, entry.width as u32, entry.height as u32)
+    }
+
     /// The pixels of one tile, as the session currently sees them.
     ///
     /// A dirty tile comes from the dirty set; a clean tile comes from the
@@ -475,7 +498,7 @@ impl<S: TileSource> Editor<S> {
     fn patch_tile(
         &self,
         tile: &mut [u8],
-        geometry: &vpng_tiling::TileGeometry,
+        geometry: &vpng_tiling::TileRect,
         rect: Rect,
         source: &[u8],
     ) -> Result<()> {
@@ -503,7 +526,7 @@ impl<S: TileSource> Editor<S> {
     fn blit(
         &self,
         tile: &[u8],
-        geometry: &vpng_tiling::TileGeometry,
+        geometry: &vpng_tiling::TileRect,
         rect: Rect,
         out: &mut CanonicalImage,
         out_row: usize,

@@ -19,10 +19,11 @@ with a status, the question, the decision, the rationale, and the consequences.
 | [0011](ADR-0011-predictor-entropy.md) | predictor set, residual folding, entropy coder, per-row selection (§6.4) | accepted |
 | [0012](ADR-0012-atomic-replacement.md) | atomic replacement per platform; append-only vs temporary-file rewrite (§18.9, §18.10) | accepted |
 | [0013](ADR-0013-cache-eviction.md) | decoded-tile cache eviction policy (§18.13) | accepted |
+| [0014](ADR-0014-levels-and-partitions.md) | levels, partitions, the level flags and the preview policy (§18.4, §18.12) | accepted |
 
 ### Still open
 
 * §18.6 SHA-256 canonical digest encoding — the definition is in the spec and
   `vpng-container`; a formal ADR will be added when the digest is frozen.
-* §18.11 metadata policy, §18.12 preview algorithm, §18.14 parallel
-  scheduling — all belong to later phases (P5–P6).
+* §18.11 metadata policy, §18.14 parallel scheduling — all belong to later
+  phases (P5–P8).

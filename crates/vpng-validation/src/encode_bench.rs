@@ -29,7 +29,7 @@ use vpng_encoder::parallel::ParallelOptions;
 use vpng_encoder::source::PixelSource;
 use vpng_encoder::stream::encode_to_file;
 use vpng_encoder::{encode, EncodeOptions};
-use vpng_tiling::TileGeometry;
+use vpng_tiling::TileRect;
 
 use crate::json::Json;
 
@@ -127,7 +127,7 @@ impl PixelSource for GeneratedSource {
         self.format
     }
 
-    fn tile_pixels(&self, _index: usize, geom: &TileGeometry, out: &mut Vec<u8>) -> Result<()> {
+    fn tile_pixels(&self, _index: usize, geom: &TileRect, out: &mut Vec<u8>) -> Result<()> {
         match self.pattern {
             Pattern::Fill => {
                 crate::stream::fill_tile(geom.x, geom.y, geom.width, geom.height, self.format, out);

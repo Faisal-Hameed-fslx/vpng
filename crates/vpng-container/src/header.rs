@@ -39,16 +39,36 @@ pub const HEADER_SIZE: usize = 64;
 /// Major format version implemented by this build.
 pub const FORMAT_MAJOR: u16 = 0;
 
+/// The minor version of the first released format.
+pub const MINOR_V0_1: u16 = 1;
+
+/// The minor version that adds the preview pyramid and adaptive tiling.
+///
+/// v0.2 keeps the 64-byte header and the 40-byte directory entry exactly as
+/// v0.1 defines them. It changes two *rules*: the directory entry's `flags`
+/// field carries the pyramid level, and a level's tiles may have different
+/// sizes rather than forming one uniform grid.
+pub const MINOR_V0_2: u16 = 2;
+
 /// Highest minor format version this build accepts.
-pub const FORMAT_MINOR: u16 = 1;
+pub const FORMAT_MINOR: u16 = MINOR_V0_2;
 
 pub const HEADER_CHECKSUM_OFFSET: usize = 52;
 pub const HEADER_CHECKSUM_LEN: usize = 4;
 pub const RESERVED_OFFSET: usize = 56;
 
-/// Feature-flag bits understood by this build. v0.1 defines none, so any set
-/// bit makes the file an unsupported version.
-pub const KNOWN_FEATURE_FLAGS: u32 = 0;
+/// The file contains derived preview levels above the original image.
+///
+/// This is a v0.2 feature flag. A v0.1 file must have no feature flags set at
+/// all, so a v0.1 reader rejects a pyramid file on two counts: the minor
+/// version and the unknown flag.
+pub const FEATURE_PYRAMID: u32 = 1 << 0;
+
+/// Feature-flag bits understood by this build.
+///
+/// v0.1 defines none, so a v0.1 file with any bit set is rejected. v0.2
+/// defines [`FEATURE_PYRAMID`].
+pub const KNOWN_FEATURE_FLAGS: u32 = FEATURE_PYRAMID;
 
 /// Parsed main header. Field widths mirror the on-disk layout exactly.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -69,6 +89,12 @@ pub struct Header {
 impl Header {
     /// Build a header for a new file. `declared_file_size` must already include
     /// the header, directory, and every payload.
+    ///
+    /// The result is a **v0.1** header. v0.1 is the format every file this
+    /// project has written so far uses, and the golden fixtures pin its exact
+    /// bytes, so the default writer does not move the version on its own.
+    /// Use [`Header::new_v2`] for a file that carries a preview pyramid or an
+    /// adaptive (variable-size) partition.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         width: u32,
@@ -82,7 +108,7 @@ impl Header {
         Dimensions::new(width, height)?;
         Ok(Header {
             major: FORMAT_MAJOR,
-            minor: FORMAT_MINOR,
+            minor: MINOR_V0_1,
             width,
             height,
             color_model: format.color_model,
@@ -93,6 +119,53 @@ impl Header {
             declared_file_size,
             feature_flags: 0,
         })
+    }
+
+    /// Build a **v0.2** header for a new file.
+    ///
+    /// The layout is identical to v0.1 — the same 64 bytes, the same field
+    /// offsets — and only the minor version differs. The caller sets the
+    /// feature flags with [`Header::with_feature_flags`].
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_v2(
+        width: u32,
+        height: u32,
+        format: PixelFormat,
+        default_codec: u8,
+        tile_count: u32,
+        directory_offset: u64,
+        declared_file_size: u64,
+    ) -> Result<Self> {
+        let mut header = Header::new(
+            width,
+            height,
+            format,
+            default_codec,
+            tile_count,
+            directory_offset,
+            declared_file_size,
+        )?;
+        header.minor = MINOR_V0_2;
+        Ok(header)
+    }
+
+    /// Set the feature flags.
+    ///
+    /// The flags are part of the header checksum, so a file that claims a
+    /// pyramid cannot be edited into one without rewriting the header.
+    pub fn with_feature_flags(mut self, flags: u32) -> Self {
+        self.feature_flags = flags;
+        self
+    }
+
+    /// Whether the file declares derived preview levels.
+    pub fn has_pyramid(&self) -> bool {
+        self.feature_flags & FEATURE_PYRAMID != 0
+    }
+
+    /// Whether this header describes a v0.2 file.
+    pub fn is_v2(&self) -> bool {
+        self.minor >= MINOR_V0_2
     }
 
     /// The pixel format described by this header (rejects unimplemented models).
@@ -211,6 +284,17 @@ impl Header {
         if feature_flags & !KNOWN_FEATURE_FLAGS != 0 {
             return Err(Error::unsupported(format!(
                 "feature flags {feature_flags:#010x} include bits unknown to this build"
+            )));
+        }
+
+        // v0.1 defines no feature flags at all, so a file that claims one is
+        // not a v0.1 file even if its minor version says it is. The check is
+        // separate from the "unknown bits" check above because the two reject
+        // different mistakes: this one rejects a *known* flag in a version
+        // that did not define it.
+        if minor < MINOR_V0_2 && feature_flags != 0 {
+            return Err(Error::unsupported(format!(
+                "feature flags {feature_flags:#010x} are not defined in v0.1"
             )));
         }
 

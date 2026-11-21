@@ -145,6 +145,103 @@ Findings, stated as limits rather than claims:
 * The corpus is **five repositories chosen for coverage**, not a random
   sample, and the category names are proxies for content types.
 
+## Measured: the preview pyramid and the adaptive partition (2026-11-21)
+
+Phase B, P6 and P7, in one format revision (**v0.1 → v0.2**; the 64-byte
+header and the 40-byte directory entry keep their layout). Driver
+`vpng-preview-bench` in `crates/vpng-validation` for P6 and
+`benchmarks/corpus/run_adaptive.py` for P7. Raw runs preserved in
+`benchmarks/p6_preview_results.json` and `benchmarks/p7_adaptive_results.json`;
+the full report, with the twelve questions, is `docs/P6_P7_REPORT.md`.
+
+Host: Intel Core i5-1235U, 10 physical cores / 12 logical processors, 7.7 GB
+RAM, Windows `x86_64-pc-windows-gnu`, `rustc 1.100.0`, `--release` build.
+Tile size 256, eight workers, `auto` codec.
+
+### P6 — the preview pyramid (5 runs per case)
+
+Source: the corpus's own 15,360 × 8,640 RGB photograph (398,131,200 canonical
+bytes) — the same file the P5.2 latency matrix used.
+
+| Case | Median | p95 | Mean | Sample stdev | File bytes | Tiles |
+|---|---:|---:|---:|---:|---:|---:|
+| v0.1, no pyramid | 18590.46 ms | 20911.24 ms | 18545.80 ms | 1635.36 ms | 124,197,035 | 2,040 |
+| v0.2, 3 derived levels | 26809.86 ms | 31703.01 ms | 27909.44 ms | 2170.57 ms | 164,873,298 | 2,725 |
+
+The v0.1 file's SHA-256 is
+`d029a7ebc1e0347cb3399ab6f9de9653da5853c96b38d95cddc3b8bb45a14dbf` — **the
+P5.2 baseline's tile-256 digest**, so the format revision moved the default
+path by nothing. The pyramid's levels are 15,360 × 8,640 (2,040 tiles),
+7,680 × 4,320 (510), 3,840 × 2,160 (135) and 1,920 × 1,080 (40).
+
+Decoding one whole level, five runs each:
+
+| Level | Median | p95 | Pixels |
+|---|---:|---:|---:|
+| 0 — the original | 12962.95 ms | 14014.20 ms | 398,131,200 |
+| 1 | 3371.25 ms | 3396.86 ms | 99,532,800 |
+| 2 | 813.89 ms | 938.06 ms | 24,883,200 |
+| 3 | 197.94 ms | 203.31 ms | 6,220,800 |
+
+Findings, stated as limits rather than claims:
+
+* **The previews cost bytes and time**: +32.7% file size (the previews are
+  40,648,863 bytes) and +44.2% encode time. The encoder's ratio uses the
+  *original* pixels, so a pyramid can never flatter it.
+* **The whole picture arrives 66× sooner at 1/64 scale**: 197.94 ms for the
+  smallest level against 13062.32 ms for the full-resolution picture.
+* **The full-resolution path pays a little**: the first viewport costs
+  34.41 ms from the pyramid against 31.61 ms from the v0.1 file (+8.8% at
+  the median), because the directory holds 685 more entries.
+* **Memory, with its scope:** the pyramid encode peaked at **547,844,096 B**
+  of resident set and **541,421,345 B** of heap, against the 528,768,000 B of
+  pixels the design requires it to hold (the picture and its three previews).
+  *Included:* the whole picture and every derived level held at once, tile
+  buffers, encoded payloads, container metadata, the binary and the
+  allocator's bookkeeping. *Excluded:* the pixel file on disk, the page
+  cache, other processes and the driver's own memory. This is **not** the
+  64 MB localized-edit target, which is a separate claim measured by the
+  P4 memory matrix.
+
+### P7 — adaptive tiling over the 750-image corpus
+
+Every image was encoded twice — uniform grid and adaptive partition — at tile
+size 256 with the `auto` codec, and the denominator is the same canonical
+pixel bytes the corpus report used.
+
+| | Uniform | Adaptive |
+|---|---:|---:|
+| Total bytes over the corpus | 453,767,460 | **452,762,594** |
+| Median ratio (bytes ÷ canonical) | 0.415337 | **0.413257** |
+| p95 ratio | 0.801071 | 0.801958 |
+| Median tile count | 4 | **2** |
+| Under the 10 MB ceiling | 748/750 | 748/750 |
+
+| Category | Images | Uniform | Adaptive | Median delta | Smaller | Larger | Equal |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| photos | 300 | 0.602 | 0.601 | −271 B | 179 | 105 | 16 |
+| scans | 100 | 0.346 | 0.346 | −346.5 B | 68 | 32 | 0 |
+| textures | 150 | 0.378 | 0.377 | 0 B | 49 | 31 | 70 |
+| pixel art | 100 | 0.165 | 0.165 | 0 B | 4 | 4 | 92 |
+| ui | 100 | 0.063 | 0.064 | +826.5 B | 30 | 69 | 1 |
+
+Findings, stated as limits rather than claims:
+
+* **Adaptive tiling is a compression wash**: −0.22% over the corpus
+  (−1,004,866 bytes), 330 images smaller, 241 larger, 179 identical. The
+  median image gains nothing.
+* **It helps photographs and scans, and it *hurts* UI screenshots** — the
+  category where a uniform grid is already nearly optimal.
+* **The claim it does support is about the partition**: half the tiles at the
+  median (4 → 2), which is a smaller directory and fewer requests to serve a
+  region.
+* **No pixels changed and no container broke**: 750 of 750 adaptive files
+  decoded exactly (`vpng verify`) and 0 failed `vpng check`. The partition
+  is validated as an exact cover before the file is written.
+* The largest single win is the 16K photograph itself: 124,197,035 →
+  123,202,141 bytes (−994,894 B) with 2,040 → 608 tiles. The largest single
+  loss is `threejs-textures-a9aefa111bdb` at +127,952 bytes.
+
 ## Measured: large-image stress (2026-11-15, with Predictor)
 
 Host: 12 logical CPUs, 7,916 MB physical RAM, Windows `x86_64-pc-windows-gnu`,

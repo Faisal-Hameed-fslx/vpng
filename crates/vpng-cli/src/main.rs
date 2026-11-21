@@ -172,6 +172,26 @@ fn cmd_encode(args: &Args) -> Result<()> {
         options = options.with_max_size(vpng_core::checked_mul(mib, 1024 * 1024)?);
     }
 
+    // The v0.2 features are opt-in. Without them the encoder writes the
+    // v0.1 bytes it has always written.
+    if args.has("adaptive") {
+        options = options.with_adaptive();
+    }
+    if let Some(threshold) = args.get_u32("adaptive-threshold")? {
+        options = options.with_adaptive_threshold(threshold);
+    }
+    if args.has("pyramid") {
+        let levels = match args.get_u32("pyramid-levels")? {
+            Some(levels) => levels,
+            None => vpng_encoder::DEFAULT_PYRAMID_LEVELS,
+        };
+        options = options.with_pyramid(levels);
+    } else if args.get("pyramid-levels").is_some() {
+        return Err(Error::invalid(
+            "--pyramid-levels needs --pyramid; there is nothing to count without it",
+        ));
+    }
+
     // The streaming writer is used rather than the batch encoder, so the
     // finished file is never held in memory: it is written straight to
     // disk, through a temporary name that is renamed over the target.
@@ -196,17 +216,20 @@ fn cmd_encode(args: &Args) -> Result<()> {
     let digest = to_hex(&canonical_digest(&image));
     if args.has("json") {
         println!(
-            "{{\"output\":\"{}\",\"input\":\"{}\",\"width\":{},\"height\":{},\"format\":\"{}\",\"tiles\":{},\"file_size\":{},\"ratio\":{:.4},\"bpp\":{:.4},\"workers\":{},\"canonical_sha256\":\"{}\"}}",
+            "{{\"output\":\"{}\",\"input\":\"{}\",\"width\":{},\"height\":{},\"format\":\"{}\",\"tiles\":{},\"levels\":{},\"file_size\":{},\"ratio\":{:.4},\"bpp\":{:.4},\"workers\":{},\"pyramid\":{},\"adaptive\":{},\"canonical_sha256\":\"{}\"}}",
             escape(&output),
             escape(&input),
             image.width(),
             image.height(),
             image.format(),
             report.tile_count,
+            report.level_count,
             report.file_size,
             report.compression_ratio(),
             report.file_size as f64 / pixel_count as f64,
             workers,
+            options.pyramid,
+            options.adaptive,
             digest
         );
     } else {
@@ -222,6 +245,15 @@ fn cmd_encode(args: &Args) -> Result<()> {
             report.file_size as f64 / pixel_count as f64,
             workers
         );
+        if report.level_count > 1 {
+            println!(
+                "  {} levels (level 0 is the original; the rest are previews)",
+                report.level_count
+            );
+        }
+        if options.adaptive {
+            println!("  adaptive partition: the tile sizes follow the picture's content");
+        }
         println!("  canonical sha256 {digest}");
     }
     Ok(())
@@ -232,24 +264,44 @@ fn cmd_decode(args: &Args) -> Result<()> {
     let output = args.require_positional(1, "output path")?.to_string();
     let limits = limits();
 
+    // `--level` picks a preview level. Level 0 is the original and is the
+    // default; a higher level is the downsampled preview, which is smaller
+    // and cheaper to decode but is not the original.
+    let level = match args.get_u32("level")? {
+        Some(level) => level as usize,
+        None => 0,
+    };
+
     let bytes = std::fs::read(&input)?;
     let document = Document::parse(&bytes, &limits)?;
-    let image = document.decode_all(&limits)?;
+    if level >= document.level_count() {
+        return Err(Error::invalid(format!(
+            "the file has {} level(s); there is no level {level}",
+            document.level_count()
+        )));
+    }
+    let image = document.decode_level(level, &limits)?;
     write_output_image(args, &output, &image)?;
 
     if args.has("json") {
         println!(
-            "{{\"input\":\"{}\",\"output\":\"{}\",\"width\":{},\"height\":{},\"format\":\"{}\",\"canonical_sha256\":\"{}\"}}",
+            "{{\"input\":\"{}\",\"output\":\"{}\",\"level\":{},\"width\":{},\"height\":{},\"format\":\"{}\",\"canonical_sha256\":\"{}\"}}",
             escape(&input),
             escape(&output),
+            level,
             image.width(),
             image.height(),
             image.format(),
             to_hex(&canonical_digest(&image))
         );
     } else {
+        let kind = if level == 0 {
+            "original"
+        } else {
+            "derived preview"
+        };
         println!(
-            "decoded {input} -> {output}  ({}x{} {})",
+            "decoded {input} -> {output}  ({}x{} {}, level {level}, {kind})",
             image.width(),
             image.height(),
             image.format()
@@ -267,7 +319,7 @@ fn cmd_info(args: &Args) -> Result<()> {
 
     if args.has("json") {
         println!(
-            "{{\"file\":\"{}\",\"file_size\":{},\"major\":{},\"minor\":{},\"width\":{},\"height\":{},\"color_model\":\"{}\",\"bits_per_channel\":{},\"channels\":{},\"default_codec\":{},\"tile_count\":{},\"tile_width\":{},\"tile_height\":{},\"directory_offset\":{},\"declared_file_size\":{},\"feature_flags\":{},\"payloads_verified\":false}}",
+            "{{\"file\":\"{}\",\"file_size\":{},\"major\":{},\"minor\":{},\"width\":{},\"height\":{},\"color_model\":\"{}\",\"bits_per_channel\":{},\"channels\":{},\"default_codec\":{},\"tile_count\":{},\"tile_width\":{},\"tile_height\":{},\"level_count\":{},\"directory_offset\":{},\"declared_file_size\":{},\"feature_flags\":{},\"payloads_verified\":false}}",
             escape(&input),
             bytes.len(),
             header.major,
@@ -279,8 +331,9 @@ fn cmd_info(args: &Args) -> Result<()> {
             header.channels(),
             header.default_codec,
             header.tile_count,
-            document.grid().tile_width(),
-            document.grid().tile_height(),
+            document.partition().nominal_tile_size().0,
+            document.partition().nominal_tile_size().1,
+            document.level_count(),
             header.directory_offset,
             header.declared_file_size,
             header.feature_flags
@@ -296,11 +349,32 @@ fn cmd_info(args: &Args) -> Result<()> {
     println!("channels          {}", header.channels());
     println!("default codec     {}", header.default_codec);
     println!("tile count        {}", header.tile_count);
-    println!(
-        "nominal tile      {}x{}",
-        document.grid().tile_width(),
-        document.grid().tile_height()
-    );
+    let (nominal_width, nominal_height) = document.partition().nominal_tile_size();
+    let (typical_width, typical_height) = document.partition().typical_tile_size();
+    if document.partition().is_uniform_size() {
+        println!("nominal tile      {nominal_width}x{nominal_height}");
+    } else {
+        // An adaptive partition has no single tile size, so the first gap
+        // between two origins is not a useful summary. The typical size is.
+        println!(
+            "typical tile      {typical_width}x{typical_height} (adaptive: the tile sizes vary)"
+        );
+    }
+    println!("level count       {}", document.level_count());
+    for (position, level) in document.levels().iter().enumerate() {
+        let kind = if level.is_derived() {
+            "derived preview"
+        } else {
+            "original"
+        };
+        println!(
+            "  level {position}        {}x{} ({}), {} tiles",
+            level.dimensions().width,
+            level.dimensions().height,
+            kind,
+            level.tile_count()
+        );
+    }
     println!("directory offset  {}", header.directory_offset);
     println!("declared size     {}", header.declared_file_size);
     println!("feature flags     {:#010x}", header.feature_flags);
@@ -416,11 +490,35 @@ fn cmd_extract_tile(args: &Args) -> Result<()> {
 
     let tile_x = args.require_u32("tile-x")?;
     let tile_y = args.require_u32("tile-y")?;
+    let level = match args.get_u32("level")? {
+        Some(level) => level as usize,
+        None => 0,
+    };
 
     let bytes = std::fs::read(&input)?;
     let document = Document::parse(&bytes, &limits)?;
-    let index = document.grid().index(tile_x, tile_y)?;
-    let geom = document.grid().geometry(tile_x, tile_y)?;
+    if level >= document.level_count() {
+        return Err(Error::invalid(format!(
+            "the file has {} level(s); there is no level {level}",
+            document.level_count()
+        )));
+    }
+    let level = document.level(level).expect("the level was checked above");
+    let position = level
+        .partition()
+        .tile_at_grid_position(tile_x, tile_y)
+        .ok_or_else(|| {
+            Error::invalid(format!(
+                "there is no tile at grid position ({tile_x}, {tile_y})"
+            ))
+        })?;
+    let index = level
+        .entry_index(position)
+        .expect("a partition tile is always inside its level");
+    let geom = level
+        .partition()
+        .tile(position)
+        .expect("a partition tile is always inside its level");
     let pixels = document.decode_tile(index, &limits)?;
 
     let image = vpng_core::CanonicalImage::from_vec_checked(
@@ -469,6 +567,15 @@ OPTIONS:
     --codec <name>         Codec: auto (default), raw, palette, rle, predictor
     --max-size <size>      Decimal byte ceiling, e.g. 10MB (ADR-0006)
     --max-size-mib <n>     Binary MiB ceiling
+    --pyramid              Build a preview pyramid (a v0.2 file). The original
+                           is still level 0 and is still exact.
+    --pyramid-levels <n>   How many derived preview levels to build (default 3)
+    --adaptive             Choose the tile sizes from the picture's content
+                           (a v0.2 file). The partition still covers every
+                           pixel exactly once.
+    --adaptive-threshold <n>  The busyness threshold of the adaptive planner
+                           (default 8: a mean neighbour difference of 8/255)
+    --level <n>            Which level to decode (default 0, the original)
     --workers <n>          Encoder worker threads (default: the logical CPU count).
                            The worker count changes the speed and not the bytes:
                            one worker and N workers write the same file.

@@ -400,16 +400,10 @@ pub fn editing_target(data: &[u8]) -> TargetResult {
     }
 
     // The dirty tiles must be exactly the tiles the rectangle touches.
-    let grid = *editor.grid();
-    let expected_tiles: Vec<usize> = grid
-        .geometries_for_rect(rect)
-        .map_err(|e| format!("the grid could not map the rectangle: {e}"))?
-        .iter()
-        .map(|geometry| {
-            grid.index(geometry.col, geometry.row)
-                .expect("a geometry from the grid has an index")
-        })
-        .collect();
+    let expected_tiles: Vec<usize> = editor
+        .partition()
+        .tiles_for(rect)
+        .map_err(|e| format!("the partition could not map the rectangle: {e}"))?;
     let mut actual = editor.dirty_tiles();
     actual.sort_unstable();
     let mut expected_tiles = expected_tiles;

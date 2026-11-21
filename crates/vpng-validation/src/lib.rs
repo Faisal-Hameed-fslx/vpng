@@ -17,9 +17,12 @@
 //! * [`photo_bench`] — the multi-run photographic benchmark: a latency
 //!   matrix over the tile size and the worker count, every case repeated,
 //!   with the median and the p95.
+//! * [`preview_bench`] — the preview-pyramid benchmark: what a pyramid buys
+//!   (the first preview) and what it costs (encode time, file size, and the
+//!   memory it needs to see the whole picture).
 //! * [`json`] — a minimal JSON writer for the reports.
 //!
-//! The five binaries are:
+//! The six binaries are:
 //!
 //! * `vpng-memory` — one validation case per process, so the process's
 //!   resident-set high-water mark belongs to that case alone. A driver
@@ -29,6 +32,7 @@
 //! * `vpng-encode-bench` — the parallel-encoder scenarios, in one report.
 //! * `vpng-photo-bench` — the multi-run photographic latency matrix, in one
 //!   report.
+//! * `vpng-preview-bench` — the preview-pyramid scenarios, in one report.
 
 #![deny(missing_docs)]
 
@@ -37,5 +41,6 @@ pub mod encode_bench;
 pub mod json;
 pub mod mem;
 pub mod photo_bench;
+pub mod preview_bench;
 pub mod stream;
 pub mod view_bench;

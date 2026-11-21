@@ -27,9 +27,9 @@ use std::path::Path;
 
 use vpng_container::{Directory, DirectoryEntry, Header};
 use vpng_core::{Dimensions, Limits, PixelFormat, Result};
-use vpng_decoder::Document;
+use vpng_decoder::{Document, Level};
 use vpng_source::TileReader;
-use vpng_tiling::TileGrid;
+use vpng_tiling::Partition;
 
 /// Everything an editing session needs to know about a file's tiles.
 pub trait TileSource {
@@ -48,8 +48,20 @@ pub trait TileSource {
     /// The number of tiles.
     fn tile_count(&self) -> u32;
 
-    /// The tile grid.
-    fn grid(&self) -> &TileGrid;
+    /// The number of levels in the file: the original plus any previews.
+    fn level_count(&self) -> usize;
+
+    /// The original image's level.
+    fn base_level(&self) -> &Level;
+
+    /// The original image's exact partition.
+    ///
+    /// The partition's tiles are the original level's tiles, in directory
+    /// order, so a tile's position in the partition is its directory-entry
+    /// index.
+    fn partition(&self) -> &Partition {
+        self.base_level().partition()
+    }
 
     /// One tile's directory entry.
     fn tile_entry(&self, index: usize) -> Option<&DirectoryEntry>;
@@ -122,8 +134,12 @@ impl TileSource for DocumentSource<'_> {
         self.document.tile_count()
     }
 
-    fn grid(&self) -> &TileGrid {
-        self.document.grid()
+    fn level_count(&self) -> usize {
+        self.document.level_count()
+    }
+
+    fn base_level(&self) -> &Level {
+        self.document.base_level()
     }
 
     fn tile_entry(&self, index: usize) -> Option<&DirectoryEntry> {
@@ -217,8 +233,12 @@ impl TileSource for FileSource {
         self.reader.meta().tile_count()
     }
 
-    fn grid(&self) -> &TileGrid {
-        self.reader.meta().grid()
+    fn level_count(&self) -> usize {
+        self.reader.meta().level_count()
+    }
+
+    fn base_level(&self) -> &Level {
+        self.reader.meta().base_level()
     }
 
     fn tile_entry(&self, index: usize) -> Option<&DirectoryEntry> {

@@ -43,7 +43,7 @@ use vpng_encoder::source::PixelSource;
 use vpng_encoder::stream::encode_to_file;
 use vpng_encoder::EncodeOptions;
 use vpng_source::TileReader;
-use vpng_tiling::TileGeometry;
+use vpng_tiling::TileRect;
 use vpng_view::{Direction, FileDecoderFactory, Pool, PrefetchPolicy, Viewport};
 
 use crate::json::Json;
@@ -423,7 +423,7 @@ const PAN_STEP: u32 = 512;
 /// in order. A tile is therefore not contiguous in the file — it is one run
 /// of bytes per row — and each row is read at its own offset. The reads are
 /// positional and lock-free, so the workers do not serialise on the file.
-struct RawSource {
+pub struct RawSource {
     file: File,
     width: u32,
     height: u32,
@@ -432,7 +432,7 @@ struct RawSource {
 
 impl RawSource {
     /// Open the raw file.
-    fn open(path: &Path, width: u32, height: u32, format: PixelFormat) -> Result<Self> {
+    pub fn open(path: &Path, width: u32, height: u32, format: PixelFormat) -> Result<Self> {
         Ok(RawSource {
             file: File::open(path)?,
             width,
@@ -455,7 +455,7 @@ impl PixelSource for RawSource {
         self.format
     }
 
-    fn tile_pixels(&self, _index: usize, geom: &TileGeometry, out: &mut Vec<u8>) -> Result<()> {
+    fn tile_pixels(&self, _index: usize, geom: &TileRect, out: &mut Vec<u8>) -> Result<()> {
         let bpp = self.format.bytes_per_pixel() as usize;
         let row_bytes = geom.width as usize * bpp;
         out.clear();
@@ -554,7 +554,7 @@ fn first_viewport_once(
 ) -> Result<(f64, f64, f64, usize)> {
     let started = Instant::now();
     let reader = TileReader::open(path, limits)?;
-    let grid = *reader.meta().grid();
+    let partition = reader.meta().partition().clone();
     let factory = FileDecoderFactory::from_reader(reader);
     let pool = Pool::new(
         &factory,
@@ -564,7 +564,7 @@ fn first_viewport_once(
     )?;
 
     let rect = centre_viewport(options)?;
-    let viewport = Viewport::new(&grid, rect)?;
+    let viewport = Viewport::new(&partition, rect)?;
     let policy = PrefetchPolicy {
         radius: 0,
         direction_reach: 0,
@@ -593,9 +593,9 @@ fn sequential_once(
     limits: &Limits,
 ) -> Result<(f64, usize)> {
     let mut reader = TileReader::open(path, limits)?;
-    let grid = *reader.meta().grid();
+    let partition = reader.meta().partition().clone();
     let rect = centre_viewport(options)?;
-    let viewport = Viewport::new(&grid, rect)?;
+    let viewport = Viewport::new(&partition, rect)?;
     let plan = viewport.plan(
         &PrefetchPolicy {
             radius: 0,
@@ -622,7 +622,7 @@ fn pan_once(
     workers: usize,
 ) -> Result<(Vec<f64>, f64)> {
     let reader = TileReader::open(path, limits)?;
-    let grid = *reader.meta().grid();
+    let partition = reader.meta().partition().clone();
     let factory = FileDecoderFactory::from_reader(reader);
     let pool = Pool::new(
         &factory,
@@ -642,7 +642,7 @@ fn pan_once(
     let started = Instant::now();
 
     for (index, (rect, direction)) in rects.iter().enumerate() {
-        let viewport = Viewport::new(&grid, *rect)?;
+        let viewport = Viewport::new(&partition, *rect)?;
         let plan = viewport.plan(&policy, *direction);
 
         // A pan: the generation advances, and everything queued for the
@@ -666,7 +666,11 @@ fn pan_once(
 }
 
 /// The summary of a set of samples.
-fn stats(samples: &[f64]) -> Stats {
+///
+/// The rules are the ones the report quotes: the median is the middle sample
+/// (or the mean of the two middle ones), the p95 is the nearest-rank
+/// percentile, and the standard deviation is the sample one.
+pub fn stats(samples: &[f64]) -> Stats {
     if samples.is_empty() {
         return Stats {
             count: 0,
@@ -710,7 +714,7 @@ fn stats(samples: &[f64]) -> Stats {
 }
 
 /// The JSON form of a summary.
-fn stats_json(summary: &Stats) -> Json {
+pub fn stats_json(summary: &Stats) -> Json {
     Json::Obj(vec![
         ("count".into(), Json::UInt(summary.count as u64)),
         ("min_ms".into(), Json::Num(summary.min)),
@@ -723,12 +727,12 @@ fn stats_json(summary: &Stats) -> Json {
 }
 
 /// The JSON form of a list of numbers.
-fn numbers(values: &[f64]) -> Json {
+pub fn numbers(values: &[f64]) -> Json {
     Json::Arr(values.iter().map(|&value| Json::Num(value)).collect())
 }
 
 /// The SHA-256 of a file, read in chunks so the whole file is never in memory.
-fn hash_file(path: &Path) -> Result<String> {
+pub fn hash_file(path: &Path) -> Result<String> {
     use std::io::Read;
 
     let mut file = File::open(path)?;
@@ -832,9 +836,7 @@ mod tests {
         std::fs::write(&path, &pixels).unwrap();
 
         let source = RawSource::open(&path, 4, 4, PixelFormat::rgb8()).unwrap();
-        let geometry = TileGeometry {
-            col: 0,
-            row: 0,
+        let geometry = TileRect {
             x: 1,
             y: 2,
             width: 2,
@@ -871,9 +873,7 @@ mod tests {
         std::fs::write(&path, [0u8; 16]).unwrap();
 
         let source = RawSource::open(&path, 4, 4, PixelFormat::rgb8()).unwrap();
-        let geometry = TileGeometry {
-            col: 0,
-            row: 0,
+        let geometry = TileRect {
             x: 0,
             y: 0,
             width: 4,

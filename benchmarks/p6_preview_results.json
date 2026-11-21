@@ -1,0 +1,301 @@
+{
+  "report": {
+    "tool": "vpng-preview-bench",
+    "parameters": {
+      "width": 15360,
+      "height": 8640,
+      "format": "RGB8",
+      "tile_size": 256,
+      "workers": 8,
+      "runs": 5,
+      "pyramid_levels": 3,
+      "viewport_width": 1024,
+      "viewport_height": 1024,
+      "cache_bytes": 33554432,
+      "queue_capacity": 256
+    },
+    "source": {
+      "path": "corpus-data\\cache\\7479807165b6411a-1006677.raw",
+      "width": 15360,
+      "height": 8640,
+      "format": "RGB8",
+      "canonical_bytes": 398131200,
+      "file_bytes": 398131200
+    },
+    "statistics": {
+      "method": "each case is repeated and the median and the p95 are reported; the mean and the sample standard deviation are reported beside them",
+      "p95_rule": "nearest rank: the smallest sample at or above the 95th percentile, so with ten samples the p95 is the largest of the ten",
+      "median_rule": "the middle sample, or the mean of the two middle samples when the count is even",
+      "stdev_rule": "the sample standard deviation, with n - 1 in the denominator"
+    },
+    "memory_scope": {
+      "included": "the pyramid encode holds the whole original picture and every derived level at once, because a preview is built from the pixels below it; the figures quoted for it are the allocator's own high-water mark and the process's resident-set high-water mark",
+      "excluded": "the canonical pixel file on disk, the operating system's page cache, the memory of other processes, and the benchmark driver's own memory",
+      "default_path": "the v0.1 path never materialises the picture: the source is read tile by tile, so its working set is bounded by the number of tiles in flight and not by the size of the image"
+    },
+    "scenarios": {
+      "encode_base": {
+        "label": "v0.1",
+        "runs": 5,
+        "samples_ms": [
+          16546.789300,
+          17626.204800,
+          19054.335300,
+          20911.238300,
+          18590.456300
+        ],
+        "stats": {
+          "count": 5,
+          "min_ms": 16546.789300,
+          "max_ms": 20911.238300,
+          "mean_ms": 18545.804800,
+          "median_ms": 18590.456300,
+          "p95_ms": 20911.238300,
+          "stdev_ms": 1635.359272
+        },
+        "file_size_bytes": 124197035,
+        "tile_count": 2040,
+        "level_count": 1,
+        "level_tile_counts": [
+          2040
+        ],
+        "level_payload_bytes": [
+          124115367
+        ],
+        "base_only_file_size_bytes": 124197035,
+        "sha256": "d029a7ebc1e0347cb3399ab6f9de9653da5853c96b38d95cddc3b8bb45a14dbf",
+        "all_runs_identical": true
+      },
+      "encode_pyramid": {
+        "label": "v0.2 pyramid",
+        "runs": 5,
+        "samples_ms": [
+          26586.281500,
+          31703.011700,
+          27750.741100,
+          26809.859500,
+          26697.303900
+        ],
+        "stats": {
+          "count": 5,
+          "min_ms": 26586.281500,
+          "max_ms": 31703.011700,
+          "mean_ms": 27909.439540,
+          "median_ms": 26809.859500,
+          "p95_ms": 31703.011700,
+          "stdev_ms": 2170.568543
+        },
+        "file_size_bytes": 164873298,
+        "tile_count": 2725,
+        "level_count": 4,
+        "level_tile_counts": [
+          2040,
+          510,
+          135,
+          40
+        ],
+        "level_payload_bytes": [
+          124115367,
+          31300377,
+          7470762,
+          1877724
+        ],
+        "base_only_file_size_bytes": 124197035,
+        "sha256": "fc384c8219b52e2f816fa5e383c48bfc8ffdff41d8a5a654eb14035b648b3dbd",
+        "all_runs_identical": true
+      },
+      "first_viewport_base": {
+        "label": "v0.1",
+        "runs": 5,
+        "visible_tiles": 20,
+        "open_stats": {
+          "count": 5,
+          "min_ms": 0.747300,
+          "max_ms": 1.588700,
+          "mean_ms": 1.020180,
+          "median_ms": 0.844800,
+          "p95_ms": 1.588700,
+          "stdev_ms": 0.341905
+        },
+        "decode_stats": {
+          "count": 5,
+          "min_ms": 29.208100,
+          "max_ms": 35.177000,
+          "mean_ms": 31.812640,
+          "median_ms": 30.767200,
+          "p95_ms": 35.177000,
+          "stdev_ms": 2.411475
+        },
+        "time_to_pixels_stats": {
+          "count": 5,
+          "min_ms": 30.796800,
+          "max_ms": 35.924300,
+          "mean_ms": 32.832820,
+          "median_ms": 31.612000,
+          "p95_ms": 35.924300,
+          "stdev_ms": 2.234957
+        }
+      },
+      "first_viewport_pyramid": {
+        "label": "v0.2 level 0",
+        "runs": 5,
+        "visible_tiles": 20,
+        "open_stats": {
+          "count": 5,
+          "min_ms": 0.775800,
+          "max_ms": 1.543200,
+          "mean_ms": 1.082720,
+          "median_ms": 1.062200,
+          "p95_ms": 1.543200,
+          "stdev_ms": 0.311884
+        },
+        "decode_stats": {
+          "count": 5,
+          "min_ms": 32.692200,
+          "max_ms": 36.106000,
+          "mean_ms": 34.069520,
+          "median_ms": 33.398400,
+          "p95_ms": 36.106000,
+          "stdev_ms": 1.535945
+        },
+        "time_to_pixels_stats": {
+          "count": 5,
+          "min_ms": 33.468000,
+          "max_ms": 37.314000,
+          "mean_ms": 35.152240,
+          "median_ms": 34.405900,
+          "p95_ms": 37.314000,
+          "stdev_ms": 1.609859
+        }
+      },
+      "level_decode": [
+        {
+          "level": 0,
+          "derived": false,
+          "width": 15360,
+          "height": 8640,
+          "tiles": 2040,
+          "runs": 5,
+          "samples_ms": [
+            13713.127100,
+            12451.232500,
+            12360.100300,
+            12962.948300,
+            14014.198100
+          ],
+          "stats": {
+            "count": 5,
+            "min_ms": 12360.100300,
+            "max_ms": 14014.198100,
+            "mean_ms": 13100.321260,
+            "median_ms": 12962.948300,
+            "p95_ms": 14014.198100,
+            "stdev_ms": 741.420342
+          },
+          "pixel_bytes": 398131200
+        },
+        {
+          "level": 1,
+          "derived": true,
+          "width": 7680,
+          "height": 4320,
+          "tiles": 510,
+          "runs": 5,
+          "samples_ms": [
+            3385.818600,
+            3105.477000,
+            3108.265400,
+            3396.857600,
+            3371.251700
+          ],
+          "stats": {
+            "count": 5,
+            "min_ms": 3105.477000,
+            "max_ms": 3396.857600,
+            "mean_ms": 3273.534060,
+            "median_ms": 3371.251700,
+            "p95_ms": 3396.857600,
+            "stdev_ms": 152.415678
+          },
+          "pixel_bytes": 99532800
+        },
+        {
+          "level": 2,
+          "derived": true,
+          "width": 3840,
+          "height": 2160,
+          "tiles": 135,
+          "runs": 5,
+          "samples_ms": [
+            938.060700,
+            818.523900,
+            795.604600,
+            798.164500,
+            813.885800
+          ],
+          "stats": {
+            "count": 5,
+            "min_ms": 795.604600,
+            "max_ms": 938.060700,
+            "mean_ms": 832.847900,
+            "median_ms": 813.885800,
+            "p95_ms": 938.060700,
+            "stdev_ms": 59.633198
+          },
+          "pixel_bytes": 24883200
+        },
+        {
+          "level": 3,
+          "derived": true,
+          "width": 1920,
+          "height": 1080,
+          "tiles": 40,
+          "runs": 5,
+          "samples_ms": [
+            191.642000,
+            197.526100,
+            199.209400,
+            197.943700,
+            203.313500
+          ],
+          "stats": {
+            "count": 5,
+            "min_ms": 191.642000,
+            "max_ms": 203.313500,
+            "mean_ms": 197.926940,
+            "median_ms": 197.943700,
+            "p95_ms": 203.313500,
+            "stdev_ms": 4.192886
+          },
+          "pixel_bytes": 6220800
+        }
+      ],
+      "full_decode_base": {
+        "label": "v0.1 whole picture",
+        "runs": 5,
+        "samples_ms": [
+          13181.919100,
+          13044.253300,
+          12595.424200,
+          13062.318800,
+          13290.723300
+        ],
+        "stats": {
+          "count": 5,
+          "min_ms": 12595.424200,
+          "max_ms": 13290.723300,
+          "mean_ms": 13034.927740,
+          "median_ms": 13062.318800,
+          "p95_ms": 13290.723300,
+          "stdev_ms": 265.065287
+        },
+        "pixel_bytes": 398131200
+      }
+    }
+  },
+  "process": {
+    "elapsed_ms": 386450.321200,
+    "peak_working_set_bytes": 547844096,
+    "peak_heap_bytes": 541421345
+  }
+}

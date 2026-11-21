@@ -11,16 +11,19 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use vpng_core::{ErrorKind, Rect};
-use vpng_tiling::TileGrid;
+use vpng_tiling::Partition;
 
 use crate::{
     Direction, Pool, PoolOutcome, PrefetchPolicy, RequestClass, RequestSpec, TileDecoder, ViewPlan,
     Viewport,
 };
 
-/// A grid over a 1024×768 image with 64×64 tiles: 16 columns, 12 rows.
-fn grid() -> TileGrid {
-    TileGrid::new(64, 64, 1024, 768).unwrap()
+/// A partition over a 1024×768 image with 64×64 tiles: 16 columns, 12 rows.
+///
+/// The partition's tiles are in the grid's row-major order, so a tile's
+/// position in the partition is the same index the grid would give it.
+fn partition() -> Partition {
+    Partition::uniform(&vpng_tiling::TileGrid::new(64, 64, 1024, 768).unwrap()).unwrap()
 }
 
 /// A rectangle of pixels.
@@ -90,8 +93,8 @@ impl TileDecoder for CountingDecoder {
 
 #[test]
 fn the_visible_tiles_are_the_ones_the_rectangle_covers() {
-    let grid = grid();
-    let viewport = Viewport::new(&grid, rect(64, 64, 128, 128)).unwrap();
+    let partition = partition();
+    let viewport = Viewport::new(&partition, rect(64, 64, 128, 128)).unwrap();
 
     // The rectangle covers exactly the four tiles at columns 1-2 and
     // rows 1-2.
@@ -107,8 +110,8 @@ fn the_visible_tiles_are_the_ones_the_rectangle_covers() {
 
 #[test]
 fn the_prefetch_ring_is_the_next_ring_out() {
-    let grid = grid();
-    let viewport = Viewport::new(&grid, rect(64, 64, 128, 128)).unwrap();
+    let partition = partition();
+    let viewport = Viewport::new(&partition, rect(64, 64, 128, 128)).unwrap();
 
     let policy = PrefetchPolicy {
         radius: 1,
@@ -135,9 +138,9 @@ fn the_prefetch_ring_is_the_next_ring_out() {
 }
 #[test]
 fn the_prefetch_ring_is_clipped_to_the_image() {
-    let grid = grid();
+    let partition = partition();
     // A viewport in the top-left corner of the image.
-    let viewport = Viewport::new(&grid, rect(0, 0, 64, 64)).unwrap();
+    let viewport = Viewport::new(&partition, rect(0, 0, 64, 64)).unwrap();
 
     let policy = PrefetchPolicy {
         radius: 3,
@@ -162,8 +165,8 @@ fn the_prefetch_ring_is_clipped_to_the_image() {
 
 #[test]
 fn the_nearest_tile_comes_first() {
-    let grid = grid();
-    let viewport = Viewport::new(&grid, rect(0, 0, 192, 192)).unwrap();
+    let partition = partition();
+    let viewport = Viewport::new(&partition, rect(0, 0, 192, 192)).unwrap();
 
     let plan = viewport.plan(&PrefetchPolicy::default(), Direction::None);
 
@@ -179,8 +182,8 @@ fn the_nearest_tile_comes_first() {
 
 #[test]
 fn the_direction_of_travel_is_preferred() {
-    let grid = grid();
-    let viewport = Viewport::new(&grid, rect(320, 320, 128, 128)).unwrap();
+    let partition = partition();
+    let viewport = Viewport::new(&partition, rect(320, 320, 128, 128)).unwrap();
 
     let policy = PrefetchPolicy {
         radius: 1,
@@ -231,8 +234,8 @@ fn a_prefetch_never_pushes_a_visible_tile_out_of_the_queue() {
     // ring of forty does not.
     let pool = Pool::new(&factory, 1, 1024 * 1024, 16).unwrap();
 
-    let grid = grid();
-    let viewport = Viewport::new(&grid, rect(0, 0, 192, 192)).unwrap();
+    let partition = partition();
+    let viewport = Viewport::new(&partition, rect(0, 0, 192, 192)).unwrap();
     let plan = viewport.plan(&PrefetchPolicy::default(), Direction::None);
 
     let report = plan.submit(&pool, pool.generation());
@@ -267,8 +270,8 @@ fn the_plan_refuses_a_stale_generation() {
     let factory = CountingFactory::new();
     let pool = Pool::new(&factory, 1, 1024 * 1024, 64).unwrap();
 
-    let grid = grid();
-    let viewport = Viewport::new(&grid, rect(0, 0, 128, 128)).unwrap();
+    let partition = partition();
+    let viewport = Viewport::new(&partition, rect(0, 0, 128, 128)).unwrap();
     let plan = viewport.plan(&PrefetchPolicy::default(), Direction::None);
 
     // The plan is made for an old viewport.
@@ -283,8 +286,8 @@ fn the_plan_refuses_a_stale_generation() {
 
 #[test]
 fn a_viewport_outside_the_image_is_refused() {
-    let grid = grid();
-    let err = Viewport::new(&grid, rect(2000, 0, 64, 64)).unwrap_err();
+    let partition = partition();
+    let err = Viewport::new(&partition, rect(2000, 0, 64, 64)).unwrap_err();
     assert_eq!(err.kind(), ErrorKind::InvalidArgument);
 
     // A rectangle with no area is refused too. `Rect::new` rejects it, so
@@ -295,7 +298,7 @@ fn a_viewport_outside_the_image_is_refused() {
         width: 0,
         height: 64,
     };
-    let err = Viewport::new(&grid, empty).unwrap_err();
+    let err = Viewport::new(&partition, empty).unwrap_err();
     assert_eq!(err.kind(), ErrorKind::InvalidArgument);
 }
 
@@ -311,8 +314,8 @@ fn a_cached_tile_is_not_queued_again() {
     let factory = CountingFactory::new();
     let pool = Pool::new(&factory, 1, 1024 * 1024, 64).unwrap();
 
-    let grid = grid();
-    let viewport = Viewport::new(&grid, rect(0, 0, 64, 64)).unwrap();
+    let partition = partition();
+    let viewport = Viewport::new(&partition, rect(0, 0, 64, 64)).unwrap();
     // No prefetch: the plan is the one visible tile and nothing else.
     let policy = PrefetchPolicy {
         radius: 0,
@@ -336,8 +339,8 @@ fn the_visible_tiles_are_submitted_before_the_prefetch() {
     let factory = CountingFactory::new();
     let pool = Pool::new(&factory, 2, 1024 * 1024, 256).unwrap();
 
-    let grid = grid();
-    let viewport = Viewport::new(&grid, rect(0, 0, 128, 128)).unwrap();
+    let partition = partition();
+    let viewport = Viewport::new(&partition, rect(0, 0, 128, 128)).unwrap();
     let plan = viewport.plan(&PrefetchPolicy::default(), Direction::None);
 
     plan.submit(&pool, pool.generation());

@@ -15,5 +15,8 @@ pub mod header;
 pub use checksum::{canonical_digest, crc32c, sha256, to_hex};
 pub use directory::{
     Directory, DirectoryEntry, DIRECTORY_TRAILER_SIZE, ENTRY_SIZE as DIRECTORY_ENTRY_SIZE,
+    TILE_FLAG_LEVEL_MASK, TILE_FLAG_RESERVED_MASK,
 };
-pub use header::{Header, FORMAT_MAJOR, FORMAT_MINOR, HEADER_SIZE, MAGIC};
+pub use header::{
+    Header, FEATURE_PYRAMID, FORMAT_MAJOR, FORMAT_MINOR, HEADER_SIZE, MAGIC, MINOR_V0_1, MINOR_V0_2,
+};

@@ -21,13 +21,17 @@
 //!
 //! Memory is bounded by the number of chunks in flight, not by the size of
 //! the image, which is what lets the streaming writer run in parallel too.
+//!
+//! The work is described by a [`Partition`], not by a grid, so a file with
+//! variable-size tiles is encoded by exactly the same code as one with a
+//! uniform grid.
 
 use std::collections::HashMap;
 use std::sync::{Condvar, Mutex};
 
 use vpng_codecs::EncodeContext;
 use vpng_core::{Dimensions, Error, Result};
-use vpng_tiling::{TileGeometry, TileGrid};
+use vpng_tiling::{Partition, TileRect};
 
 use crate::source::PixelSource;
 use crate::{select_payload, EncodeOptions, EncodeReport, TilePayload};
@@ -82,20 +86,35 @@ pub fn encode_parallel(
         width: source.width(),
         height: source.height(),
     };
-    let grid = crate::plan_grid(dims, options)?;
-    let payloads = encode_all_tiles(source, &grid, options, parallel)?;
-    crate::assemble(dims, source.format(), options, &grid, payloads)
+
+    // The adaptive planner and the pyramid builder both need the picture's
+    // content, so a source that cannot be asked for "some pixels" is read
+    // into a whole image first. The default path never does that.
+    let (materialized, plan) = if options.is_v2() {
+        let image = crate::materialize(source, options)?;
+        let plan = crate::plan_file(&image, options)?;
+        (Some(image), plan)
+    } else {
+        (None, crate::plan_uniform(dims, options)?)
+    };
+
+    let level0: &dyn PixelSource = match &materialized {
+        Some(image) => image,
+        None => source,
+    };
+    let levels = crate::encode_plan(level0, &plan, options, parallel)?;
+    crate::assemble(dims, source.format(), options, &levels)
 }
 
 /// Encode every tile into one vector, in tile order.
 pub(crate) fn encode_all_tiles(
     source: &dyn PixelSource,
-    grid: &TileGrid,
+    partition: &Partition,
     options: &EncodeOptions,
     parallel: &ParallelOptions,
 ) -> Result<Vec<TilePayload>> {
-    let mut payloads = Vec::with_capacity(grid.tile_count()? as usize);
-    encode_tiles_in_order(source, grid, options, parallel, &mut |_, payload| {
+    let mut payloads = Vec::with_capacity(partition.len());
+    encode_tiles_in_order(source, partition, options, parallel, &mut |_, payload| {
         payloads.push(payload);
         Ok(())
     })?;
@@ -120,12 +139,12 @@ struct Shared {
 /// the bytes and drop them without holding the whole file in memory.
 pub(crate) fn encode_tiles_in_order(
     source: &dyn PixelSource,
-    grid: &TileGrid,
+    partition: &Partition,
     options: &EncodeOptions,
     parallel: &ParallelOptions,
     sink: &mut dyn FnMut(usize, TilePayload) -> Result<()>,
 ) -> Result<()> {
-    let tile_count = grid.tile_count()? as usize;
+    let tile_count = partition.len();
     if tile_count == 0 {
         return Ok(());
     }
@@ -137,8 +156,10 @@ pub(crate) fn encode_tiles_in_order(
         // tile, so the encoder allocates once rather than once per tile.
         let mut pixels = Vec::new();
         for index in 0..tile_count {
-            let geom = grid.geometry_for_index(index)?;
-            let payload = encode_tile(source, index, &geom, options, &mut pixels)?;
+            let rect = partition
+                .tile(index)
+                .ok_or_else(|| Error::internal(format!("tile {index} is out of range")))?;
+            let payload = encode_tile(source, index, rect, options, &mut pixels)?;
             sink(index, payload)?;
         }
         return Ok(());
@@ -188,7 +209,7 @@ pub(crate) fn encode_tiles_in_order(
 
                 let start = chunk * chunk_tiles;
                 let end = (start + chunk_tiles).min(tile_count);
-                let outcome = encode_chunk(source, grid, options, start, end, &mut pixels);
+                let outcome = encode_chunk(source, partition, options, start, end, &mut pixels);
 
                 let mut state = shared.lock().unwrap();
                 state.results.insert(chunk, outcome);
@@ -234,10 +255,10 @@ pub(crate) fn encode_tiles_in_order(
     })
 }
 
-/// Encode the tiles `start..end` of the grid, in order.
+/// Encode the tiles `start..end` of the partition, in order.
 fn encode_chunk(
     source: &dyn PixelSource,
-    grid: &TileGrid,
+    partition: &Partition,
     options: &EncodeOptions,
     start: usize,
     end: usize,
@@ -245,8 +266,10 @@ fn encode_chunk(
 ) -> Result<Vec<TilePayload>> {
     let mut payloads = Vec::with_capacity(end - start);
     for index in start..end {
-        let geom = grid.geometry_for_index(index)?;
-        payloads.push(encode_tile(source, index, &geom, options, pixels)?);
+        let rect = partition
+            .tile(index)
+            .ok_or_else(|| Error::internal(format!("tile {index} is out of range")))?;
+        payloads.push(encode_tile(source, index, rect, options, pixels)?);
     }
     Ok(payloads)
 }
@@ -256,11 +279,11 @@ fn encode_chunk(
 fn encode_tile(
     source: &dyn PixelSource,
     index: usize,
-    geom: &TileGeometry,
+    rect: &TileRect,
     options: &EncodeOptions,
     pixels: &mut Vec<u8>,
 ) -> Result<TilePayload> {
-    source.tile_pixels(index, geom, pixels)?;
+    source.tile_pixels(index, rect, pixels)?;
     let uncompressed_length = u32::try_from(pixels.len())
         .map_err(|_| Error::resource_limit("tile uncompressed size exceeds u32"))?;
 
@@ -270,8 +293,8 @@ fn encode_tile(
     let ctx = EncodeContext {
         limits: options.limits,
         format: source.format(),
-        tile_width: geom.width as u16,
-        tile_height: geom.height as u16,
+        tile_width: rect.width as u16,
+        tile_height: rect.height as u16,
     };
 
     let (codec_id, bytes) = select_payload(pixels.as_slice(), &ctx, options)?;

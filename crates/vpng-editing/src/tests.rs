@@ -500,6 +500,58 @@ fn a_commit_with_nothing_to_change_still_writes_a_valid_file() {
 }
 
 #[test]
+fn a_pyramid_file_loses_its_previews_and_keeps_its_original_tiles() {
+    // An edit invalidates the previews: they are derived from pixels the
+    // edit changes. The editor cannot rebuild them without re-reading the
+    // whole original, so the commit writes the original level only and says
+    // how many previews it left out.
+    let directory = TempDir::new("pyramid");
+    let limits = Limits::default();
+    let image = gradient(256, 256, PixelFormat::rgba8());
+    let bytes = encode(
+        &image,
+        &EncodeOptions::default()
+            .with_tile_size(64, 64)
+            .with_pyramid(2),
+    )
+    .unwrap()
+    .bytes;
+    let path = directory.path("pyramid.vpng");
+    fs::write(&path, &bytes).unwrap();
+
+    let before = Document::parse(&bytes, &limits).unwrap();
+    assert_eq!(before.level_count(), 3);
+    let base = before.base_level();
+    let untouched = base.entry_index(3).unwrap();
+    let untouched_payload = before.tile_payload(untouched).unwrap().to_vec();
+
+    let mut editor = Editor::parse(&bytes, &limits).unwrap();
+    editor
+        .write_region(Rect::new(0, 0, 8, 8).unwrap(), &vec![0x11; 8 * 8 * 4])
+        .unwrap();
+    let report = editor.commit(&path, &CommitOptions::default()).unwrap();
+    assert_eq!(report.preview_levels_dropped, 2);
+    assert_eq!(report.tiles_rewritten, 1);
+    assert_eq!(report.tiles_copied, 15);
+
+    let saved = fs::read(&path).unwrap();
+    let after = Document::parse(&saved, &limits).unwrap();
+    assert_eq!(after.level_count(), 1, "the previews are gone");
+    assert!(!after.header().has_pyramid());
+
+    // The untouched tile keeps its payload byte for byte.
+    assert_eq!(
+        after.tile_payload(untouched).unwrap(),
+        &untouched_payload[..]
+    );
+
+    // The original is still exact.
+    let decoded = after.decode_all(&limits).unwrap();
+    assert_eq!(crop(&decoded, 0, 0, 8, 8), vec![0x11; 8 * 8 * 4]);
+    assert_eq!(crop(&decoded, 200, 200, 8, 8), crop(&image, 200, 200, 8, 8));
+}
+
+#[test]
 fn the_cache_evicts_when_the_budget_is_exceeded() {
     let limits = Limits::default();
     let image = gradient(512, 512, PixelFormat::rgba8());
@@ -632,13 +684,17 @@ fn crop(image: &CanonicalImage, x: u32, y: u32, width: u32, height: u32) -> Vec<
     out
 }
 
-/// Give one directory entry a distinctive predictor id and flags, and repair
-/// the directory checksum.
+/// Give one directory entry a distinctive predictor id, and repair the
+/// directory checksum.
 ///
-/// No codec reads these two fields today, so a file that carries them still
-/// parses and still decodes. They are the only way to tell a tile that
-/// *kept* its metadata from a tile whose metadata was *reset*.
-fn patch_tile_metadata(bytes: &mut [u8], index: usize, predictor_id: u8, flags: u16) {
+/// No codec reads the predictor id today, so a file that carries one still
+/// parses and still decodes. It is the only way to tell a tile that *kept*
+/// its metadata from a tile whose metadata was *reset*.
+///
+/// The entry's `flags` field is **not** used for this: from v0.2 onwards the
+/// field carries the pyramid level and its upper byte is reserved, so a
+/// v0.1 file with a non-zero `flags` is a corrupt file and is rejected.
+fn patch_tile_predictor(bytes: &mut [u8], index: usize, predictor_id: u8) {
     const ENTRY_SIZE: usize = 40;
     const TRAILER_SIZE: usize = 4;
     // The main header: tile count at byte 28, directory offset at byte 32.
@@ -647,7 +703,6 @@ fn patch_tile_metadata(bytes: &mut [u8], index: usize, predictor_id: u8, flags: 
 
     let start = directory_offset + index * ENTRY_SIZE;
     bytes[start + 13] = predictor_id;
-    bytes[start + 14..start + 16].copy_from_slice(&flags.to_le_bytes());
 
     let body_len = tile_count * ENTRY_SIZE;
     let crc = vpng_container::crc32c(&bytes[directory_offset..directory_offset + body_len]);
@@ -662,14 +717,14 @@ fn a_rewritten_tile_gets_fresh_metadata_and_an_untouched_tile_keeps_its_own() {
     let image = gradient(128, 128, PixelFormat::rgba8());
     let (path, original) = write_file(&directory, "image.vpng", &image, 64);
 
-    // Give the *first* tile a distinctive predictor id and flags.
+    // Give the *first* tile a distinctive predictor id.
     let mut patched = original.clone();
-    patch_tile_metadata(&mut patched, 0, 7, 0x1234);
+    patch_tile_predictor(&mut patched, 0, 7);
     fs::write(&path, &patched).unwrap();
 
     let before = Document::parse(&patched, &limits).unwrap();
     assert_eq!(before.tile_entry(0).unwrap().predictor_id, 7);
-    assert_eq!(before.tile_entry(0).unwrap().flags, 0x1234);
+    assert_eq!(before.tile_entry(0).unwrap().flags, 0);
     assert!(
         before.check_integrity().is_ok(),
         "the patched file is still intact"
@@ -694,7 +749,7 @@ fn a_rewritten_tile_gets_fresh_metadata_and_an_untouched_tile_keeps_its_own() {
 
     // The untouched tile keeps its own metadata.
     assert_eq!(after.tile_entry(0).unwrap().predictor_id, 7);
-    assert_eq!(after.tile_entry(0).unwrap().flags, 0x1234);
+    assert_eq!(after.tile_entry(0).unwrap().flags, 0);
 
     // The pixels are still exact: the edited tile holds the patch, and the
     // untouched tile holds the original pixels.

@@ -4,11 +4,12 @@ A lossless, adaptive, tiled, random-access image format and editing engine.
 
 **Primary requirement:** exact pixel reconstruction.
 **Secondary target:** fit eligible images within 10 MB — measured, never promised.
-**Status:** v0.1 container implemented, compiled, and tested; the editing engine
+**Status:** v0.2 container implemented, compiled, and tested; the editing engine
 (P4), the compression research (P3.5), the interactive engine (P5) and the
-parallel/streaming encoder (P5.1) have landed. `cargo build --workspace` and
-`cargo test --workspace --all-targets`
-both pass (368 tests, 0 failures) on `stable-x86_64-pc-windows-gnu` rustc
+parallel/streaming encoder (P5.1) have landed, and so have the preview pyramid
+(P6) and the adaptive partition (P7) in one format revision. `cargo build
+--workspace` and `cargo test --workspace --all-targets`
+both pass on `stable-x86_64-pc-windows-gnu` rustc
 1.100.0. Large-image stress runs, a 16K memory matrix, an editing benchmark, a
 16K viewing benchmark, a 16K encoding benchmark and a seed-corpus measurement
 are recorded in `docs/BENCHMARKS.md`, `docs/P5_REPORT.md` and
@@ -16,12 +17,26 @@ are recorded in `docs/BENCHMARKS.md`, `docs/P5_REPORT.md` and
 
 ## What works today
 
-* A precise, ADR-backed binary format: `docs/VPNG_SPEC_0_1.md`.
+* A precise, ADR-backed binary format: `docs/VPNG_SPEC_0_1.md`, revised as
+  `docs/VPNG_SPEC_0_2.md` (the same layout, with the level index carried in
+  the directory entry's `flags` and a level's tiles allowed to differ in
+  size).
 * All eight v0.1 pixel formats (Gray/GrayAlpha/RGB/RGBA at 8 and 16 bits).
 * A validated container: 64-byte header, 40-byte directory entries, CRC32C
   checksums, whole-image canonical SHA-256 digest.
 * Raw, Palette, Run-length, and Predictor+entropy tile codecs, uniform tiling,
   per-tile codec selection, tile decode, full decode, and region decode.
+* A **preview pyramid** (format v0.2): derived levels built with an
+  integer-only 2 × 2 box average, the level marked in each entry's `flags`,
+  and a decoder that reads any level. Measured on the corpus's own 16K
+  photograph: the whole picture in **197.94 ms** at 1/64 scale against
+  **13062.32 ms** at full resolution, for +32.7% bytes and +44.2% encode
+  time. See `docs/P6_P7_REPORT.md`.
+* An **adaptive partition** (format v0.2): variable-size tiles forming an
+  exact cover of the level, validated before a file is written. Measured
+  over the whole 750-image corpus it is a compression **wash** (−0.22%
+  bytes, and it hurts UI screenshots) and it delivers **half the tiles at the
+  median**. The unfavourable result is kept. See `docs/P6_P7_REPORT.md`.
 * An **editing engine**: region reads and writes, dirty-tile tracking,
   transactions, bounded tile-level undo/redo, and a copy-on-write save that
   reuses every untouched payload byte for byte and replaces the file
@@ -54,7 +69,7 @@ are recorded in `docs/BENCHMARKS.md`, `docs/P5_REPORT.md` and
 * Conformance tests: exhaustive round-trip, region-vs-crop, malformed-input
   sweeps, a bounded mutation sweep, golden files, the `default_codec`
   clarification, and a deterministic fuzzing harness over seven targets.
-  368 tests, all passing.
+  418 tests, all passing.
 * Layered integrity: `info` (structure only), `check` (every payload CRC32C),
   `verify` (exact pixels against a reference).
 * Measured evidence: large-image stress (up to a 15360×8640 photo and
@@ -73,9 +88,10 @@ are recorded in `docs/BENCHMARKS.md`, `docs/P5_REPORT.md` and
 
 ## What is explicitly not here yet
 
-Adaptive (variable-size) tiling, the preview/multiresolution surface, the
-Python bindings, and a frozen v1.0 format. The stable codec ids 4–6 are still
-reserved; the LZ77, CARC and hybrid codecs that were measured in the P3.5 study
+The Python bindings, the WebAssembly package, HTTP Range streaming, layers and
+masks, GPU-ready payloads, and a frozen v1.0 format. The stable codec ids 4–6
+are still reserved; the LZ77, CARC and hybrid codecs that were measured in the
+P3.5 study
 are **research-only** — their ids live in `0x80..=0xFF`, they cannot reach a
 file, and the decoder rejects a file that names one. Coverage-guided fuzzing runs
 in CI's nightly job on Linux —
@@ -122,6 +138,18 @@ See `docs/P5_CORPUS_REPORT.md`.
 After that come the multiresolution preview pyramid (P6) and adaptive tiling
 (P7), which are container revisions and are done back to back so the
 container version is bumped once.
+
+Both are now done, in one revision: the container's minor version is **0.2**
+and the layout did not move with it — the header is still 64 bytes, the
+directory entry is still 40 bytes, and the default encoder path still writes
+v0.1 bytes, so every golden fixture and every existing file is untouched.
+The pyramid puts the whole 16K picture on screen 66× sooner at 1/64 scale,
+for +32.7% bytes and +44.2% encode time. The adaptive partition was measured
+over the whole 750-image corpus and is a compression **wash** — it is kept
+because it halves the tile count, not because it compresses better. The
+next steps are the stable codec ids 4–6, then the ecosystem: Python, WASM,
+HTTP Range, layers, GPU payloads and the graphical UI. See
+`docs/P6_P7_REPORT.md`.
 
 The roadmap also carries a **feature backlog** — a preview pyramid, Python
 bindings, a graphical editor, a WebAssembly package, HTTP Range streaming,

@@ -126,7 +126,7 @@ fn region_and_tile_decode_agree_for_palette_tiles() {
         );
     }
 
-    for (index, geom) in document.grid().iter().enumerate() {
+    for (index, geom) in document.partition().tiles().iter().enumerate() {
         let tile = document.decode_tile(index, &limits).unwrap();
         for row in 0..geom.height as usize {
             let src = (geom.y as usize + row) * stride + geom.x as usize * bpp;

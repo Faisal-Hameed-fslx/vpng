@@ -27,10 +27,15 @@ const VALUE_OPTIONS: &[&str] = &[
     "cache-bytes",
     "jobs",
     "workers",
+    "pyramid-levels",
+    "adaptive-threshold",
+    "level",
 ];
 
 /// Long options that are simple flags.
-const SWITCH_OPTIONS: &[&str] = &["json", "help", "verbose", "quiet", "force", "version"];
+const SWITCH_OPTIONS: &[&str] = &[
+    "json", "help", "verbose", "quiet", "force", "version", "pyramid", "adaptive",
+];
 
 #[derive(Debug, Default, Clone)]
 pub struct Args {

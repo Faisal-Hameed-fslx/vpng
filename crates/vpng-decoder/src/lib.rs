@@ -7,13 +7,24 @@
 //!
 //! v0.1 layout rule (see `docs/VPNG_SPEC_0_1.md`): the directory sits at the
 //! header's `directory_offset` and every tile payload lies after the directory.
+//!
+//! # Levels
+//!
+//! A file may hold more than one grid of tiles. Level 0 is the original image;
+//! every other level holds derived preview pixels. The levels are derived from
+//! the directory by [`derive_levels`], which is the same function the
+//! file-backed reader uses, so the two readers cannot disagree.
 
 #![forbid(unsafe_code)]
+
+pub mod levels;
+
+pub use levels::{derive_levels, Level};
 
 use vpng_codecs::{get_codec, DecodeContext};
 use vpng_container::{crc32c, Directory, DirectoryEntry, Header, HEADER_SIZE};
 use vpng_core::{CanonicalImage, Dimensions, Error, Limits, PixelFormat, Rect, Result};
-use vpng_tiling::{TileGeometry, TileGrid};
+use vpng_tiling::{Partition, TileGeometry, TileGrid, TileRect};
 
 /// A validated, borrowable view over one VPNG file.
 #[derive(Debug)]
@@ -21,7 +32,7 @@ pub struct Document<'a> {
     bytes: &'a [u8],
     header: Header,
     directory: Directory,
-    grid: TileGrid,
+    levels: Vec<Level>,
     format: PixelFormat,
 }
 
@@ -67,6 +78,8 @@ impl<'a> Document<'a> {
             ));
         }
 
+        directory.validate_flags(header.minor)?;
+
         let directory_end = vpng_core::checked_add(header.directory_offset, directory_size as u64)?;
 
         // Per-tile structural checks that need cross-field context.
@@ -90,13 +103,13 @@ impl<'a> Document<'a> {
         directory.validate_payload_ranges(bytes.len() as u64)?;
         directory.validate_tile_sizes(format.bytes_per_pixel())?;
 
-        let grid = derive_grid(&header, &directory, dims)?;
+        let levels = derive_levels(&header, &directory, dims)?;
 
         Ok(Document {
             bytes,
             header,
             directory,
-            grid,
+            levels,
             format,
         })
     }
@@ -113,8 +126,29 @@ impl<'a> Document<'a> {
         self.directory.entries.get(index)
     }
 
-    pub fn grid(&self) -> &TileGrid {
-        &self.grid
+    /// The file's levels: the original image first, then any derived previews.
+    pub fn levels(&self) -> &[Level] {
+        &self.levels
+    }
+
+    /// The number of levels in the file.
+    pub fn level_count(&self) -> usize {
+        self.levels.len()
+    }
+
+    /// One level by position. Position 0 is the original image.
+    pub fn level(&self, position: usize) -> Option<&Level> {
+        self.levels.get(position)
+    }
+
+    /// The original image's level.
+    pub fn base_level(&self) -> &Level {
+        &self.levels[0]
+    }
+
+    /// The original image's exact partition.
+    pub fn partition(&self) -> &Partition {
+        self.base_level().partition()
     }
 
     pub fn format(&self) -> PixelFormat {
@@ -193,20 +227,42 @@ impl<'a> Document<'a> {
 
     /// Decode the whole image. This is the only path that allocates a full-image
     /// pixel buffer, and only when the caller asks for it.
+    ///
+    /// The result is the **original** image: level 0's pixels, exactly. A
+    /// derived preview level is never used to produce it.
     pub fn decode_all(&self, limits: &Limits) -> Result<CanonicalImage> {
-        let mut image =
-            CanonicalImage::new_zeroed(self.width(), self.height(), self.format, limits)?;
-        for (index, geom) in self.grid.iter().enumerate() {
+        self.decode_level(0, limits)
+    }
+
+    /// Decode one level into a fresh buffer.
+    ///
+    /// Level 0 is the original image and is exact. A derived level is a
+    /// preview: its pixels are whatever the file stored, and they are not a
+    /// substitute for the original.
+    pub fn decode_level(&self, position: usize, limits: &Limits) -> Result<CanonicalImage> {
+        let level = self
+            .levels
+            .get(position)
+            .ok_or_else(|| Error::invalid(format!("level {position} is out of range")))?;
+
+        let dims = level.dimensions();
+        let mut image = CanonicalImage::new_zeroed(dims.width, dims.height, self.format, limits)?;
+
+        for (offset, tile) in level.partition().tiles().iter().enumerate() {
+            let index = level
+                .entry_index(offset)
+                .expect("a partition tile is always inside its level");
             let pixels = self.decode_tile(index, limits)?;
-            blit(&mut image, &geom, &pixels)?;
+            blit(&mut image, tile, &pixels)?;
         }
+
         Ok(image)
     }
 
     /// Decode the tiles intersecting `rect` and return exactly that region.
     ///
     /// No unrelated tile is decoded, and the returned image is sized to the
-    /// requested rectangle.
+    /// requested rectangle. The region is taken from the **original** level.
     pub fn decode_region(&self, rect: Rect, limits: &Limits) -> Result<CanonicalImage> {
         let dims = self.dimensions();
         if !rect.is_within(dims) {
@@ -223,9 +279,16 @@ impl<'a> Document<'a> {
         let bpp = self.format.bytes_per_pixel() as usize;
         let out_row = out.row_bytes()? as usize;
 
-        for geom in self.grid.geometries_for_rect(rect)? {
-            let index = self.grid.index(geom.col, geom.row)?;
+        let level = self.base_level();
+        for position in level.partition().tiles_for(rect)? {
+            let index = level
+                .entry_index(position)
+                .expect("a partition tile is always inside its level");
             let pixels = self.decode_tile(index, limits)?;
+            let geom = level
+                .partition()
+                .tile(position)
+                .expect("a partition tile is always inside its level");
 
             let ix0 = geom.x.max(rect.x);
             let iy0 = geom.y.max(rect.y);
@@ -363,7 +426,7 @@ pub fn derive_grid(header: &Header, directory: &Directory, dims: Dimensions) -> 
 }
 
 /// Copy a decoded tile's pixels into the destination image at its geometry.
-fn blit(image: &mut CanonicalImage, geom: &TileGeometry, pixels: &[u8]) -> Result<()> {
+fn blit(image: &mut CanonicalImage, geom: &TileRect, pixels: &[u8]) -> Result<()> {
     let bpp = image.bytes_per_pixel() as usize;
     let dst_row = image.row_bytes()? as usize;
     let tile_row = geom.width as usize * bpp;
@@ -478,10 +541,9 @@ mod tests {
             .unwrap()
             .bytes;
         let doc = Document::parse(&file, &limits).unwrap();
-        let geom = doc.grid().geometry(1, 0).unwrap();
-        let tile = doc
-            .decode_tile(doc.grid().index(1, 0).unwrap(), &limits)
-            .unwrap();
+        let partition = doc.partition();
+        let geom = partition.tile(1).unwrap();
+        let tile = doc.decode_tile(1, &limits).unwrap();
 
         let bpp = 4usize;
         let src_row = 300 * bpp;

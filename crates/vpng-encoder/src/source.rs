@@ -1,7 +1,7 @@
 //! A source of canonical pixels the encoder can read one tile at a time.
 
 use vpng_core::{CanonicalImage, PixelFormat, Result};
-use vpng_tiling::TileGeometry;
+use vpng_tiling::TileRect;
 
 /// A source of canonical pixels the encoder pulls one tile at a time.
 ///
@@ -24,12 +24,15 @@ pub trait PixelSource: Sync {
     /// The image's pixel format.
     fn format(&self) -> PixelFormat;
 
-    /// Write the canonical pixels of tile `index` into `out`.
+    /// Write the canonical pixels of the tile at `rect` into `out`.
     ///
-    /// `geom` is the tile's geometry, already clipped to the image's edge.
+    /// `rect` is the tile's rectangle, already clipped to the image's edge.
     /// The implementation must leave `out` holding exactly
-    /// `geom.width * geom.height * bytes_per_pixel` bytes.
-    fn tile_pixels(&self, index: usize, geom: &TileGeometry, out: &mut Vec<u8>) -> Result<()>;
+    /// `rect.width * rect.height * bytes_per_pixel` bytes.
+    ///
+    /// The rectangle is given rather than a grid position because a v0.2 file
+    /// may hold an **adaptive** partition, whose tiles do not share a grid.
+    fn tile_pixels(&self, index: usize, rect: &TileRect, out: &mut Vec<u8>) -> Result<()>;
 }
 
 impl PixelSource for CanonicalImage {
@@ -45,7 +48,7 @@ impl PixelSource for CanonicalImage {
         CanonicalImage::format(self)
     }
 
-    fn tile_pixels(&self, _index: usize, geom: &TileGeometry, out: &mut Vec<u8>) -> Result<()> {
-        crate::extract_tile(self, geom, out)
+    fn tile_pixels(&self, _index: usize, rect: &TileRect, out: &mut Vec<u8>) -> Result<()> {
+        crate::extract_rect(self, rect, out)
     }
 }

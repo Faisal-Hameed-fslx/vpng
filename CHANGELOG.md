@@ -8,6 +8,80 @@ separately as major.minor in the header.
 
 ### Added
 
+* **The preview pyramid and the adaptive partition, in one format revision
+  (Phase B, P6 and P7).** The container's minor version moves **0.1 → 0.2**
+  and the layout does not move with it: the main header is still 64 bytes
+  with the same fields at the same offsets, the directory entry is still 40
+  bytes, and the file is still header, directory, payloads.
+  * **What v0.2 changes is two rules.** The directory entry's `flags` field
+    carries the **level index** in its low byte (0 is the original, 1 and up
+    are derived previews); the upper byte is reserved and must be zero, and a
+    decoder that finds it set rejects the file with `UnsupportedFeature`. And
+    a level's tiles may now have **different sizes**: they are an *exact
+    partition* of the level's rectangle — every pixel covered once — checked
+    by a sweep-line validator before a file is written, so a gap or an
+    overlap cannot reach a file.
+  * **The default path is unchanged.** `Header::new` still writes **v0.1**, so
+    the golden fixtures and every existing file stay byte-identical. The
+    v0.1 file this milestone produced has the SHA-256
+    `d029a7ebc1e0347cb3399ab6f9de9653da5853c96b38d95cddc3b8bb45a14dbf` —
+    **the P5.2 tile-256 baseline's digest**. The pyramid and the adaptive
+    partition are opt-in (`--pyramid`, `--adaptive`).
+  * **P6 — the preview pyramid.** The encoder builds derived levels with an
+    integer-only 2 × 2 box average (round-half-up, no floating point, alpha
+    averaged like the other channels) and stops when the next level would
+    not be strictly smaller in both dimensions. The measured result on the
+    corpus's own 15,360 × 8,640 RGB photograph (398,131,200 canonical
+    bytes), five runs per case: the whole picture is available in
+    **197.94 ms** at 1/64 scale against **13062.32 ms** at full resolution —
+    **66× sooner** — and the cost is stated: **+32.7% bytes**
+    (164,873,298 against 124,197,035) and **+44.2% encode time**
+    (26809.86 ms against 18590.46 ms). The encoder's reported ratio uses the
+    *original* pixels, so a pyramid can never flatter it. The pyramid encode
+    peaks at **547,844,096 B** of resident set and **541,421,345 B** of heap
+    — the picture and its previews have to be held, and the report says so
+    with the memory scope attached. This is **not** the 64 MB
+    localized-edit target, which is a separate claim.
+  * **P7 — adaptive tiling.** A planner picks tile sizes from the picture's
+    own content: a coarse binary cut along the longer axis, splits on
+    multiples of half the nominal tile, and a busiest-first greedy pass
+    scored by the mean absolute neighbour difference sampled on a 64 × 64
+    lattice. Measured over the **whole 750-image corpus** on the same
+    canonical pixels, the result is unfavourable and kept: adaptive tiling is
+    a **compression wash** — 452,762,594 bytes against the uniform grid's
+    453,767,460 (−0.22%), with 330 images smaller, 241 larger and 179
+    identical. It **hurts UI screenshots** (69 of 100 grow). What it does
+    deliver is **half the tiles at the median** (4 → 2), a smaller directory
+    and fewer requests to serve a region. All **750 of 750** adaptive files
+    decode exactly and pass `vpng check`.
+  * **The container's readers all learned about levels.** `vpng-decoder`
+    exposes `Document::levels()`, `level()`, `base_level()` and
+    `decode_level()`; `vpng-source` reports a level list; `vpng-cli` gained
+    `--pyramid`, `--pyramid-levels N`, `--adaptive`, `--adaptive-threshold N`
+    and `--level N` for `decode` and `extract-tile`; `vpng-view` plans
+    viewports over a partition; and the editing engine commits a pyramid
+    file by **dropping the previews** (reported as `preview_levels_dropped`)
+    while keeping every untouched tile payload byte for byte.
+  * **New documentation.** `docs/VPNG_SPEC_0_2.md` (the revision),
+    `docs/decisions/ADR-0014-levels-and-partitions.md` (which supersedes
+    ADR-0005 for v0.2), `docs/P6_P7_REPORT.md` (the report, with the twelve
+    questions and the acceptance gates), `benchmarks/p6_preview_results.json`,
+    `benchmarks/p7_adaptive_results.json` and `benchmarks/p6_memory_results.json`
+    (the raw data), and
+    `check_preview()` and `check_adaptive()` in
+    `benchmarks/verify_reports.py`, which bind every quoted figure to it.
+  * **The 64 MB localized-edit target was re-measured**, not assumed, after
+    the partition refactor: the 12-case memory matrix is **12 PASS / 0 FAIL /
+    0 BLOCKED**, and the worst case — a 16384 × 16384 RGBA16 image, 2 GiB of
+    canonical pixels — edits with **13,770,752 bytes** of resident-set growth
+    against the 67,108,864-byte budget, **20.5%** of it. Every case rewrites
+    one tile and copies the rest byte for byte.
+  * **The test suite is 418 passed / 0 failed** (was 368). The v0.2 revision
+    added 50: 10 in `crates/vpng-testkit/tests/v2_formats.rs`, 6 in
+    `crates/vpng-cli/tests/v2_features.rs`, and the rest in the crates the
+    revision touched — the decoder's level derivation, the tiling
+    partition's exact-cover validator, the encoder's pyramid and adaptive
+    planner, and the editing engine's pyramid commit.
 * **The 750-image corpus, and the distribution it makes measurable
   (Phase A, Step 3).** The nine-image seed is replaced by a real corpus:
   **750 images** in the five planned categories — photographs 300,

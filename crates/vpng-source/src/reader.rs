@@ -7,11 +7,11 @@ use std::sync::Arc;
 
 use vpng_container::{Directory, DirectoryEntry, Header, HEADER_SIZE};
 use vpng_core::{Dimensions, Error, Limits, PixelFormat, Result};
-use vpng_decoder::derive_grid;
-use vpng_tiling::TileGrid;
+use vpng_decoder::{derive_levels, Level};
+use vpng_tiling::Partition;
 
 /// What a container says about itself: the header, the directory, the tile
-/// grid and the pixel format.
+/// levels and the pixel format.
 ///
 /// This is the part of a file that is read once and then shared. It never
 /// changes while a reader holds it, so it can be handed to as many workers
@@ -20,7 +20,7 @@ use vpng_tiling::TileGrid;
 pub struct ContainerMeta {
     header: Header,
     directory: Directory,
-    grid: TileGrid,
+    levels: Vec<Level>,
     format: PixelFormat,
 }
 
@@ -35,9 +35,32 @@ impl ContainerMeta {
         &self.directory
     }
 
-    /// The file's tile grid.
-    pub fn grid(&self) -> &TileGrid {
-        &self.grid
+    /// The file's levels: the original image first, then any derived previews.
+    pub fn levels(&self) -> &[Level] {
+        &self.levels
+    }
+
+    /// The number of levels in the file.
+    pub fn level_count(&self) -> usize {
+        self.levels.len()
+    }
+
+    /// The original image's level.
+    pub fn base_level(&self) -> &Level {
+        &self.levels[0]
+    }
+
+    /// One level of the file, by its index.
+    ///
+    /// Level 0 is the original image; every higher level holds a derived
+    /// preview. `None` means the file has no such level.
+    pub fn level(&self, index: usize) -> Option<&Level> {
+        self.levels.get(index)
+    }
+
+    /// The original image's exact partition.
+    pub fn partition(&self) -> &Partition {
+        self.base_level().partition()
     }
 
     /// The file's pixel format.
@@ -154,6 +177,8 @@ impl TileReader {
             ));
         }
 
+        directory.validate_flags(header.minor)?;
+
         let directory_end = vpng_core::checked_add(header.directory_offset, directory_size as u64)?;
 
         for (index, entry) in directory.entries.iter().enumerate() {
@@ -176,12 +201,12 @@ impl TileReader {
         directory.validate_payload_ranges(file_size)?;
         directory.validate_tile_sizes(format.bytes_per_pixel())?;
 
-        let grid = derive_grid(&header, &directory, dims)?;
+        let levels = derive_levels(&header, &directory, dims)?;
 
         let meta = ContainerMeta {
             header,
             directory,
-            grid,
+            levels,
             format,
         };
 

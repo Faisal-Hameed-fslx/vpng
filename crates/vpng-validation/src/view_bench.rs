@@ -321,8 +321,8 @@ fn first_viewport(options: &ViewBenchOptions, path: &Path, limits: &Limits) -> R
     let started = Instant::now();
     let reader = TileReader::open(path, limits)?;
     let open_ms = started.elapsed().as_secs_f64() * 1000.0;
-    let grid = *reader.meta().grid();
     let tile_count = reader.meta().tile_count();
+    let partition = reader.meta().partition().clone();
 
     let factory = FileDecoderFactory::from_reader(reader);
     let pool = Pool::new(
@@ -333,7 +333,7 @@ fn first_viewport(options: &ViewBenchOptions, path: &Path, limits: &Limits) -> R
     )?;
 
     let rect = centre_viewport(options)?;
-    let viewport = Viewport::new(&grid, rect)?;
+    let viewport = Viewport::new(&partition, rect)?;
     let policy = PrefetchPolicy {
         radius: 0,
         direction_reach: 0,
@@ -493,9 +493,9 @@ fn sequential_baseline(
     crate::mem::reset_peaks();
 
     let mut reader = TileReader::open(path, limits)?;
-    let grid = *reader.meta().grid();
+    let partition = reader.meta().partition().clone();
     let rect = centre_viewport(options)?;
-    let viewport = Viewport::new(&grid, rect)?;
+    let viewport = Viewport::new(&partition, rect)?;
     let plan = viewport.plan(
         &PrefetchPolicy {
             radius: 0,
@@ -564,7 +564,7 @@ fn pan_scenario(
     crate::mem::reset_peaks();
 
     let reader = TileReader::open(path, limits)?;
-    let grid = *reader.meta().grid();
+    let partition = reader.meta().partition().clone();
     let factory = FileDecoderFactory::from_reader(reader);
     let pool = Pool::new(
         &factory,
@@ -584,7 +584,7 @@ fn pan_scenario(
     let mut visible_tiles = 0u64;
 
     for (index, (rect, direction)) in rects.iter().enumerate() {
-        let viewport = Viewport::new(&grid, *rect)?;
+        let viewport = Viewport::new(&partition, *rect)?;
         let plan = viewport.plan(&policy, *direction);
 
         // A pan: the generation advances, and everything queued for the

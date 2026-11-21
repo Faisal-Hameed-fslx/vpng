@@ -16,6 +16,14 @@ This document is normative for the v0.1 implementation. Where a design question
 was open, the resolved answer is recorded in `docs/decisions/`. If code and this
 document disagree, that is a bug in one of them; file it, do not paper over it.
 
+> **v0.2 (2026-11-21).** A later minor version, `docs/VPNG_SPEC_0_2.md`, adds a
+> preview pyramid and adaptive (variable-size) tiles. It keeps this document's
+> 64-byte header and 40-byte directory entry exactly as they are, and changes
+> two rules: the entry's `flags` field carries the level index (it must be
+> zero here), and a level's tiles may have different sizes (they must form one
+> uniform grid here). A v0.1 file remains valid and readable; a v0.1 reader
+> rejects a v0.2 file because its minor version is newer.
+
 ---
 
 ## 1. File layout

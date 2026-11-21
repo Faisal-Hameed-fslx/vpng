@@ -34,6 +34,16 @@ pub const ENTRY_SIZE: usize = 40;
 /// CRC32C trailer that follows the entry array.
 pub const DIRECTORY_TRAILER_SIZE: usize = 4;
 
+/// The directory entry's `flags` field holds the pyramid level index.
+///
+/// v0.1 requires the field to be zero. v0.2 gives the low byte to the level:
+/// level 0 is the original image, and every higher level holds derived
+/// preview pixels. The upper byte is reserved and must be zero.
+pub const TILE_FLAG_LEVEL_MASK: u16 = 0x00FF;
+
+/// The bits of the `flags` field that v0.2 reserves and requires to be zero.
+pub const TILE_FLAG_RESERVED_MASK: u16 = 0xFF00;
+
 /// One independently decodable tile.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DirectoryEntry {
@@ -51,6 +61,29 @@ pub struct DirectoryEntry {
 }
 
 impl DirectoryEntry {
+    /// The pyramid level this tile belongs to.
+    ///
+    /// Level 0 is the original image. Every other level holds derived preview
+    /// pixels and is never used to reconstruct the original.
+    pub fn level(&self) -> u16 {
+        self.flags & TILE_FLAG_LEVEL_MASK
+    }
+
+    /// Whether the tile holds derived preview pixels rather than original ones.
+    pub fn is_derived(&self) -> bool {
+        self.level() != 0
+    }
+
+    /// Build the `flags` field for a level index.
+    pub fn flags_for_level(level: u16) -> Result<u16> {
+        if level > TILE_FLAG_LEVEL_MASK {
+            return Err(Error::invalid(format!(
+                "pyramid level {level} does not fit the directory entry's flag field"
+            )));
+        }
+        Ok(level & TILE_FLAG_LEVEL_MASK)
+    }
+
     /// Exclusive right edge of the tile in pixels.
     pub fn right(&self) -> Result<u32> {
         self.x
@@ -162,9 +195,12 @@ impl Directory {
         Ok(Directory { entries })
     }
 
-    /// Sort into the canonical `(y, x)` order used before encoding.
+    /// Sort into the canonical `(level, y, x)` order used before encoding.
+    ///
+    /// v0.1 files have one level, so this is the `(y, x)` order v0.1 defines.
+    /// v0.2 groups the levels, each in `(y, x)` order.
     pub fn sort_canonical(&mut self) {
-        self.entries.sort_by_key(|e| (e.y, e.x));
+        self.entries.sort_by_key(|e| (e.level(), e.y, e.x));
     }
 
     /// Sort a second copy into canonical order and return it, leaving `self` alone.
@@ -172,6 +208,29 @@ impl Directory {
         let mut clone = self.clone();
         clone.sort_canonical();
         clone
+    }
+
+    /// Check every entry's `flags` field against the format version.
+    ///
+    /// v0.1 requires the field to be zero. v0.2 gives the low byte to the
+    /// pyramid level and requires the rest to be zero.
+    pub fn validate_flags(&self, minor: u16) -> Result<()> {
+        for (index, entry) in self.entries.iter().enumerate() {
+            if minor < crate::header::MINOR_V0_2 {
+                if entry.flags != 0 {
+                    return Err(Error::corrupt(format!(
+                        "tile {index} sets flags {:#06x}, which v0.1 does not define",
+                        entry.flags
+                    )));
+                }
+            } else if entry.flags & TILE_FLAG_RESERVED_MASK != 0 {
+                return Err(Error::corrupt(format!(
+                    "tile {index} sets reserved flag bits {:#06x}",
+                    entry.flags & TILE_FLAG_RESERVED_MASK
+                )));
+            }
+        }
+        Ok(())
     }
 
     /// Verify every payload range lies inside the file and that no two ranges

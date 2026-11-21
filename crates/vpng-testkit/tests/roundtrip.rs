@@ -128,7 +128,7 @@ fn single_tile_decode_matches_full_image() {
 
     let bpp = 4usize;
     let stride = 300 * bpp;
-    for (index, geom) in document.grid().iter().enumerate() {
+    for (index, geom) in document.partition().tiles().iter().enumerate() {
         let tile = document.decode_tile(index, &limits).unwrap();
         assert_eq!(tile.len(), geom.width as usize * geom.height as usize * bpp);
         for row in 0..geom.height as usize {

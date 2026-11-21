@@ -94,8 +94,18 @@ fn edge_tiles_are_encoded_at_their_actual_width() {
     assert_eq!(report.tile_count, 6, "3 columns x 2 rows");
 
     let document = Document::parse(&report.bytes, &limits).unwrap();
-    let widths: Vec<u32> = document.grid().iter().map(|g| g.width).collect();
-    let heights: Vec<u32> = document.grid().iter().map(|g| g.height).collect();
+    let widths: Vec<u32> = document
+        .partition()
+        .tiles()
+        .iter()
+        .map(|g| g.width)
+        .collect();
+    let heights: Vec<u32> = document
+        .partition()
+        .tiles()
+        .iter()
+        .map(|g| g.height)
+        .collect();
     assert_eq!(widths, vec![32, 32, 6, 32, 32, 6]);
     assert_eq!(heights, vec![32, 32, 32, 1, 1, 1]);
 
@@ -205,7 +215,7 @@ fn region_and_tile_decode_agree_for_predictor_tiles() {
         );
     }
 
-    for (index, geom) in document.grid().iter().enumerate() {
+    for (index, geom) in document.partition().tiles().iter().enumerate() {
         let tile = document.decode_tile(index, &limits).unwrap();
         for row in 0..geom.height as usize {
             let src = (geom.y as usize + row) * stride + geom.x as usize * bpp;

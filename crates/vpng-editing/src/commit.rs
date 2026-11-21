@@ -36,10 +36,9 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use vpng_container::{crc32c, Directory, DirectoryEntry, Header, HEADER_SIZE};
+use vpng_container::{crc32c, Directory, DirectoryEntry, Header, FEATURE_PYRAMID, HEADER_SIZE};
 use vpng_core::{Error, Limits, PixelFormat, Result};
 use vpng_encoder::{select_payload, EncodeOptions};
-use vpng_tiling::TileGrid;
 
 use crate::source::TileSource;
 
@@ -101,6 +100,14 @@ pub struct CommitReport {
     /// than the source's own file, or when the source cannot re-read its
     /// baseline (the borrowed in-memory source).
     pub baseline_advanced: bool,
+    /// The number of derived preview levels the commit dropped.
+    ///
+    /// A preview is derived from the original's pixels, so an edit that
+    /// changes those pixels leaves the preview stale. The editor cannot
+    /// rebuild a preview without re-reading the whole original, which its
+    /// memory model does not allow, so the commit writes the original level
+    /// only and says how many previews it left out.
+    pub preview_levels_dropped: u32,
     /// How long the save took.
     pub elapsed: Duration,
 }
@@ -123,13 +130,19 @@ pub(crate) fn write_document<S: TileSource>(
     format: PixelFormat,
     width: u32,
     height: u32,
-    grid: &TileGrid,
     template: &Header,
     target: &Path,
     options: &CommitOptions,
 ) -> Result<CommitReport> {
     let started = Instant::now();
-    let tile_count = source.tile_count() as usize;
+
+    // The original level is the only level the editor writes. A file may hold
+    // derived preview levels; those are dropped, because an edit invalidates
+    // them and the editor cannot rebuild them without re-reading the whole
+    // original.
+    let base = source.base_level();
+    let tile_count = base.tile_count();
+    let preview_levels_dropped = (source.level_count() - 1) as u32;
 
     // Step one: encode every dirty tile. The payloads are held in memory
     // only for the tiles the edit touched, which is bounded by the edited
@@ -138,16 +151,11 @@ pub(crate) fn write_document<S: TileSource>(
     for (index, pixels) in dirty {
         // The lookup is the bounds check: a dirty tile must exist in the
         // directory.
-        if source.tile_entry(*index).is_none() {
-            return Err(Error::invalid(format!(
-                "tile index {index} is out of range"
-            )));
-        }
-        let geometry = grid
-            .geometry_for_index(*index)
-            .map_err(|_| Error::internal(format!("tile {index} has no geometry")))?;
+        let original = source
+            .tile_entry(*index)
+            .ok_or_else(|| Error::invalid(format!("tile index {index} is out of range")))?;
         let expected =
-            geometry.width as usize * geometry.height as usize * format.bytes_per_pixel() as usize;
+            original.width as usize * original.height as usize * format.bytes_per_pixel() as usize;
         if pixels.len() != expected {
             return Err(Error::internal(format!(
                 "tile {index} holds {} pixels, expected {expected}",
@@ -158,8 +166,8 @@ pub(crate) fn write_document<S: TileSource>(
         let ctx = vpng_codecs::EncodeContext {
             limits: *limits,
             format,
-            tile_width: geometry.width as u16,
-            tile_height: geometry.height as u16,
+            tile_width: original.width,
+            tile_height: original.height,
         };
         let encode_options = match options.codec_id {
             Some(codec_id) => EncodeOptions {
@@ -175,7 +183,7 @@ pub(crate) fn write_document<S: TileSource>(
     // Step two: lay out the new directory. The offsets depend on the sizes
     // of the rewritten payloads, so they are computed after the payloads are
     // known.
-    let directory_size = Directory::total_size(source.tile_count())?;
+    let directory_size = Directory::total_size(tile_count as u32)?;
     let mut cursor = vpng_core::checked_add(HEADER_SIZE as u64, directory_size as u64)?;
 
     let mut entries: Vec<DirectoryEntry> = Vec::with_capacity(tile_count);
@@ -186,18 +194,15 @@ pub(crate) fn write_document<S: TileSource>(
         let original = source
             .tile_entry(index)
             .ok_or_else(|| Error::internal(format!("tile {index} has no directory entry")))?;
-        let geometry = grid
-            .geometry_for_index(index)
-            .map_err(|_| Error::internal(format!("tile {index} has no geometry")))?;
 
         let entry = match rewritten.get(&index) {
             Some(new) => {
                 rewritten_payload_bytes += new.payload.len() as u64;
                 DirectoryEntry {
-                    x: geometry.x,
-                    y: geometry.y,
-                    width: geometry.width as u16,
-                    height: geometry.height as u16,
+                    x: original.x,
+                    y: original.y,
+                    width: original.width,
+                    height: original.height,
                     codec_id: new.codec_id,
                     // The metadata describes the payload that was just
                     // written, not the one it replaced. The previous tile's
@@ -210,8 +215,8 @@ pub(crate) fn write_document<S: TileSource>(
                     compressed_length: new.payload.len() as u64,
                     // The uncompressed length is a property of the tile's
                     // geometry, not of its encoding: an edit never changes
-                    // the grid, so the length is the same one the source
-                    // declared.
+                    // the tile's size, so the length is the same one the
+                    // source declared.
                     uncompressed_length: original.uncompressed_length,
                     payload_checksum: crc32c(&new.payload),
                 }
@@ -219,10 +224,10 @@ pub(crate) fn write_document<S: TileSource>(
             None => {
                 copied_payload_bytes += original.compressed_length;
                 DirectoryEntry {
-                    x: geometry.x,
-                    y: geometry.y,
-                    width: geometry.width as u16,
-                    height: geometry.height as u16,
+                    x: original.x,
+                    y: original.y,
+                    width: original.width,
+                    height: original.height,
                     codec_id: original.codec_id,
                     predictor_id: original.predictor_id,
                     flags: original.flags,
@@ -240,9 +245,11 @@ pub(crate) fn write_document<S: TileSource>(
     let directory = Directory::new(entries);
     let directory_bytes = directory.encode()?;
 
-    // The header keeps every field of the original except the size and the
-    // directory offset. The default codec id is informational — the
-    // per-tile entry is authoritative — so it is carried over unchanged.
+    // The header keeps every field of the original except the size, the
+    // directory offset and the tile count. The default codec id is
+    // informational — the per-tile entry is authoritative — so it is carried
+    // over unchanged. The pyramid flag is cleared, because the committed file
+    // holds the original level only.
     let header = Header {
         major: template.major,
         minor: template.minor,
@@ -251,10 +258,10 @@ pub(crate) fn write_document<S: TileSource>(
         color_model: template.color_model,
         bits: template.bits,
         default_codec: template.default_codec,
-        tile_count: template.tile_count,
+        tile_count: tile_count as u32,
         directory_offset: HEADER_SIZE as u64,
         declared_file_size: cursor,
-        feature_flags: template.feature_flags,
+        feature_flags: template.feature_flags & !FEATURE_PYRAMID,
     };
     let header_bytes = header.to_bytes()?;
 
@@ -263,6 +270,7 @@ pub(crate) fn write_document<S: TileSource>(
     let write_result = write_temp_file(
         source,
         &rewritten,
+        tile_count,
         &header_bytes,
         &directory_bytes,
         &temp_path,
@@ -294,6 +302,7 @@ pub(crate) fn write_document<S: TileSource>(
         copied_payload_bytes,
         rewritten_payload_bytes,
         baseline_advanced: false,
+        preview_levels_dropped,
         elapsed: started.elapsed(),
     })
 }
@@ -302,6 +311,7 @@ pub(crate) fn write_document<S: TileSource>(
 fn write_temp_file<S: TileSource>(
     source: &mut S,
     rewritten: &BTreeMap<usize, Rewritten>,
+    tile_count: usize,
     header_bytes: &[u8],
     directory_bytes: &[u8],
     temp_path: &Path,
@@ -334,7 +344,6 @@ fn write_temp_file<S: TileSource>(
     write(&mut file, header_bytes, &mut written)?;
     write(&mut file, directory_bytes, &mut written)?;
 
-    let tile_count = source.tile_count() as usize;
     for index in 0..tile_count {
         match rewritten.get(&index) {
             Some(new) => {
