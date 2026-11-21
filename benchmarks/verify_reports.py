@@ -302,6 +302,110 @@ def check_bench() -> None:
           "the report does not mention the digest")
 
 
+def check_corpus() -> None:
+    """Check the 750-image corpus report against the raw data."""
+    report = (REPO / "docs/P5_CORPUS_REPORT.md").read_text(encoding="utf-8")
+    raw = json.loads((REPO / "benchmarks/p5_corpus_results.json").read_text(encoding="utf-8"))
+    manifest = json.loads((REPO / "benchmarks/corpus_manifest.json").read_text(encoding="utf-8"))
+    summary = raw["summary"]
+    categories = summary["categories"]
+    overall = summary["overall"]
+    images = raw["images"]
+    parameters = raw["context"]["parameters"]
+
+    def quoted(value, fmt) -> None:
+        text = format(value, fmt)
+        check(text in report, f"the corpus report does not contain the figure {text!r}")
+
+    # ---- the corpus is the corpus ------------------------------------------
+    manifest_ids = {entry["id"] for entry in manifest["images"]}
+    result_ids = {image["id"] for image in images}
+    check(
+        manifest_ids == result_ids,
+        "the manifest and the measurement file do not hold the same images",
+    )
+    check(
+        len(images) == manifest["total_images"],
+        f"the measurement file holds {len(images)} images, the manifest says {manifest['total_images']}",
+    )
+    quoted(len(images), ",")
+    quoted(len(images), "d")
+
+    # Every image must have been the bytes the manifest recorded.
+    mismatched = [image["id"] for image in images if not image["sha256_matches_manifest"]]
+    check(not mismatched, f"{len(mismatched)} images do not match their manifest digest")
+
+    # The manifest must record a digest and a commit for every image.
+    for entry in manifest["images"]:
+        check(len(entry.get("sha256", "")) == 64, f"{entry['id']}: no canonical digest")
+        check(len(entry.get("source_sha256", "")) == 64, f"{entry['id']}: no source digest")
+        check(entry.get("category") in categories, f"{entry['id']}: unknown category")
+        if entry.get("origin") == "github":
+            check(
+                len(entry.get("source_commit", "")) == 40,
+                f"{entry['id']}: no source commit",
+            )
+
+    # ---- the per-category figures ------------------------------------------
+    for name, row in categories.items():
+        quoted(row["count"], "d")
+        quoted(row["real"], "d")
+        quoted(row["synthetic"], "d")
+        quoted(row["auto"]["ratio"]["median"], ".3f")
+        quoted(row["auto"]["ratio"]["p95"], ".3f")
+        quoted(int(row["auto"]["bytes"]["median"]), ",")
+        quoted(int(row["auto"]["bytes"]["p95"]), ",")
+        quoted(row["under_10mb"]["count"], "d")
+        quoted(f"{100.0 * row['under_10mb']['rate']:.1f}%", "")
+        for tool in ("png", "webp", "jxl"):
+            if row[tool]["measured"]:
+                quoted(row[tool]["ratio"]["median"], ".3f")
+
+    # ---- the overall figures -------------------------------------------------
+    quoted(overall["auto"]["ratio"]["median"], ".3f")
+    quoted(overall["auto"]["ratio"]["p95"], ".3f")
+    quoted(overall["png"]["ratio"]["median"], ".3f")
+    quoted(overall["webp"]["ratio"]["median"], ".3f")
+    quoted(overall["jxl"]["ratio"]["median"], ".3f")
+    quoted(overall["under_10mb"]["count"], "d")
+    quoted(f"{100.0 * overall['under_10mb']['rate']:.1f}%", "")
+    quoted(overall["total_canonical_bytes"], ",")
+    quoted(overall["total_auto_bytes"], ",")
+
+    # ---- the encoder's own property -----------------------------------------
+    # Auto selection mixes codecs per tile; it must never be larger than the
+    # best single-codec run on the same pixels.
+    comparable = [image for image in images if image.get("auto_no_worse_than_best") is not None]
+    check(comparable, "no image produced a comparable auto and forced run")
+    worse = [image["id"] for image in comparable if not image["auto_no_worse_than_best"]]
+    check(not worse, f"{len(worse)} images are larger under auto than under the best forced codec")
+
+    # Every encode must have passed the container's own check.
+    failed = [
+        image["id"]
+        for image in images
+        for codec, node in image["vpng"].items()
+        if node.get("check_exit", 0) != 0
+    ]
+    check(not failed, f"{len(failed)} encodes did not pass `vpng check`")
+
+    # ---- the report has to state its rules -----------------------------------
+    check("nearest-rank" in report.lower(), "the corpus report does not define the p95 rule")
+    check("median" in report.lower(), "the corpus report does not mention the median")
+    check("included" in report.lower() and "excluded" in report.lower(),
+          "the corpus report does not state the memory scope")
+    check("sha256" in report.lower() or "digest" in report.lower(),
+          "the corpus report does not mention the digest")
+    check(f"{parameters['size_ceiling_bytes']:,}" in report,
+          "the corpus report does not state the 10 MB ceiling in bytes")
+
+    # The corpus's composition must be stated, not implied: a synthetic image
+    # and a photograph are not the same evidence.
+    check("synthetic" in report.lower(), "the corpus report does not say what is synthetic")
+    check("licence" in report.lower() or "license" in report.lower(),
+          "the corpus report does not mention the licences")
+
+
 def main() -> int:
     raw = json.loads((REPO / "benchmarks/p3_5_raw_results.json").read_text(encoding="utf-8"))
     report = (REPO / "docs/P3_5_COMPRESSION_RESEARCH_REPORT.md").read_text(encoding="utf-8")
@@ -537,6 +641,9 @@ def main() -> int:
 
     # ---- the multi-run photographic baseline ---------------------------------
     check_bench()
+
+    # ---- the 750-image corpus ------------------------------------------------
+    check_corpus()
 
     if problems:
         print(f"{len(problems)} problem(s):")

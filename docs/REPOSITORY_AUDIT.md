@@ -124,10 +124,16 @@ Resolved during the build phase:
 
 Still open:
 
-4. **Corpus coverage is thin.** A 9-image seed corpus with manifest provenance
-   exists (`benchmarks/corpus_manifest.json`, `docs/BENCHMARKS.md`), so codec
-   and baseline comparisons are measurable, but the 750-image target is unmet;
-   no distribution or per-category success-rate claim follows from nine images.
+4. ~~**Corpus coverage is thin.**~~ Resolved (2026-11-21): the corpus is
+   **750 images** in five categories — photographs 300, screenshots 100, pixel
+   art 100, scans 100, textures 150 — with a SHA-256 manifest that records
+   each image's canonical digest, its source digest and the commit it was
+   read at (`benchmarks/corpus_manifest.json` version 2,
+   `docs/P5_CORPUS_REPORT.md`). The per-category distribution and the 10 MB
+   success rate (748 of 750, 99.7%) are measured on it. What is *not* solved
+   by this: the corpus is five repositories chosen for coverage rather than a
+   random sample of the world's images, and only three of its images are
+   larger than 4096 pixels, so the large-image tail is still thin.
 5. **16K is partially validated.** A 16384×16384 gray8 gradient and a
    15360×8640 rgb8 photo are recorded; the 16384×16384 RGBA8 case was skipped
    because it needs about 3.4 GiB of live buffers and free physical memory never

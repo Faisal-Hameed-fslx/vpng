@@ -8,6 +8,51 @@ separately as major.minor in the header.
 
 ### Added
 
+* **The 750-image corpus, and the distribution it makes measurable
+  (Phase A, Step 3).** The nine-image seed is replaced by a real corpus:
+  **750 images** in the five planned categories — photographs 300,
+  screenshots 100, pixel art 100, scans 100, textures 150 — of which **746
+  are real images** fetched from five public repositories at pinned commits
+  and **4** are the project's own deterministic synthetic seed images.
+  * **The corpus is a manifest of digests.** `benchmarks/corpus_manifest.json`
+    (version 2) records, per image: the SHA-256 of its canonical pixels, the
+    SHA-256 of the file it came from, the repository, the ref, the **commit**
+    and the path inside it, the dimensions, the pixel format, the licence and
+    the attribution. The image bytes are not redistributed — they stay under
+    the git-ignored `corpus-data/` tree.
+  * **The selection is deterministic and the skips are counted.** Candidates
+    are ordered by the SHA-256 of their path, and the builder records what it
+    rejected: 49 images that failed the pixel-art test (a long edge of at
+    most 512 pixels and at most 64 distinct colours, alpha excluded), 23 it
+    could not decode and 4 duplicates.
+  * **Every image was verified, and every file checked.** All 750 images were
+    re-canonicalised and compared with the manifest: **0 digest mismatches**.
+    Every encoded file passed `vpng check`: **0 failures**.
+  * **The headline result is unfavourable, and it is kept.** `auto` writes
+    **0.415×** the canonical bytes; PNG writes **0.379×**, WebP lossless
+    **0.242×** and JPEG XL lossless **0.219×**. **VPNG is behind PNG on every
+    one of the five categories** — photographs 0.602 against 0.591,
+    screenshots 0.063 against 0.031, scans 0.346 against 0.277, pixel art
+    0.165 against 0.140, textures 0.378 against 0.367. The seed hinted at
+    this; 750 images measure it.
+  * **The 10 MB target succeeds on 748 of 750 images (99.7%)** — photographs
+    299/300, screenshots 100/100, pixel art 100/100, scans 100/100, textures
+    149/150. Both failures are named: the 16K photograph at **124,197,035**
+    bytes and one 2,048 × 2,048 texture at **11,397,940** bytes.
+  * **Auto selection never lost to the best forced codec** on any of the 750
+    images, and was strictly smaller on **109** of them (1,541,810 bytes in
+    total). The palette codec refused 556 images — more than 256 distinct
+    pixel values — with a typed refusal rather than a silent fallback.
+  * **Eighteen images expand**: their file is larger than their pixels, the
+    worst a 1 × 1 texture at 37.0×, because the container's fixed overhead
+    is larger than the image. The corpus records it rather than hiding it.
+  * New: `benchmarks/corpus/build_corpus.py` (the builder),
+    `benchmarks/corpus/sources.py` (the source registry),
+    `benchmarks/render_corpus_tables.py` (the tables, rendered from the raw
+    data), `docs/P5_CORPUS_REPORT.md` (the report, with the twelve
+    questions), `benchmarks/p5_corpus_results.json` (the raw data), and
+    `check_corpus()` in `benchmarks/verify_reports.py`, which binds every
+    quoted figure to it.
 * **The multi-run photographic benchmark and the latency matrix
   (`crates/vpng-validation`).** The measurement foundation: every case is
   repeated, and the report gives the **median** and the **p95**, not a

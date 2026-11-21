@@ -998,6 +998,47 @@ Test a range of dimensions, including 512, 1024, 2048, 4096, 8192, and
 Do not upscale small images and count them as native 16K compression
 evidence.
 
+### 11.1.1 What was built (2026-11-21)
+
+The corpus now exists, and it is recorded rather than asserted.
+`benchmarks/corpus_manifest.json` (version 2) holds **750 images**, each with
+the SHA-256 of its canonical pixels, the SHA-256 of the file it came from,
+the repository, the ref, the **commit** and the path it was read at, its
+dimensions, its licence and its attribution. The builder is
+`benchmarks/corpus/build_corpus.py` and the source registry is
+`benchmarks/corpus/sources.py`; the measurement is in
+`benchmarks/p5_corpus_results.json` and the report, with the twelve
+questions, is `docs/P5_CORPUS_REPORT.md`.
+
+The seven categories above were merged into the five the plan now names —
+photos, UI, pixel art, scans, textures — and the merge is recorded rather
+than implied:
+
+  Category                   Planned     Delivered   From
+  ------------------------ ------------ ----------- --------------------------
+  Photographs                     200         300   ImageNet sample images
+  Anime/illustrations             100           —   merged into pixel art
+  Digital paintings               100         100   scans (digitised artwork)
+  Screenshots/text/UI             100         100   GitHub and VS Code docs
+  3D renders                      100           —   merged into textures
+  Procedural textures             100         150   three.js and Godot textures
+  Synthetic random/noise           50           4   the project's own seed images
+  **Total**                       750         750
+
+Of the 750, **746 are real images** from five public repositories at pinned
+commits and **4** are the project's own deterministic synthetic seed images.
+Pixel art is not a guess: an image joins that category only when its long
+edge is at most 512 pixels and it holds at most 64 distinct colours, and the
+test rejected 49 candidates the source directories contained.
+
+What the corpus measures, on 750 images with one denominator (the same
+canonical pixels for every encoder): `auto` writes **0.415×** the canonical
+bytes, PNG **0.379×**, WebP lossless **0.242×** and JPEG XL lossless
+**0.219×** — so VPNG is **behind PNG on every category**, which is the
+unfavourable result the corpus was built to find. The 10 MB target succeeds
+on **748 of 750 images (99.7%)**, with both failures named. The FLIF
+baseline is still absent: no reliable encoder is installed.
+
 ## 11.2 Baselines
 
 Compare exact pixel data against:

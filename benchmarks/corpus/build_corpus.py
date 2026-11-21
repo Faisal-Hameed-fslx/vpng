@@ -1,0 +1,412 @@
+#!/usr/bin/env python3
+"""Build the 750-image corpus, reproducibly.
+
+The builder fetches images from the sources in ``benchmarks/corpus/sources.py``,
+canonicalises each one, and writes a manifest that records, for every image:
+
+* the category it belongs to and the rule that put it there,
+* the repository, ref and **commit** it came from, and the path inside it,
+* the SHA-256 of the downloaded file and the SHA-256 of the canonical pixels,
+* the dimensions, the pixel format and the canonical byte count.
+
+The image bytes stay under the git-ignored ``corpus-data/`` tree. The
+manifest is the committed artefact: it says which bytes the measurements were
+taken on, and a second run over the same commits produces the same digests.
+
+Run from the repository root:
+
+    python benchmarks/corpus/build_corpus.py
+    python benchmarks/corpus/build_corpus.py --dry-run
+    python benchmarks/corpus/build_corpus.py --category photos --target 10
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import sys
+import time
+from collections import Counter
+from pathlib import Path
+
+import numpy as np
+
+HERE = Path(__file__).resolve().parent
+REPO = HERE.parents[1]
+sys.path.insert(0, str(HERE))
+sys.path.insert(0, str(REPO / "benchmarks" / "stress"))
+
+from canonical_cache import cache_one, file_sha256  # noqa: E402
+from sources import (  # noqa: E402
+    CATEGORIES,
+    CATEGORY_MIGRATION,
+    CATEGORY_TARGETS,
+    IMAGE_EXTENSIONS,
+    SOURCES,
+    GitHub,
+    GitHubError,
+    Source,
+    order_key,
+)
+
+#: The manifest version this builder writes.
+MANIFEST_VERSION = 2
+
+BYTES_PER_PIXEL = {"gray8": 1, "graya8": 2, "rgb8": 3, "rgba8": 4}
+
+#: A pixel-art image is small and has few colours. Both halves matter: a
+#: small screenshot has few colours but is not pixel art, and a large
+#: gradient has few colours but is not pixel art either.
+PIXEL_ART_MAX_EDGE = 512
+PIXEL_ART_MAX_COLORS = 64
+
+#: Above this many pixels the distinct-colour count is not worth the time.
+COLOR_COUNT_PIXEL_CAP = 2_000_000
+
+
+def parse_targets(text: str | None) -> dict[str, int]:
+    """Parse ``photos=300,ui=100`` into a dictionary."""
+    if not text:
+        return dict(CATEGORY_TARGETS)
+    targets: dict[str, int] = {}
+    for part in text.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if "=" not in part:
+            raise SystemExit(f"--targets expects `category=count`, not `{part}`")
+        name, count = part.split("=", 1)
+        name = name.strip()
+        if name not in CATEGORIES:
+            raise SystemExit(
+                f"unknown category `{name}`; known categories: {', '.join(CATEGORIES)}"
+            )
+        targets[name] = int(count)
+    return targets
+
+
+def distinct_colors(raw_path: Path, width: int, height: int, fmt: str) -> int | None:
+    """How many distinct colours the canonical pixels hold.
+
+    Alpha is ignored: a transparent pixel and its opaque twin are the same
+    colour for this test. The count is exact for the formats the corpus
+    uses; it is skipped for images too large to be worth the sort.
+    """
+    bpp = BYTES_PER_PIXEL[fmt]
+    if width * height > COLOR_COUNT_PIXEL_CAP:
+        return None
+    pixels = np.memmap(raw_path, dtype=np.uint8, mode="r", shape=(height * width * bpp,))
+    grid = pixels.reshape(height, width, bpp)
+    if bpp == 1:
+        return int(np.unique(grid).size)
+    if bpp == 2:
+        # Gray plus alpha: the alpha is not a colour.
+        return int(np.unique(grid[:, :, 0:1]).size)
+    return int(np.unique(grid[:, :, :3].reshape(-1, 3), axis=0).shape[0])
+
+
+def is_pixel_art(width: int, height: int, colors: int | None) -> bool:
+    """The pixel-art test: small canvas, few colours."""
+    if colors is None:
+        return False
+    long_edge = max(width, height)
+    return long_edge <= PIXEL_ART_MAX_EDGE and colors <= PIXEL_ART_MAX_COLORS
+
+
+def migrate_legacy(manifest: dict, root: Path) -> list[dict]:
+    """Keep the images the seed manifest recorded, under the new categories.
+
+    The seed images are real measurements — the 16K photograph among them —
+    so they are carried forward with their original provenance and their
+    original digest.
+    """
+    entries: list[dict] = []
+    for entry in manifest.get("images", []):
+        path = root / entry["path"]
+        if not path.exists():
+            print(f"  legacy image is gone, skipped: {entry['path']}")
+            continue
+        migrated = dict(entry)
+        migrated["category"] = CATEGORY_MIGRATION.get(entry["category"], entry["category"])
+        migrated["origin"] = "legacy"
+        migrated.setdefault("source_sha256", file_sha256(path))
+        migrated.setdefault("canonical_path", "")
+        migrated.setdefault("tags", [])
+        migrated.setdefault("distinct_colors", None)
+        migrated.setdefault("synthetic", entry.get("source", "").startswith("generated by"))
+        migrated["notes"] = (migrated.get("notes", "") + " [carried forward from the seed manifest]").strip()
+        entries.append(migrated)
+    return entries
+
+
+def entry_id(source: Source, path: str) -> str:
+    """A stable id for an image: the source, then a digest of its path."""
+    digest = hashlib.sha256(path.encode("utf-8")).hexdigest()[:12]
+    return f"{source.id}-{digest}"
+
+
+def download_candidate(
+    github: GitHub, source: Source, commit: str, path: str, root: Path
+) -> Path:
+    """Fetch one file, or reuse the copy already on disk."""
+    target = root / "sources" / source.id / path
+    if target.exists() and target.stat().st_size > 0:
+        return target
+    target.parent.mkdir(parents=True, exist_ok=True)
+    data = github.download(source.repo, commit, path)
+    tmp = target.with_suffix(target.suffix + ".part")
+    tmp.write_bytes(data)
+    tmp.replace(target)
+    return target
+
+
+def build(args: argparse.Namespace) -> dict:
+    root = Path(args.root)
+    root.mkdir(parents=True, exist_ok=True)
+    manifest_path = Path(args.manifest)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else {}
+
+    targets = parse_targets(args.targets)
+    if args.category:
+        for name in args.category:
+            if name not in targets:
+                raise SystemExit(f"unknown category `{name}`")
+        targets = {name: count for name, count in targets.items() if name in args.category}
+
+    entries = migrate_legacy(manifest, root) if not args.fresh else []
+    counts = Counter(entry["category"] for entry in entries)
+    seen_digests = {entry["sha256"] for entry in entries}
+
+    sources = [source for source in SOURCES if not args.source or source.id in args.source]
+    if args.source:
+        unknown = {name for name in args.source if name not in {s.id for s in SOURCES}}
+        if unknown:
+            raise SystemExit(f"unknown source(s): {', '.join(sorted(unknown))}")
+
+    github = GitHub()
+    source_records: list[dict] = []
+    skips: Counter[str] = Counter()
+    skipped_examples: list[dict] = []
+    downloaded = 0
+    started = time.perf_counter()
+
+    for source in sources:
+        target_count = targets.get(source.category, 0)
+        if counts[source.category] >= target_count:
+            print(f"== {source.id}: {source.category} is already full ({counts[source.category]}/{target_count})")
+            continue
+        try:
+            commit = github.resolve_commit(source.repo, source.ref)
+            tree = github.list_tree(source.repo, commit, source.paths)
+        except GitHubError as exc:
+            print(f"== {source.id}: FAILED to list ({exc})")
+            skips["source_unavailable"] += 1
+            skipped_examples.append({"source": source.id, "reason": "source_unavailable", "detail": str(exc)})
+            continue
+
+        candidates = [
+            entry
+            for entry in tree
+            if source.covers(entry["path"])
+            and ("." + entry["path"].rsplit(".", 1)[-1].lower()) in IMAGE_EXTENSIONS
+            and entry.get("size", 0) <= args.max_file_bytes
+        ]
+        candidates.sort(key=lambda entry: order_key(entry["path"]))
+        print(
+            f"== {source.id}: {len(candidates)} candidates in {source.repo}@{commit[:12]} "
+            f"({source.category}, need {target_count - counts[source.category]})"
+        )
+        if args.dry_run:
+            source_records.append(source.to_dict(commit))
+            continue
+
+        taken = 0
+        for candidate in candidates:
+            if counts[source.category] >= target_count or taken >= source.limit:
+                break
+            path = candidate["path"]
+            try:
+                local = download_candidate(github, source, commit, path, root)
+                downloaded += 1
+            except GitHubError as exc:
+                skips["download_failed"] += 1
+                if len(skipped_examples) < 200:
+                    skipped_examples.append({"source": source.id, "path": path, "reason": "download_failed", "detail": str(exc)})
+                continue
+
+            try:
+                record = cache_one(local, root / "cache", force=args.force_cache)
+            except Exception as exc:  # noqa: BLE001 - an undecodable image is skipped
+                skips["undecodable"] += 1
+                if len(skipped_examples) < 200:
+                    skipped_examples.append({"source": source.id, "path": path, "reason": "undecodable", "detail": str(exc)[:200]})
+                continue
+
+            width = record["width"]
+            height = record["height"]
+            fmt = record["pixel_format"]
+            if width * height > args.max_pixels:
+                skips["too_large"] += 1
+                if len(skipped_examples) < 200:
+                    skipped_examples.append({"source": source.id, "path": path, "reason": "too_large", "detail": f"{width}x{height}"})
+                continue
+
+            digest = record["canonical_sha256"]
+            if digest in seen_digests:
+                skips["duplicate"] += 1
+                continue
+
+            raw_path = root / "cache" / record["canonical_path"]
+            try:
+                colors = distinct_colors(raw_path, width, height, fmt)
+            except Exception as exc:  # noqa: BLE001 - an odd image is skipped, not fatal
+                skips["unreadable_pixels"] += 1
+                if len(skipped_examples) < 200:
+                    skipped_examples.append({"source": source.id, "path": path, "reason": "unreadable_pixels", "detail": str(exc)[:200]})
+                continue
+            if source.accept == "pixel_art" and not is_pixel_art(width, height, colors):
+                skips["not_pixel_art"] += 1
+                continue
+
+            entry = {
+                "id": entry_id(source, path),
+                "category": source.category,
+                "path": str(local.relative_to(root)).replace("\\", "/"),
+                "canonical_path": record["canonical_path"],
+                "source": source.url,
+                "source_id": source.id,
+                "source_path": path,
+                "source_ref": source.ref,
+                "source_commit": commit,
+                "source_sha256": record["source_sha256"],
+                "sha256": digest,
+                "width": width,
+                "height": height,
+                "pixel_format": fmt,
+                "canonical_bytes": record["canonical_bytes"],
+                "license": source.license,
+                "attribution": source.attribution,
+                "notes": source.notes,
+                "tags": [source.accept] if source.accept != "any" else [],
+                "distinct_colors": colors,
+                "origin": "github",
+                "synthetic": False,
+            }
+            entries.append(entry)
+            seen_digests.add(digest)
+            counts[source.category] += 1
+            taken += 1
+            if taken % 10 == 0:
+                print(
+                    f"   {source.id}: {taken} taken, {counts[source.category]}/{target_count} "
+                    f"in {source.category} ({time.perf_counter() - started:.0f}s)"
+                )
+
+        source_records.append(source.to_dict(commit))
+        source_records[-1]["taken"] = taken
+
+    entries.sort(key=lambda entry: (entry["category"], entry["id"]))
+    report = {
+        "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "elapsed_seconds": round(time.perf_counter() - started, 3),
+        "targets": targets,
+        "counts": dict(counts),
+        "total": len(entries),
+        "downloaded_files": downloaded,
+        "github_requests": github.requests,
+        "github_downloaded_bytes": github.downloaded_bytes,
+        "skips": dict(skips),
+        "skipped_examples": skipped_examples[:200],
+        "sources": source_records,
+    }
+    return {"entries": entries, "report": report}
+
+
+def write_manifest(path: Path, entries: list[dict], report: dict, targets: dict[str, int]) -> None:
+    counts = Counter(entry["category"] for entry in entries)
+    manifest = {
+        "$schema": "https://example.invalid/vpng/corpus-manifest.schema.json",
+        "manifest_version": MANIFEST_VERSION,
+        "updated": time.strftime("%Y-%m-%d"),
+        "notes": [
+            "Provenance and licence are recorded for every entry.",
+            "Dimensions are the NATIVE dimensions; no image is upscaled.",
+            "sha256 is over the canonical pixel buffer (docs/VPNG_SPEC_0_1.md section 7).",
+            "source_sha256 is over the downloaded file's bytes.",
+            "Image bytes live under corpus-data/ (git-ignored); this manifest is the provenance record.",
+            f"Built by benchmarks/corpus/build_corpus.py; {len(entries)} images.",
+        ],
+        "categories": [
+            {"id": name, "description": description, "target_count": targets.get(name, 0), "count": counts.get(name, 0)}
+            for name, description in CATEGORIES.items()
+        ],
+        "target_total": sum(targets.values()),
+        "total_images": len(entries),
+        "sources": report["sources"],
+        "build": {
+            "generated_at": report["generated_at"],
+            "elapsed_seconds": report["elapsed_seconds"],
+            "downloaded_files": report["downloaded_files"],
+            "skips": report["skips"],
+        },
+        "images": entries,
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--root", default=str(REPO / "corpus-data"))
+    parser.add_argument("--manifest", default=str(REPO / "benchmarks" / "corpus_manifest.json"))
+    parser.add_argument("--targets", default=None, help="category=count,... (default: the 750-image plan)")
+    parser.add_argument("--category", action="append", default=[], help="only this category")
+    parser.add_argument("--source", action="append", default=[], help="only this source id")
+    parser.add_argument("--max-file-bytes", type=int, default=25 * 1024 * 1024)
+    parser.add_argument("--max-pixels", type=int, default=50_000_000)
+    parser.add_argument("--force-cache", action="store_true")
+    parser.add_argument("--fresh", action="store_true", help="ignore the existing manifest")
+    parser.add_argument("--dry-run", action="store_true", help="list the candidates, download nothing")
+    parser.add_argument("--report", default=None, help="where to write the build report")
+    args = parser.parse_args()
+
+    root = Path(args.root)
+    built = build(args)
+    entries = built["entries"]
+    report = built["report"]
+    targets = parse_targets(args.targets)
+
+    counts = Counter(entry["category"] for entry in entries)
+    print()
+    print("corpus:")
+    for name in CATEGORIES:
+        target = targets.get(name, 0)
+        count = counts.get(name, 0)
+        mark = "ok" if count >= target else "SHORT"
+        print(f"  {name:<12} {count:>4}/{target:<4} {mark}")
+    print(f"  {'total':<12} {len(entries):>4}/{sum(targets.values()):<4}")
+    print(f"  skips: {report['skips']}")
+
+    if args.dry_run:
+        print("dry run: nothing was written")
+        return 0
+
+    manifest_path = Path(args.manifest)
+    write_manifest(manifest_path, entries, report, targets)
+    print(f"manifest written: {manifest_path} ({len(entries)} entries)")
+
+    report_path = Path(args.report) if args.report else root / "build_report.json"
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    print(f"build report written: {report_path}")
+
+    short = [name for name in CATEGORIES if counts.get(name, 0) < targets.get(name, 0)]
+    if short:
+        print(f"categories short of their target: {', '.join(short)}")
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

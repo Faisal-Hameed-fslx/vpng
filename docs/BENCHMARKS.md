@@ -81,12 +81,69 @@ rate under 10 MB.
   tiles load. *Runnable now (Raw).*
 * **E6** Editing locality on a 16K image. **Done** — see "Measured: P4
   editing locality and 16K memory" below.
-* **E7** 10 MB success distribution per category. *Blocked on the full corpus; the
-  9-image seed cannot support a distribution claim.*
+* **E7** 10 MB success distribution per category. **Done** — see "Measured: the
+  750-image corpus" below: 748 of 750 images (99.7%) land under the decimal
+  10,000,000-byte ceiling, with the per-category distribution and both
+  failures named.
 * **E8** Streaming performance: time to first preview/visible tile, panning,
   zoom transitions, cache hit rate, worker utilization. *Blocked on P5/P6.*
   The P4 streaming **writer** is done (tile-by-tile, one tile in memory);
   the streaming *reader* and the preview surface are not.
+
+## Measured: the 750-image corpus (2026-11-21)
+
+The corpus the roadmap asked for now exists. Driver
+`benchmarks/corpus/run_corpus.py` over `benchmarks/corpus_manifest.json`
+(version 2: 750 images, each with a canonical SHA-256, a source SHA-256 and
+the commit it was read at); builder `benchmarks/corpus/build_corpus.py`;
+source registry `benchmarks/corpus/sources.py`. Raw run preserved in
+`benchmarks/p5_corpus_results.json`; the full report, with the twelve
+questions, is `docs/P5_CORPUS_REPORT.md`.
+
+Categories: photographs 300, screenshots 100, pixel art 100, scans 100,
+textures 150. 746 images are real, fetched from five public repositories at
+pinned commits; 4 are the project's own deterministic synthetic seed images.
+Baselines are Pillow PNG (`compress_level=6`), Pillow WebP lossless
+(`quality=100, method=4`) and `cjxl -d 0`, all encoded from the **same**
+canonical pixels, on 749 of the 750 images (the 16K photograph is above the
+32-megapixel baseline cap and was encoded by VPNG only). Tile size 256.
+
+Median ratio (encoded bytes ÷ canonical bytes, lower is better):
+
+| Category | Images | auto | raw | palette | rle | predictor | PNG | WebP | JPEG XL |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| photos | 300 | 0.602× | 1.000× | 1.006× | 0.971× | 0.602× | 0.591× | 0.429× | 0.387× |
+| pixel_art | 100 | 0.165× | 1.012× | 0.201× | 0.429× | 0.266× | 0.140× | 0.065× | 0.067× |
+| scans | 100 | 0.346× | 1.000× | 1.004× | 0.798× | 0.363× | 0.277× | 0.176× | 0.137× |
+| textures | 150 | 0.378× | 1.001× | 1.004× | 0.849× | 0.387× | 0.367× | 0.246× | 0.228× |
+| ui | 100 | 0.063× | 1.000× | 0.342× | 0.069× | 0.067× | 0.031× | 0.012× | 0.019× |
+| **all** | 750 | **0.415×** | 1.000× | 0.336× | 0.839× | 0.439× | **0.379×** | **0.242×** | **0.219×** |
+
+The palette column is over the 194 images it applies to: the palette codec
+refuses any image with more than 256 distinct pixel values, and refused 556
+of the 750.
+
+Findings, stated as limits rather than claims:
+
+* **VPNG is behind PNG on every category**, and behind WebP lossless and
+  JPEG XL lossless by a wide margin: 0.415× against PNG's 0.379×, WebP's
+  0.242× and JPEG XL's 0.219× across the corpus. The seed had hinted at
+  this; 750 images measure it.
+* **The 10 MB target succeeds on 748 of 750 images (99.7%)** — photographs
+  299/300, screenshots 100/100, pixel art 100/100, scans 100/100, textures
+  149/150. The failures are named: the 16K photograph at 124,197,035 bytes
+  and one 2,048 × 2,048 texture at 11,397,940 bytes.
+* **Auto selection never lost to the best forced codec** on any of the 750
+  images, and was strictly smaller on 109 of them (1,541,810 bytes in total).
+  The property the nine-image seed showed now holds on a corpus.
+* **Eighteen images expand**: their file is larger than their pixels, the
+  worst a 1 × 1 texture at 37.0×. The container's fixed overhead is larger
+  than the image, and the corpus records it rather than hiding it.
+* The corpus is **mostly small** — 461 of the 750 images are 512 pixels or
+  less on the long edge, and three are larger than 4096 — so the large-image
+  tail is two images, not a distribution.
+* The corpus is **five repositories chosen for coverage**, not a random
+  sample, and the category names are proxies for content types.
 
 ## Measured: large-image stress (2026-11-15, with Predictor)
 

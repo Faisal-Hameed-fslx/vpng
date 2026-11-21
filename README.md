@@ -108,6 +108,17 @@ across workers without changing a single byte of the file it writes. That is
 what makes the 750-image corpus affordable, and it is the reason the corpus
 comes before the container revisions rather than after them.
 
+The **750-image corpus** is done as well (P5.3): 750 images in five
+categories — photographs, screenshots, pixel art, scans, textures — 746 of
+them real, fetched from five public repositories at pinned commits and
+recorded by a SHA-256 manifest that names every image's canonical digest,
+its source digest and the commit it came from. The distribution is measured
+on it, and it is unfavourable and kept: `auto` writes **0.415×** the
+canonical bytes against PNG's **0.379×**, WebP lossless's **0.242×** and
+JPEG XL lossless's **0.219×**, so VPNG is behind PNG on every category. The
+10 MB target succeeds on **748 of the 750** images, with both failures named.
+See `docs/P5_CORPUS_REPORT.md`.
+
 After that come the multiresolution preview pyramid (P6) and adaptive tiling
 (P7), which are container revisions and are done back to back so the
 container version is bumped once.

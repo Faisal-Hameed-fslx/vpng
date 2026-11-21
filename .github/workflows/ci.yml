@@ -192,6 +192,10 @@ jobs:
         run: python benchmarks/corpus/run_research.py --help
       - name: The corpus runner must show its help
         run: python benchmarks/corpus/run_corpus.py --help
+      - name: The corpus builder must show its help
+        run: python benchmarks/corpus/build_corpus.py --help
+      - name: The corpus statistics rules must be pinned
+        run: python benchmarks/corpus/run_corpus.py --self-test
       - name: The seed generator must show its help
         run: python benchmarks/corpus/seed.py --help
       - name: The synthetic generator must show its help
