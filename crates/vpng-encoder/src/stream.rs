@@ -40,7 +40,7 @@ use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 use vpng_codecs::{CODEC_AUTO, CODEC_RAW};
-use vpng_container::{crc32c, Directory, DirectoryEntry, Header, FEATURE_PYRAMID, HEADER_SIZE};
+use vpng_container::{crc32c, Directory, DirectoryEntry, FEATURE_PYRAMID, HEADER_SIZE};
 use vpng_core::{Dimensions, Error, Result};
 use vpng_tiling::Partition;
 
@@ -265,33 +265,26 @@ fn write_stream(
         options.codec_id
     };
 
-    // A file is v0.2 when it uses a feature v0.2 defines. The default path
-    // stays v0.1, so the bytes the golden fixtures pin do not move.
-    let header = if options.is_v2() {
-        Header::new_v2(
-            dims.width,
-            dims.height,
-            format,
-            file_codec,
-            tile_count,
-            HEADER_SIZE as u64,
-            cursor,
-        )?
-    } else {
-        Header::new(
-            dims.width,
-            dims.height,
-            format,
-            file_codec,
-            tile_count,
-            HEADER_SIZE as u64,
-            cursor,
-        )?
-    };
+    // The minor version states what the file *contains*, not what the options
+    // allowed. A file that names a codec promoted in v0.3 needs a v0.3
+    // reader; a file that does not, does not. The default path stays v0.1, so
+    // the bytes the golden fixtures pin do not move.
+    //
+    // The rule is shared with the batch assembler, so the streaming writer
+    // and `encode` cannot disagree about a file's version.
+    let minor = crate::content_minor(&codec_ids, options.is_v2());
 
     // The pyramid flag and the levels must agree.
     let feature_flags = if levels.len() > 1 { FEATURE_PYRAMID } else { 0 };
-    let header = header.with_feature_flags(feature_flags);
+    let header = crate::build_header(
+        minor,
+        dims,
+        format,
+        file_codec,
+        tile_count,
+        cursor,
+        feature_flags,
+    )?;
     let header_bytes = header.to_bytes()?;
     let directory_bytes = Directory::new(entries).encode()?;
 

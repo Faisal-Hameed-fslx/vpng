@@ -19,3 +19,4 @@ vpng-tiling.workspace = true
 
 [dev-dependencies]
 vpng-codecs.workspace = true
+vpng-testkit.workspace = true

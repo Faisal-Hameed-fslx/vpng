@@ -20,6 +20,7 @@ with a status, the question, the decision, the rationale, and the consequences.
 | [0012](ADR-0012-atomic-replacement.md) | atomic replacement per platform; append-only vs temporary-file rewrite (§18.9, §18.10) | accepted |
 | [0013](ADR-0013-cache-eviction.md) | decoded-tile cache eviction policy (§18.13) | accepted |
 | [0014](ADR-0014-levels-and-partitions.md) | levels, partitions, the level flags and the preview policy (§18.4, §18.12) | accepted |
+| [0015](ADR-0015-promoting-codecs-4-to-6.md) | promoting the dictionary and context-adaptive codecs to ids 4–6, and the v0.3 version rule | accepted |
 
 ### Still open
 

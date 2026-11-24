@@ -1,18 +1,20 @@
-//! The hybrid research codecs: predictor, LZ77 and entropy coding combined.
+//! The hybrid codecs: predictor, LZ77 and entropy coding combined.
 //!
-//! This is **research code**. It carries research-only codec ids
-//! (`0x91..=0x93`), is not reachable through [`crate::get_codec`], and is not
-//! in [`crate::IMPLEMENTED_CODEC_IDS`]. A file that somehow carried one of
-//! these ids would be rejected by the production decoder with
-//! `UnsupportedFeature`.
+//! One of the three pipelines is a **stable** codec: the predictor layered
+//! over a dictionary is codec id **5** (`predictor+dictionary`), and it is
+//! reachable through [`crate::get_codec`] from format v0.3 onwards. The other
+//! two pipelines remain **research-only**: they carry research ids
+//! (`0x92`, `0x93`), are not in [`crate::IMPLEMENTED_CODEC_IDS`], and a file
+//! that somehow carried one of those ids would be rejected by the production
+//! decoder with `UnsupportedFeature`.
 //!
 //! # The three hybrids
 //!
 //! | kind | id | pipeline |
 //! |---|---|---|
-//! | `PredictorThenLz77` | `0x91` | predictor → LZ77 |
-//! | `Lz77ThenEntropy` | `0x92` | LZ77 → entropy |
-//! | `PredictorThenLz77ThenEntropy` | `0x93` | predictor → LZ77 → entropy |
+//! | `PredictorThenLz77` | **5** (stable) | predictor → LZ77 |
+//! | `Lz77ThenEntropy` | `0x92` (research) | LZ77 → entropy |
+//! | `PredictorThenLz77ThenEntropy` | `0x93` (research) | predictor → LZ77 → entropy |
 //!
 //! The stages are **not** combined automatically. Each hybrid is a separate
 //! candidate, and the research harness selects between them by the complete
@@ -54,7 +56,7 @@
 //!
 //! ```text
 //! offset ..  u8   predictor version (1)
-//! offset ..  ..   tile width in samples, unsigned LEB128
+//! offset ..  ..   tile width in **pixels**, unsigned LEB128
 //! offset ..  ..   one predictor-mode byte per tile row
 //! ```
 //!
@@ -71,11 +73,11 @@
 
 use vpng_core::{Error, Result};
 
-use crate::experimental::{entropy, lz77};
 use crate::predictor::{self, get_uleb128, put_uleb128, Layout, PREDICTOR_MAX};
-use crate::{DecodeContext, EncodeContext, TileCodec};
+use crate::{entropy, lz77, DecodeContext, EncodeContext, TileCodec};
 
-use super::{EXP_LZ77_ENTROPY, EXP_PRED_LZ77, EXP_PRED_LZ77_ENTROPY};
+use crate::experimental::{EXP_LZ77_ENTROPY, EXP_PRED_LZ77_ENTROPY};
+use crate::CODEC_PREDICTOR_DICTIONARY;
 
 /// Payload version of the hybrid codecs.
 pub const VERSION: u8 = 1;
@@ -115,18 +117,24 @@ impl HybridKind {
     }
 
     /// Human-readable name, used by the research reports.
+    ///
+    /// The promoted kind carries the stable registry's name; the two
+    /// research-only kinds keep their research labels.
     pub fn name(self) -> &'static str {
         match self {
-            HybridKind::PredictorThenLz77 => "pred-lz77",
+            HybridKind::PredictorThenLz77 => "predictor+dictionary",
             HybridKind::Lz77ThenEntropy => "lz77-entropy",
             HybridKind::PredictorThenLz77ThenEntropy => "pred-lz77-entropy",
         }
     }
 
-    /// The research codec id this kind uses.
+    /// The codec id this kind uses.
+    ///
+    /// The predictor layered over a dictionary is the stable id 5; the other
+    /// two kinds keep their research-only ids.
     pub fn codec_id(self) -> u8 {
         match self {
-            HybridKind::PredictorThenLz77 => EXP_PRED_LZ77,
+            HybridKind::PredictorThenLz77 => CODEC_PREDICTOR_DICTIONARY,
             HybridKind::Lz77ThenEntropy => EXP_LZ77_ENTROPY,
             HybridKind::PredictorThenLz77ThenEntropy => EXP_PRED_LZ77_ENTROPY,
         }
@@ -183,6 +191,20 @@ impl HybridCodec {
         &self.params
     }
 }
+
+/// The stable predictor-over-dictionary codec (id 5).
+///
+/// The predictor's row plan is written into the payload, so the decoder
+/// reconstructs the same residuals before the dictionary stage runs.
+pub static PREDICTOR_DICTIONARY_CODEC: HybridCodec =
+    HybridCodec::new(HybridKind::PredictorThenLz77);
+
+/// The research-only LZ77-over-entropy codec (id `0x92`).
+pub static LZ77_ENTROPY_CODEC: HybridCodec = HybridCodec::new(HybridKind::Lz77ThenEntropy);
+
+/// The research-only predictor-over-LZ77-over-entropy codec (id `0x93`).
+pub static PREDICTOR_LZ77_ENTROPY_CODEC: HybridCodec =
+    HybridCodec::new(HybridKind::PredictorThenLz77ThenEntropy);
 
 /// Fold signed residuals into unsigned fixed-width bytes.
 ///

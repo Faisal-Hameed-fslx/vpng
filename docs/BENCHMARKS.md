@@ -242,6 +242,93 @@ Findings, stated as limits rather than claims:
   123,202,141 bytes (−994,894 B) with 2,040 → 608 tiles. The largest single
   loss is `threejs-textures-a9aefa111bdb` at +127,952 bytes.
 
+## Measured: promoting the stable codecs 4, 5 and 6 (2026-11-22)
+
+Step 5 of the plan, in one format revision (**v0.1 → v0.3**; the 64-byte
+header and the 40-byte directory entry keep their layout). Drivers
+`benchmarks/corpus/run_codec_research.py` (the candidates on their own) and
+`benchmarks/corpus/run_codec_corpus.py` (the production encoder, with real
+files that are checked, verified and digested). Raw runs preserved in
+`benchmarks/p8_codec_corpus_results.json` and
+`benchmarks/p8_codec_production_results.json`; the full report, with the
+twelve questions, is `docs/P8_CODEC_REPORT.md`.
+
+Host: Intel Core i5-1235U, 10 physical cores / 12 logical processors, 7.7 GB
+RAM, Windows `x86_64-pc-windows-gnu`, `rustc 1.100.0`, `--release` build.
+Tile size 256, four encoder workers, one image at a time.
+
+### The production encoder over the whole corpus
+
+Every one of the 750 images was encoded **twice** — `--codec-set stable` and
+`--codec-set extended` — so 1,500 files were written, checked with
+`vpng check`, **verified** with `vpng verify` (which decodes every tile and
+compares it with the original pixels) and digested with SHA-256. The
+denominator is the same canonical pixel bytes the corpus report used.
+
+| Category | Images | Stable bytes | Extended bytes | Delta | Delta % | Median ratio (stable → extended) | Smaller | Larger | Equal |
+|---|---:|---:|---:|---:|---:|---|---:|---:|---:|
+| **overall** | **750** | **453,767,460** | **406,294,626** | **−47,472,834** | **−10.46%** | 0.415337 → **0.357749** | **643** | **0** | 107 |
+| photos | 300 | 234,827,986 | 220,022,669 | −14,805,317 | −6.30% | 0.601730 → 0.552488 | 297 | 0 | 3 |
+| pixel_art | 100 | 365,091 | 309,965 | −55,126 | −15.10% | 0.165392 → 0.165392 | 39 | 0 | 61 |
+| scans | 100 | 67,871,353 | 55,647,808 | −12,223,545 | −18.01% | 0.346336 → 0.283930 | 100 | 0 | 0 |
+| textures | 150 | 133,872,854 | 115,710,014 | −18,162,840 | −13.57% | 0.378297 → 0.346149 | 107 | 0 | 43 |
+| ui | 100 | 16,830,176 | 14,604,170 | −2,226,006 | −13.23% | 0.063064 → 0.052882 | 100 | 0 | 0 |
+
+Findings, stated as limits rather than claims:
+
+* **No image is worse under the extended set**: 643 smaller, 107 identical,
+  **0 larger**. The selector only takes a promoted codec when its payload is
+  strictly smaller.
+* **The default path did not move by one byte**: 750 of 750 stable files match
+  the P5 corpus baseline, all 750 report minor version 1, and the 16K
+  photograph's digest is the P5.2 tile-256 baseline's
+  (`d029a7ebc1e0347cb3399ab6f9de9653da5853c96b38d95cddc3b8bb45a14dbf`).
+  The version is content-determined, so the 107 unchanged files stay v0.1 and
+  the other 643 are v0.3.
+* **Every file is lossless**: 0 `vpng check` failures and 0 `vpng verify`
+  failures across all 1,500 files.
+* **The cost is encode time**: **3.44×** — 421,618 ms against 122,542 ms over
+  the corpus. The extended set therefore stays **opt-in**; turning it on by
+  default would trade a 10% size gain for a 3.4× encode-time cost and would
+  move every published byte.
+* **The research harness and the production run agree exactly**: both
+  project 453,767,460 stable bytes and 406,294,626 extended bytes.
+
+### The candidates, measured on their own
+
+The research harness ran every candidate over every image in memory. These
+are whole-file figures — the payload of every tile plus the container
+framing:
+
+| Candidate | id after promotion | Total bytes | Median ratio | p95 ratio |
+|---|---:|---:|---:|---:|
+| `context-entropy` | **6** | **410,048,571** | **0.403363** | 0.796793 |
+| `predictor` | 3 | 459,004,556 | 0.438941 | 0.821072 |
+| `pred-lz77` | **5** | 940,212,603 | 0.793161 | 1.227140 |
+| `lz77` | **4** | 955,849,483 | 0.870301 | 1.191931 |
+| `rle` | 2 | 935,209,171 | 0.839388 | 1.015947 |
+| `palette` | 1 | 1,205,064,250 | 1.000315 | 1.008102 |
+| `raw` | 0 | 1,450,772,090 | 1.000405 | 1.093426 |
+
+`context-entropy` is the best codec on the corpus and the selector takes it
+for 7,094 of the 8,944 tiles. The two dictionary codecs are worse on their
+own than the stable predictor but win on content the predictor handles badly
+— 515 tiles for id 4 and 314 for id 5, mostly in the UI category, where flat
+rectangles and repeating runs are what a dictionary codes well.
+
+### The largest image
+
+| | Stable | Extended |
+|---|---:|---:|
+| File size | 124,197,035 B | **119,214,234 B** |
+| Ratio to canonical | 0.311950 | **0.299435** |
+| Tiles | 2,040 | 2,040 |
+| Minor version | 1 | **3** |
+
+**−4,982,801 bytes**, the largest single win in the corpus. The 10 MB
+ceiling is met by **748 of 750** in both sets; the two that miss it are the
+same two as in the corpus report.
+
 ## Measured: large-image stress (2026-11-15, with Predictor)
 
 Host: 12 logical CPUs, 7,916 MB physical RAM, Windows `x86_64-pc-windows-gnu`,

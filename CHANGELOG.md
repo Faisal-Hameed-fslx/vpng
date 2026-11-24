@@ -8,6 +8,61 @@ separately as major.minor in the header.
 
 ### Added
 
+* **The stable codecs 4, 5 and 6, promoted and measured over the whole
+  corpus (Step 5).** The three research pipelines that ADR-0004 reserved are
+  now stable codec ids, and the container's minor version moves **0.2 → 0.3**
+  to carry the rule that lets them reach a file. The layout does not move:
+  the main header is still 64 bytes with the same fields at the same offsets,
+  and the directory entry is still 40 bytes.
+  * **What v0.3 changes is one rule.** A directory entry may name codec id
+    4, 5 or 6 **only if** the file's minor version is 3 or newer; a v0.1 or
+    v0.2 file that names one is malformed, and every reader rejects it with
+    `UnsupportedFeature`. The version states what the file **contains**, not
+    what the encoder was allowed to do: a writer that permits the extended
+    set but ends up choosing only the original four writes a **v0.1** file.
+  * **The ids are the reserved ones.** id 4 `lz77` (the tile-local LZ77
+    dictionary), id 5 `predictor+dictionary` (the stable predictor's
+    residuals, folded to unsigned bytes, then LZ77) and id 6
+    `context-entropy` (the residuals priced against a gradient-conditioned
+    probability table).
+  * **The default path is unchanged.** `EncodeOptions::codec_set` defaults to
+    `CodecSet::V0_1`, so the published bytes do not move — and they did not:
+    **750 of 750** stable files in the corpus run match the P5 corpus
+    baseline byte for byte, all 750 report minor version 1, and the 16K
+    photograph's digest is the P5.2 tile-256 baseline's
+    (`d029a7ebc1e0347cb3399ab6f9de9653da5853c96b38d95cddc3b8bb45a14dbf`).
+  * **The extended set is opt-in and it is worth asking for.** With
+    `--codec-set extended` the encoder writes **−10.46%** bytes over the
+    whole corpus — 453,767,460 → 406,294,626 — with **643 images smaller,
+    107 identical and 0 larger**, and all 1,500 files (both sets) pass
+    `vpng check` and **losslessly** `vpng verify`. Every category gains:
+    scans −18.01%, pixel art −15.10%, textures −13.57%, UI −13.23%, photos
+    −6.30%. The largest single win is the 16K photograph itself:
+    124,197,035 → **119,214,234** bytes (−4,982,801).
+  * **The cost is stated, and it is why the default did not move.** The
+    extended set costs **3.44×** the encode time over the corpus (421,618 ms
+    against 122,542 ms). A 10% size gain for a 3.4× encode-time cost is a
+    trade, not a free win, so the extended set stays opt-in
+    (`--codec-set extended`, and `--codec lz77|predictor+dictionary|context-entropy`
+    to force one) until the cost comes down.
+  * **The research ids still cannot reach a file.** `0x80..=0xFF` is not
+    implemented, the production encoder cannot reference it, and a decoder
+    rejects a file that names one with `UnsupportedFeature`.
+  * **A real defect, found by the corpus run and fixed.** The first
+    production run failed: the **streaming** writer — the path `vpng encode`
+    actually uses — built its own header and knew only about v0.1 and v0.2,
+    so it wrote files that named codec id 6 and claimed to be v0.1. The rule
+    now lives in one function (`vpng_encoder::content_minor`) that both the
+    batch assembler and the streaming writer call, and the test suite pins
+    the agreement over 144 encode cases per codec set.
+  * **New documentation and evidence.** `docs/VPNG_SPEC_0_3.md` (the
+    revision, with the payload layouts of ids 4, 5 and 6 and a conformance
+    checklist), `docs/decisions/ADR-0015-promoting-codecs-4-to-6.md`,
+    `docs/P8_CODEC_REPORT.md` (the report, with the twelve questions and the
+    acceptance gates), `benchmarks/p8_codec_corpus_results.json` and
+    `benchmarks/p8_codec_production_results.json` (the raw data), and
+    `check_codecs()` in `benchmarks/verify_reports.py`, which binds every
+    quoted figure to it.
 * **The preview pyramid and the adaptive partition, in one format revision
   (Phase B, P6 and P7).** The container's minor version moves **0.1 → 0.2**
   and the layout does not move with it: the main header is still 64 bytes

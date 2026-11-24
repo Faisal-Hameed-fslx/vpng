@@ -330,14 +330,14 @@ fn framing_bytes(
         "predictor" | "carc-a" => {
             1 + leb_len(width as u64) + height + leb_len(total_samples as u64)
         }
-        "carc-b" | "carc-c" | "carc-d" => {
+        "carc-b" | "carc-c" | "carc-d" | "context-entropy" => {
             3 + leb_len(width as u64) + height + leb_len(total_samples as u64)
         }
         "lz77" => {
             // The LZ77 header plus its declared output length.
             9 + leb_len((total_samples * bpp) as u64)
         }
-        "pred-lz77" => {
+        "pred-lz77" | "predictor+dictionary" => {
             2 + (1 + leb_len(width as u64) + height) + (9 + leb_len((total_samples * bpp) as u64))
         }
         "lz77-entropy" => 2 + (9 + leb_len((total_samples * bpp) as u64)),
@@ -358,8 +358,8 @@ fn model_state_bytes(name: &str, format: PixelFormat) -> usize {
         "raw" | "rle" => 0,
         "palette" => 256 * format.bytes_per_pixel() as usize,
         "predictor" | "carc-a" => contexts * 4,
-        "carc-b" | "carc-c" | "carc-d" => 256 * contexts * 4,
-        "lz77" | "pred-lz77" | "lz77-entropy" | "pred-lz77-entropy" => {
+        "carc-b" | "carc-c" | "carc-d" | "context-entropy" => 256 * contexts * 4,
+        "lz77" | "pred-lz77" | "predictor+dictionary" | "lz77-entropy" | "pred-lz77-entropy" => {
             // The hash table and the match chain of the default parameters.
             (1usize << 14) * 4 + (1usize << 15) * 4
         }

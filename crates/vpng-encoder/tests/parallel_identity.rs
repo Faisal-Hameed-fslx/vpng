@@ -173,6 +173,52 @@ fn parallel_and_streaming_match_the_batch_encoder_everywhere() {
 }
 
 #[test]
+fn the_extended_codec_set_agrees_across_every_path() {
+    // The promoted codecs take the file to v0.3, and the version is part of
+    // the bytes. The batch encoder, the parallel encoder and the streaming
+    // writer must all say the same thing about it.
+    let directory = TempDir::new();
+    let mut cases = 0usize;
+
+    for format in FORMATS {
+        for (width, height) in SIZES {
+            for tile_size in [16u32, 64, 256] {
+                let image = mixed(width, height, format);
+                let options = EncodeOptions::default()
+                    .with_tile_size(tile_size, tile_size)
+                    .with_extended_codecs();
+                let label = format!("extended-{format}-{width}x{height}-tile{tile_size}");
+                let path = directory.0.join(format!("extended-{cases}.vpng"));
+                assert_all_paths_agree(&image, &options, &path, &label);
+                cases += 1;
+            }
+        }
+    }
+
+    assert_eq!(cases, 144);
+}
+
+#[test]
+fn a_pyramid_with_the_extended_codecs_is_still_one_file() {
+    // A pyramid file that names a promoted codec is a v0.3 file that also
+    // carries previews: the version must not hide the v0.2 feature.
+    let directory = TempDir::new();
+    let image = mixed(300, 180, PixelFormat::rgba8());
+    let options = EncodeOptions::default()
+        .with_tile_size(64, 64)
+        .with_extended_codecs()
+        .with_pyramid(2);
+    let label = "pyramid-extended";
+    let path = directory.0.join("pyramid.vpng");
+    assert_all_paths_agree(&image, &options, &path, label);
+
+    let bytes = fs::read(&path).unwrap();
+    let header = vpng_container::Header::parse(&bytes).unwrap();
+    assert_eq!(header.minor, vpng_container::MINOR_V0_3);
+    assert!(header.has_pyramid());
+}
+
+#[test]
 fn neither_the_worker_count_nor_the_chunk_size_changes_the_bytes() {
     let image = mixed(300, 180, PixelFormat::rgba8());
     let options = EncodeOptions::default().with_tile_size(32, 32);

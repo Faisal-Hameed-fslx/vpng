@@ -3,112 +3,102 @@
 //!
 //! # Why this module is separate
 //!
-//! The stable format has exactly four implemented codec ids (0 Raw, 1 Palette,
-//! 2 Run-length, 3 Predictor+entropy) and three reserved ids (4, 5, 6) that
-//! the specification has already claimed for future production bitstreams. A
-//! research codec must therefore never take one of those ids, and must never
-//! appear in [`crate::IMPLEMENTED_CODEC_IDS`] or be reachable through
-//! [`crate::get_codec`].
+//! Three of the eight research codecs were promoted into the stable format
+//! in **v0.3**: the standalone LZ77 dictionary (id 4), prediction layered over
+//! that dictionary (id 5), and the gradient-conditioned context-adaptive model
+//! (id 6). They live in [`crate::lz77`], [`crate::hybrid`] and [`crate::carc`]
+//! now, and they are reachable through [`crate::get_codec`].
 //!
-//! Every codec in this module:
+//! The five codecs that remain in this module:
 //!
-//! * uses a **research-only id** in the `0x80..=0xFF` range, so it can never
-//!   collide with a stable or reserved id;
-//! * is therefore **undecodable by the production decoder** — a file carrying
+//! * use a **research-only id** in the `0x80..=0xFF` range, so they can never
+//!   collide with a stable id;
+//! * are therefore **undecodable by the production decoder** — a file carrying
 //!   one is rejected with `UnsupportedFeature`, which is the honest outcome;
-//! * implements [`TileCodec`], so it obeys the same exactness, determinism,
+//! * implement [`TileCodec`], so they obey the same exactness, determinism,
 //!   bounded-memory and independent-tile rules as a stable codec;
-//! * is measured by the research harness, not by the production encoder.
+//! * are measured by the research harness, not by the production encoder.
 //!
 //! Nothing in this module changes the bytes of a stable VPNG file. The stable
 //! codecs are untouched; this module only *reads* the shared sample arithmetic
 //! and the shared arithmetic coder from [`crate::predictor`].
 //!
-//! # Experimental ids
+//! # Research ids
 //!
 //! | id | codec | notes |
 //! |---:|-------|-------|
 //! | `0x80` | CARC model A | independent residual model (baseline) |
 //! | `0x81` | CARC model B | neighbour-conditioned |
-//! | `0x82` | CARC model C | gradient-conditioned |
 //! | `0x83` | CARC model D | combined spatial + channel |
-//! | `0x90` | LZ77 | tile-local bounded dictionary |
-//! | `0x91` | Predictor + LZ77 | hybrid |
 //! | `0x92` | LZ77 + entropy | hybrid |
 //! | `0x93` | Predictor + LZ77 + entropy | hybrid |
 //!
 //! These ids are **research handles only**. They are not a specification.
-
-pub mod carc;
-pub mod entropy;
-pub mod hybrid;
-pub mod lz77;
+//!
+//! # Retired research ids
+//!
+//! Three research ids were retired when their codecs were promoted. They
+//! never named a stable codec, and they are kept here only so a file that
+//! carries one is still recognisably a research file:
+//!
+//! | id | codec | became |
+//! |---:|-------|--------|
+//! | `0x82` | CARC model C | stable id 6 |
+//! | `0x90` | LZ77 | stable id 4 |
+//! | `0x91` | Predictor + LZ77 | stable id 5 |
 
 use crate::TileCodec;
 
-pub use carc::{CarcCodec, CarcModel};
-pub use hybrid::{HybridCodec, HybridKind};
-pub use lz77::{Lz77Codec, Lz77Params, Lz77Strategy};
+pub use crate::carc::{CarcCodec, CarcModel};
+pub use crate::hybrid::{HybridCodec, HybridKind};
+pub use crate::lz77::{Lz77Codec, Lz77Params, Lz77Strategy};
 
 /// Research-only codec id: CARC model A (independent residual model).
 pub const EXP_CARC_A: u8 = 0x80;
 /// Research-only codec id: CARC model B (neighbour-conditioned).
 pub const EXP_CARC_B: u8 = 0x81;
-/// Research-only codec id: CARC model C (gradient-conditioned).
-pub const EXP_CARC_C: u8 = 0x82;
 /// Research-only codec id: CARC model D (combined spatial + channel).
 pub const EXP_CARC_D: u8 = 0x83;
-/// Research-only codec id: standalone LZ77.
-pub const EXP_LZ77: u8 = 0x90;
-/// Research-only codec id: Predictor followed by LZ77.
-pub const EXP_PRED_LZ77: u8 = 0x91;
 /// Research-only codec id: LZ77 followed by entropy coding.
 pub const EXP_LZ77_ENTROPY: u8 = 0x92;
 /// Research-only codec id: Predictor, then LZ77, then entropy coding.
 pub const EXP_PRED_LZ77_ENTROPY: u8 = 0x93;
 
-/// The standalone LZ77 codec with the default (balanced) parameters.
-pub static LZ77: Lz77Codec = Lz77Codec::new(Lz77Params::DEFAULT);
+/// Retired research id: CARC model C. Promoted to stable id 6.
+pub const EXP_CARC_C: u8 = 0x82;
+/// Retired research id: standalone LZ77. Promoted to stable id 4.
+pub const EXP_LZ77: u8 = 0x90;
+/// Retired research id: Predictor followed by LZ77. Promoted to stable id 5.
+pub const EXP_PRED_LZ77: u8 = 0x91;
 
-/// The four CARC model variants, as concrete codec instances.
-pub static CARC_A: CarcCodec = CarcCodec::new(CarcModel::Independent);
-pub static CARC_B: CarcCodec = CarcCodec::new(CarcModel::NeighbourConditioned);
-pub static CARC_C: CarcCodec = CarcCodec::new(CarcModel::GradientConditioned);
-pub static CARC_D: CarcCodec = CarcCodec::new(CarcModel::CombinedSpatialChannel);
-
-/// Predictor followed by LZ77.
-pub static PRED_LZ77: HybridCodec = HybridCodec::new(HybridKind::PredictorThenLz77);
-/// LZ77 followed by entropy coding.
-pub static LZ77_ENTROPY: HybridCodec = HybridCodec::new(HybridKind::Lz77ThenEntropy);
-/// Predictor, then LZ77, then entropy coding.
-pub static PRED_LZ77_ENTROPY: HybridCodec =
-    HybridCodec::new(HybridKind::PredictorThenLz77ThenEntropy);
-
-/// Every experimental codec, in a fixed order.
+/// Every **research-only** codec, in a fixed order.
 ///
-/// The order is stable and deterministic so a benchmark report lists the
-/// candidates in the same sequence on every run.
+/// The order is ascending research id, so it is also the tie-break order of
+/// [`select_best`] once the stable codecs have had their turn.
 pub fn all() -> Vec<(&'static str, &'static dyn TileCodec)> {
     vec![
-        ("carc-a", &CARC_A as &dyn TileCodec),
-        ("carc-b", &CARC_B as &dyn TileCodec),
-        ("carc-c", &CARC_C as &dyn TileCodec),
-        ("carc-d", &CARC_D as &dyn TileCodec),
-        ("lz77", &LZ77 as &dyn TileCodec),
-        ("pred-lz77", &PRED_LZ77 as &dyn TileCodec),
-        ("lz77-entropy", &LZ77_ENTROPY as &dyn TileCodec),
-        ("pred-lz77-entropy", &PRED_LZ77_ENTROPY as &dyn TileCodec),
+        ("carc-a", &crate::carc::CARC_A as &dyn TileCodec),
+        ("carc-b", &crate::carc::CARC_B as &dyn TileCodec),
+        ("carc-d", &crate::carc::CARC_D as &dyn TileCodec),
+        (
+            "lz77-entropy",
+            &crate::hybrid::LZ77_ENTROPY_CODEC as &dyn TileCodec,
+        ),
+        (
+            "pred-lz77-entropy",
+            &crate::hybrid::PREDICTOR_LZ77_ENTROPY_CODEC as &dyn TileCodec,
+        ),
     ]
 }
 
-/// Look up an experimental codec by its research name.
+/// Look up a research-only codec by its research name.
 ///
 /// The name is the same string the codec's [`TileCodec::name`] returns.
 pub fn by_name(name: &str) -> Option<&'static dyn TileCodec> {
     all().into_iter().find(|(n, _)| *n == name).map(|(_, c)| c)
 }
 
-/// Look up an experimental codec by its research id.
+/// Look up a research-only codec by its research id.
 pub fn by_id(id: u8) -> Option<&'static dyn TileCodec> {
     all()
         .into_iter()
@@ -152,6 +142,15 @@ pub fn candidate_codecs() -> Vec<(&'static str, &'static dyn TileCodec)> {
         (
             "predictor",
             &crate::predictor::PREDICTOR_CODEC as &dyn TileCodec,
+        ),
+        ("lz77", &crate::lz77::LZ77_CODEC as &dyn TileCodec),
+        (
+            "predictor+dictionary",
+            &crate::hybrid::PREDICTOR_DICTIONARY_CODEC as &dyn TileCodec,
+        ),
+        (
+            "context-entropy",
+            &crate::carc::CONTEXT_ENTROPY_CODEC as &dyn TileCodec,
         ),
     ];
     out.extend(all());
@@ -204,20 +203,14 @@ mod tests {
     use crate::IMPLEMENTED_CODEC_IDS;
 
     #[test]
-    fn experimental_ids_never_collide_with_stable_or_reserved_ids() {
+    fn experimental_ids_never_collide_with_stable_ids() {
         for &stable in IMPLEMENTED_CODEC_IDS {
             assert!(!is_experimental_id(stable), "stable id {stable} collided");
-        }
-        for reserved in [4u8, 5, 6] {
-            assert!(
-                !is_experimental_id(reserved),
-                "reserved id {reserved} collided"
-            );
         }
     }
 
     #[test]
-    fn experimental_codecs_are_not_in_the_stable_registry() {
+    fn research_codecs_are_not_in_the_stable_registry() {
         for (name, codec) in all() {
             assert!(is_experimental_id(codec.codec_id()), "{name}");
             assert!(
@@ -232,7 +225,7 @@ mod tests {
     }
 
     #[test]
-    fn every_experimental_codec_has_a_unique_id_and_a_lookup() {
+    fn every_research_codec_has_a_unique_id_and_a_lookup() {
         let mut ids = Vec::new();
         for (name, codec) in all() {
             ids.push(codec.codec_id());
@@ -242,7 +235,35 @@ mod tests {
         ids.sort_unstable();
         let before = ids.len();
         ids.dedup();
-        assert_eq!(before, ids.len(), "duplicate experimental codec id");
+        assert_eq!(before, ids.len(), "duplicate research codec id");
+    }
+
+    #[test]
+    fn the_candidate_list_is_in_ascending_codec_id_order() {
+        let ids: Vec<u8> = candidate_codecs()
+            .iter()
+            .map(|(_, codec)| codec.codec_id())
+            .collect();
+        assert!(
+            ids.windows(2).all(|w| w[0] < w[1]),
+            "candidate ids must ascend: {ids:?}"
+        );
+    }
+
+    #[test]
+    fn the_promoted_codecs_are_candidates() {
+        let names: Vec<&str> = candidate_codecs().iter().map(|(name, _)| *name).collect();
+        for name in [
+            "raw",
+            "palette",
+            "rle",
+            "predictor",
+            "lz77",
+            "predictor+dictionary",
+            "context-entropy",
+        ] {
+            assert!(names.contains(&name), "missing candidate {name}");
+        }
     }
 
     #[test]

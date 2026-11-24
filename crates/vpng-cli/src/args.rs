@@ -20,6 +20,7 @@ const VALUE_OPTIONS: &[&str] = &[
     "tile-width",
     "tile-height",
     "codec",
+    "codec-set",
     "max-size",
     "max-size-mib",
     "format",

@@ -1,4 +1,4 @@
-//! A byte-level adaptive entropy stage for the hybrid research codecs.
+//! A byte-level adaptive entropy stage for the hybrid codecs.
 //!
 //! This is deliberately *not* a new entropy coder. It reuses the stable
 //! arithmetic coder from [`crate::predictor`] and drives it with a small set of
@@ -14,6 +14,12 @@
 //!
 //! No floating point is involved: the coder's own arithmetic is integer-only
 //! and the shared probability model is the stable one.
+//!
+//! # Not a tile codec
+//!
+//! This stage is a *component*: it has no header, no geometry of its own, and
+//! no end-of-stream rule, so it is not a [`crate::TileCodec`] and has no codec
+//! id. The hybrid codecs in [`crate::hybrid`] frame it.
 
 use crate::predictor::{BitSink, Decoder, Encoder};
 

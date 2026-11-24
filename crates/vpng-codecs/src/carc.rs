@@ -1,10 +1,12 @@
-//! VPNG-CARC — **research** context-adaptive residual coding.
+//! VPNG-CARC — context-adaptive residual coding.
 //!
-//! This is **research code**. It carries research-only codec ids
-//! (`0x80..=0x83`), is not reachable through [`crate::get_codec`], and is not
-//! in [`crate::IMPLEMENTED_CODEC_IDS`]. A file that somehow carried one of
-//! these ids would be rejected by the production decoder with
-//! `UnsupportedFeature`.
+//! One of the four models is a **stable** codec: the gradient-conditioned
+//! model is codec id **6** (`context-entropy`), and it is reachable through
+//! [`crate::get_codec`] from format v0.3 onwards. The other three models
+//! remain **research-only**: they carry research ids (`0x80`, `0x81`,
+//! `0x83`), are not in [`crate::IMPLEMENTED_CODEC_IDS`], and a file that
+//! somehow carried one of those ids would be rejected by the production
+//! decoder with `UnsupportedFeature`.
 //!
 //! # The question this module answers
 //!
@@ -15,14 +17,14 @@
 //! conditioning the probabilities on the neighbourhood of the residual buys
 //! enough compressed bytes to justify the extra model state.
 //!
-//! # The four experiments
+//! # The four models
 //!
 //! | model | id | conditioning |
 //! |---|---|---|
-//! | A `Independent` | `0x80` | none — the stable model, as the baseline |
-//! | B `NeighbourConditioned` | `0x81` | left, up and upper-left residuals plus the previous symbol class |
-//! | C `GradientConditioned` | `0x82` | a deterministic gradient class of the reconstructed neighbourhood |
-//! | D `CombinedSpatialChannel` | `0x83` | gradient class, previous residual class of the same channel, channel identity, the previous channel's residual class in the same pixel, and an edge class |
+//! | A `Independent` | `0x80` (research) | none — the stable model, as the baseline |
+//! | B `NeighbourConditioned` | `0x81` (research) | left, up and upper-left residuals plus the previous symbol class |
+//! | C `GradientConditioned` | **6** (stable) | a deterministic gradient class of the reconstructed neighbourhood |
+//! | D `CombinedSpatialChannel` | `0x83` (research) | gradient class, previous residual class of the same channel, channel identity, the previous channel's residual class in the same pixel, and an edge class |
 //!
 //! Model A is the *existing implementation*: its payload is byte-for-byte the
 //! stable predictor codec's payload, so the research harness can compare
@@ -80,7 +82,7 @@
 //! offset 0   u8   version (1)
 //! offset 1   u8   model id (1 = B, 2 = C, 3 = D)
 //! offset 2   u8   context table shift (log2 of the number of blocks)
-//! offset 3   ..   tile width in samples, unsigned LEB128
+//! offset 3   ..   tile width in **pixels**, unsigned LEB128
 //! offset ..  ..   one predictor-mode byte per tile row
 //! offset ..  ..   residual count, unsigned LEB128
 //! offset ..  ..   entropy-coded residual data
@@ -96,7 +98,8 @@ use crate::predictor::{
 };
 use crate::{DecodeContext, EncodeContext, TileCodec};
 
-use super::{EXP_CARC_A, EXP_CARC_B, EXP_CARC_C, EXP_CARC_D};
+use crate::experimental::{EXP_CARC_A, EXP_CARC_B, EXP_CARC_D};
+use crate::CODEC_CONTEXT_ENTROPY;
 
 /// Payload version of the context-adaptive models.
 pub const VERSION: u8 = 1;
@@ -168,12 +171,15 @@ impl CarcModel {
         }
     }
 
-    /// The research codec id this model uses.
+    /// The codec id this model uses.
+    ///
+    /// The gradient-conditioned model is the stable id 6; the other three
+    /// models keep their research-only ids.
     pub fn codec_id(self) -> u8 {
         match self {
             CarcModel::Independent => EXP_CARC_A,
             CarcModel::NeighbourConditioned => EXP_CARC_B,
-            CarcModel::GradientConditioned => EXP_CARC_C,
+            CarcModel::GradientConditioned => CODEC_CONTEXT_ENTROPY,
             CarcModel::CombinedSpatialChannel => EXP_CARC_D,
         }
     }
@@ -206,6 +212,22 @@ impl CarcCodec {
         self.model
     }
 }
+
+/// The stable context-adaptive entropy codec (id 6).
+///
+/// It is the gradient-conditioned model: the probability block a residual is
+/// priced against depends on a deterministic class of the reconstructed
+/// neighbourhood around it.
+pub static CONTEXT_ENTROPY_CODEC: CarcCodec = CarcCodec::new(CarcModel::GradientConditioned);
+
+/// The research-only independent residual model (id `0x80`).
+pub static CARC_A: CarcCodec = CarcCodec::new(CarcModel::Independent);
+
+/// The research-only neighbour-conditioned model (id `0x81`).
+pub static CARC_B: CarcCodec = CarcCodec::new(CarcModel::NeighbourConditioned);
+
+/// The research-only combined spatial-and-channel model (id `0x83`).
+pub static CARC_D: CarcCodec = CarcCodec::new(CarcModel::CombinedSpatialChannel);
 
 /// The class of a residual, or of a residual that does not exist.
 ///
@@ -696,7 +718,7 @@ impl TileCodec for CarcCodec {
         match self.model {
             CarcModel::Independent => "carc-a",
             CarcModel::NeighbourConditioned => "carc-b",
-            CarcModel::GradientConditioned => "carc-c",
+            CarcModel::GradientConditioned => "context-entropy",
             CarcModel::CombinedSpatialChannel => "carc-d",
         }
     }

@@ -5,8 +5,8 @@
 //! arithmetic, and the final byte count is verified against the header's
 //! declared file size before returning.
 //!
-//! Each tile is encoded with the smallest payload offered by any implemented
-//! codec (see [`vpng_codecs::IMPLEMENTED_CODEC_IDS`]); ties go to the lowest
+//! Each tile is encoded with the smallest payload offered by the codecs the
+//! options permit (see [`EncodeOptions::codec_set`]); ties go to the lowest
 //! codec id, and Raw is always a candidate, so a valid lossless encoding always
 //! exists. A caller may force a single codec with
 //! [`EncodeOptions::with_codec`].
@@ -42,6 +42,18 @@
 //! its levels may hold tiles of different sizes. The header and the directory
 //! entry layouts are **unchanged**: v0.2 is a set of rules on top of the same
 //! 64-byte header and the same 40-byte entries.
+//!
+//! # v0.3: the promoted codecs
+//!
+//! Format **v0.3** adds three codecs to the stable set: the tile-local LZ77
+//! dictionary (id 4), prediction layered over that dictionary (id 5), and
+//! context-adaptive entropy coding (id 6). A file whose directory names one
+//! of them is a v0.3 file, and its minor version says so.
+//!
+//! The minor version states what the file **contains**, not what the options
+//! allowed: a file that ends up using only the original four codecs stays a
+//! v0.1 file even when the extended set was permitted. The default codec set
+//! is the original four, so the default path's bytes do not move.
 
 #![forbid(unsafe_code)]
 
@@ -51,8 +63,11 @@ pub mod pyramid;
 pub mod source;
 pub mod stream;
 
-use vpng_codecs::{get_codec, EncodeContext, CODEC_AUTO, CODEC_RAW, IMPLEMENTED_CODEC_IDS};
-use vpng_container::{crc32c, Directory, DirectoryEntry, Header, FEATURE_PYRAMID, HEADER_SIZE};
+use vpng_codecs::{get_codec, CodecSet, EncodeContext, CODEC_AUTO, CODEC_RAW};
+use vpng_container::{
+    crc32c, Directory, DirectoryEntry, Header, FEATURE_PYRAMID, HEADER_SIZE, MINOR_V0_1,
+    MINOR_V0_2, MINOR_V0_3,
+};
 use vpng_core::{CanonicalImage, Dimensions, Error, ErrorKind, Limits, PixelFormat, Result};
 use vpng_tiling::{Partition, TileGeometry, TileGrid, TileRect};
 
@@ -67,6 +82,15 @@ pub struct EncodeOptions {
     /// Codec to force for every tile, or [`vpng_codecs::CODEC_AUTO`] (the
     /// default) to let the encoder pick the smallest payload per tile.
     pub codec_id: u8,
+    /// Which codecs the per-tile selector may choose from.
+    ///
+    /// The default is [`CodecSet::V0_1`], the four original codecs: their
+    /// payloads are the ones the published measurements and the golden
+    /// fixtures pin. [`CodecSet::V0_3`] adds the three codecs promoted in
+    /// format v0.3 — the dictionary, the predictor over a dictionary, and
+    /// the context-adaptive model — which produce smaller files and cost
+    /// several times more to compute.
+    pub codec_set: CodecSet,
     /// Optional decimal byte ceiling (see ADR-0006 for MB vs MiB).
     pub max_size: Option<u64>,
     pub limits: Limits,
@@ -86,6 +110,7 @@ impl Default for EncodeOptions {
             tile_width: DEFAULT_TILE_SIZE,
             tile_height: DEFAULT_TILE_SIZE,
             codec_id: CODEC_AUTO,
+            codec_set: CodecSet::V0_1,
             max_size: None,
             limits: Limits::default(),
             pyramid: false,
@@ -115,6 +140,23 @@ impl EncodeOptions {
     /// Restore per-tile selection (the default).
     pub fn with_auto_codec(mut self) -> Self {
         self.codec_id = CODEC_AUTO;
+        self
+    }
+
+    /// Choose the codecs the per-tile selector may use.
+    ///
+    /// [`CodecSet::V0_3`] adds the three codecs promoted in format v0.3. A
+    /// file that ends up using one of them is a **v0.3** file: its minor
+    /// version is 3.
+    pub fn with_codec_set(mut self, set: CodecSet) -> Self {
+        self.codec_set = set;
+        self
+    }
+
+    /// Let the selector use every implemented codec, including the three
+    /// promoted in format v0.3.
+    pub fn with_extended_codecs(mut self) -> Self {
+        self.codec_set = CodecSet::V0_3;
         self
     }
 
@@ -161,6 +203,16 @@ impl EncodeOptions {
     pub fn is_v2(&self) -> bool {
         self.pyramid || self.adaptive
     }
+
+    /// Whether the options allow a codec that only a v0.3 file may name.
+    ///
+    /// The file's minor version is decided by what the file *contains*, not
+    /// by what the options allow: a file that ends up using only the v0.1
+    /// codecs stays a v0.1 file even when the extended set was permitted.
+    pub fn allows_v0_3_codecs(&self) -> bool {
+        self.codec_set == CodecSet::V0_3
+            || (self.codec_id != CODEC_AUTO && vpng_codecs::is_v0_3_codec(self.codec_id))
+    }
 }
 
 /// The produced file plus per-tile diagnostics.
@@ -184,6 +236,11 @@ pub struct EncodeReport {
     /// always "original pixels over file bytes", so a pyramid cannot make the
     /// picture look better than it is.
     pub base_uncompressed_bytes: u64,
+    /// The minor version the file's header carries.
+    ///
+    /// One for a v0.1 file, two for a file that uses a v0.2 feature, three
+    /// for a file that names a codec promoted in v0.3.
+    pub format_minor: u16,
 }
 
 impl EncodeReport {
@@ -367,6 +424,76 @@ pub(crate) fn encode_plan(
     Ok(levels)
 }
 
+/// The minor version a file's **contents** call for.
+///
+/// The minor version states what the file contains, not what the options
+/// allowed:
+///
+/// * a file that names a codec promoted in v0.3 (ids 4, 5 or 6) is a v0.3
+///   file, because a v0.1 or v0.2 reader has no codec to decode it with;
+/// * a file that uses a v0.2 feature (a preview pyramid or an adaptive
+///   partition) is a v0.2 file;
+/// * anything else is a v0.1 file, which is what the default path writes and
+///   what the golden fixtures pin.
+///
+/// The batch assembler and the streaming writer both call this, so the two
+/// cannot disagree about a file's version.
+pub(crate) fn content_minor(codec_ids: &[u8], v2_features: bool) -> u16 {
+    if codec_ids.iter().any(|&id| vpng_codecs::is_v0_3_codec(id)) {
+        MINOR_V0_3
+    } else if v2_features {
+        MINOR_V0_2
+    } else {
+        MINOR_V0_1
+    }
+}
+
+/// Build the header a file's contents call for.
+///
+/// The header layout is the same 64 bytes in every version; only the minor
+/// version and the feature flags differ.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn build_header(
+    minor: u16,
+    dims: Dimensions,
+    format: PixelFormat,
+    default_codec: u8,
+    tile_count: u32,
+    declared_file_size: u64,
+    feature_flags: u32,
+) -> Result<Header> {
+    let header = match minor {
+        MINOR_V0_3 => Header::new_v3(
+            dims.width,
+            dims.height,
+            format,
+            default_codec,
+            tile_count,
+            HEADER_SIZE as u64,
+            declared_file_size,
+        )?,
+        MINOR_V0_2 => Header::new_v2(
+            dims.width,
+            dims.height,
+            format,
+            default_codec,
+            tile_count,
+            HEADER_SIZE as u64,
+            declared_file_size,
+        )?,
+        _ => Header::new(
+            dims.width,
+            dims.height,
+            format,
+            default_codec,
+            tile_count,
+            HEADER_SIZE as u64,
+            declared_file_size,
+        )?,
+    };
+    Ok(header.with_feature_flags(feature_flags))
+}
+
 /// Assemble the container from the encoded levels.
 ///
 /// This is the single place where offsets, checksums and the header are
@@ -437,34 +564,24 @@ pub(crate) fn assemble(
         options.codec_id
     };
 
-    // A file is v0.2 when it uses a feature v0.2 defines. The default path
-    // stays v0.1, so the bytes the golden fixtures pin do not move.
-    let header = if options.is_v2() {
-        Header::new_v2(
-            dims.width,
-            dims.height,
-            format,
-            file_codec,
-            tile_count,
-            HEADER_SIZE as u64,
-            cursor,
-        )?
-    } else {
-        Header::new(
-            dims.width,
-            dims.height,
-            format,
-            file_codec,
-            tile_count,
-            HEADER_SIZE as u64,
-            cursor,
-        )?
-    };
+    // The minor version states what the file *contains*, not what the options
+    // allowed. A file that names a codec promoted in v0.3 needs a v0.3
+    // reader; a file that does not, does not. The default path stays v0.1, so
+    // the bytes the golden fixtures pin do not move.
+    let minor = content_minor(&chosen_codecs, options.is_v2());
 
     // The pyramid flag and the levels must agree: a file with more than one
     // level says so, and a file that says so has more than one level.
     let feature_flags = if levels.len() > 1 { FEATURE_PYRAMID } else { 0 };
-    let header = header.with_feature_flags(feature_flags);
+    let header = build_header(
+        minor,
+        dims,
+        format,
+        file_codec,
+        tile_count,
+        cursor,
+        feature_flags,
+    )?;
 
     let capacity = vpng_core::checked_usize(cursor)?;
     let mut bytes = Vec::with_capacity(capacity);
@@ -513,17 +630,19 @@ pub(crate) fn assemble(
         level_tile_counts,
         level_payload_bytes,
         base_uncompressed_bytes,
+        format_minor: minor,
     })
 }
 
-/// Encode one tile with the smallest payload any implemented codec offers.
+/// Encode one tile with the smallest payload the permitted codecs offer.
 ///
 /// When [`EncodeOptions::codec_id`] forces a codec, only that codec is tried and
-/// any error is returned. Otherwise every implemented codec is tried in
-/// ascending id order; a codec that reports the tile as not representable
-/// ([`ErrorKind::UnsupportedFeature`]) is skipped, and the smallest payload
-/// wins. Because the ids are visited in ascending order and a candidate must be
-/// *strictly* smaller to replace the incumbent, ties go to the lowest id.
+/// any error is returned. Otherwise every codec in [`EncodeOptions::codec_set`]
+/// is tried in ascending id order; a codec that reports the tile as not
+/// representable ([`ErrorKind::UnsupportedFeature`]) is skipped, and the
+/// smallest payload wins. Because the ids are visited in ascending order and a
+/// candidate must be *strictly* smaller to replace the incumbent, ties go to
+/// the lowest id.
 ///
 /// The function is public so the editing engine rewrites a tile exactly the
 /// way the encoder would. Sharing the selection keeps a re-encoded tile from
@@ -541,7 +660,7 @@ pub fn select_payload(
     }
 
     let mut best: Option<(u8, Vec<u8>)> = None;
-    for &id in IMPLEMENTED_CODEC_IDS {
+    for &id in options.codec_set.ids() {
         let codec = get_codec(id)?;
         let mut payload = Vec::new();
         match codec.encode(tile, ctx, &mut payload) {
@@ -724,12 +843,45 @@ mod tests {
     }
 
     #[test]
-    fn reserved_codec_is_rejected() {
+    fn unknown_codec_is_rejected() {
         let image = gradient(64, 64, PixelFormat::rgba8());
-        let options = EncodeOptions::default().with_codec(vpng_codecs::CODEC_LZ77);
+        let options = EncodeOptions::default().with_codec(7);
         assert_eq!(
             encode(&image, &options).unwrap_err().kind(),
             vpng_core::ErrorKind::UnsupportedFeature
+        );
+    }
+
+    #[test]
+    fn a_promoted_codec_may_be_forced() {
+        // Codec id 4 was reserved in v0.1 and v0.2. From v0.3 it is a stable
+        // codec, and a file that names it says so in its minor version.
+        let image = gradient(64, 64, PixelFormat::rgba8());
+        let options = EncodeOptions::default().with_codec(vpng_codecs::CODEC_LZ77);
+        let report = encode(&image, &options).unwrap();
+        assert!(
+            report
+                .codec_ids
+                .iter()
+                .all(|&id| id == vpng_codecs::CODEC_LZ77),
+            "every tile must use the forced codec"
+        );
+        assert_eq!(report.format_minor, vpng_container::MINOR_V0_3);
+    }
+
+    #[test]
+    fn the_default_path_still_writes_a_v0_1_file() {
+        // The default codec set is the four original codecs, so the default
+        // file's bytes do not move.
+        let image = gradient(64, 64, PixelFormat::rgba8());
+        let report = encode(&image, &EncodeOptions::default()).unwrap();
+        assert_eq!(report.format_minor, vpng_container::MINOR_V0_1);
+        assert!(
+            report
+                .codec_ids
+                .iter()
+                .all(|&id| vpng_codecs::CODEC_IDS_V0_2.contains(&id)),
+            "the default path must not name a v0.3 codec"
         );
     }
 

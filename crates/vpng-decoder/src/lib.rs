@@ -22,7 +22,7 @@ pub mod levels;
 pub use levels::{derive_levels, Level};
 
 use vpng_codecs::{get_codec, DecodeContext};
-use vpng_container::{crc32c, Directory, DirectoryEntry, Header, HEADER_SIZE};
+use vpng_container::{crc32c, Directory, DirectoryEntry, Header, HEADER_SIZE, MINOR_V0_3};
 use vpng_core::{CanonicalImage, Dimensions, Error, Limits, PixelFormat, Rect, Result};
 use vpng_tiling::{Partition, TileGeometry, TileGrid, TileRect};
 
@@ -91,6 +91,17 @@ impl<'a> Document<'a> {
             }
             limits
                 .validate_tile_payload(entry.compressed_length, entry.uncompressed_length as u64)?;
+            // The three codecs promoted in v0.3 may only be named by a file
+            // whose minor version says so. A v0.1 or v0.2 file that names one
+            // is malformed: those versions never defined them.
+            if vpng_codecs::is_v0_3_codec(entry.codec_id) && header.minor < MINOR_V0_3 {
+                return Err(Error::unsupported(format!(
+                    "tile {index} uses codec id {} ({}), which format v0.{} does not define",
+                    entry.codec_id,
+                    vpng_codecs::codec_name(entry.codec_id).unwrap_or("unknown"),
+                    header.minor
+                )));
+            }
             if !vpng_codecs::is_implemented(entry.codec_id) {
                 return Err(Error::unsupported(format!(
                     "tile {index} uses codec id {} ({}), which this build does not implement",

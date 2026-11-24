@@ -111,9 +111,26 @@ fn forged_tile_count_is_rejected() {
 #[test]
 fn unknown_codec_id_is_unsupported() {
     let mut bytes = valid_file();
-    // Set codec_id (byte 12 of the first directory entry) to 4 (LZ77, reserved),
-    // then recompute the directory CRC so that only the codec rule can fire and
-    // not the checksum rule.
+    // Set codec_id (byte 12 of the first directory entry) to 7, which no
+    // version has ever defined, then recompute the directory CRC so that only
+    // the codec rule can fire and not the checksum rule.
+    bytes[HEADER_SIZE + 12] = 7;
+    let tile_count = u32::from_le_bytes([bytes[28], bytes[29], bytes[30], bytes[31]]);
+    let size = Directory::total_size(tile_count).unwrap();
+    let body_len = size - 4;
+    let crc = vpng_container::crc32c(&bytes[HEADER_SIZE..HEADER_SIZE + body_len]);
+    bytes[HEADER_SIZE + body_len..HEADER_SIZE + body_len + 4].copy_from_slice(&crc.to_le_bytes());
+
+    let limits = Limits::default();
+    let err = Document::parse(&bytes, &limits).unwrap_err();
+    assert_eq!(err.kind(), vpng_core::ErrorKind::UnsupportedFeature);
+}
+
+#[test]
+fn a_v0_1_file_may_not_name_a_v0_3_codec() {
+    let mut bytes = valid_file();
+    // Codec id 4 (the LZ77 dictionary) was promoted in v0.3. A file whose
+    // minor version is 1 never defined it, so the file is malformed.
     bytes[HEADER_SIZE + 12] = 4;
     let tile_count = u32::from_le_bytes([bytes[28], bytes[29], bytes[30], bytes[31]]);
     let size = Directory::total_size(tile_count).unwrap();

@@ -561,6 +561,17 @@ Each codec ID needs:
 
 Never rely on unspecified platform behavior.
 
+> **Status note (2026-11-22).** All seven ids above are now implemented and
+> stable. Ids 0–3 are the original set; ids **4, 5 and 6** were promoted from
+> the research registry in the **v0.3** format revision, under exactly the
+> names this table gives them. The rule that lets them reach a file is in
+> `docs/VPNG_SPEC_0_3.md` §3: a directory entry may name id 4, 5 or 6 only if
+> the file's minor version is 3 or newer, and the version states what the file
+> **contains**, so the default encoder path still writes v0.1 bytes. The
+> payload layouts, the reset rules, the memory bounds and the golden vectors
+> are all in that specification and in the ADR that records the decision.
+> See `docs/P8_CODEC_REPORT.md`.
+
 ## 5.6 Integrity
 
 Use two levels:
@@ -1424,6 +1435,23 @@ Gate P7:
 > 0.2** without moving the 64-byte header or the 40-byte directory entry, and
 > the default encoder path still writes v0.1 bytes. The gates above keep
 > their old numbering; the living record is `docs/ROADMAP_STATUS.md`.
+
+> **Status note (2026-11-22).** Step 5 of the forward plan — **promoting the
+> stable codecs 4, 5 and 6** — is closed and is recorded in
+> `docs/ROADMAP_STATUS.md` &#167;2.1 and `docs/P8_CODEC_REPORT.md`. The three
+> pipelines the table in &#167;5.5 names are now stable ids under exactly the
+> names the table gives them: id 4 `lz77`, id 5 `predictor+dictionary` and id
+> 6 `context-entropy`. It shipped as a **second** format revision: the
+> container's minor version moved **0.2 → 0.3** without moving the 64-byte
+> header or the 40-byte directory entry, and it adds exactly one rule — a
+> directory entry may name id 4, 5 or 6 only if the file's minor version is 3
+> or newer, and the version states what the file **contains**, so the default
+> encoder path still writes v0.1 bytes. Measured over the whole 750-image
+> corpus with the production encoder, the extended set writes **&#8722;10.46%**
+> bytes with **no image worse** (643 smaller, 107 identical, 0 larger) and
+> every file lossless; it costs **3.44&#215;** the encode time, so it stays
+> **opt-in**. The gates above keep their old numbering; the living record is
+> `docs/ROADMAP_STATUS.md`.
 
 ## Phase 8 --- 10 MB target evaluation
 

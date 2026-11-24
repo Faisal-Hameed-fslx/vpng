@@ -36,7 +36,9 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use vpng_container::{crc32c, Directory, DirectoryEntry, Header, FEATURE_PYRAMID, HEADER_SIZE};
+use vpng_container::{
+    crc32c, Directory, DirectoryEntry, Header, FEATURE_PYRAMID, HEADER_SIZE, MINOR_V0_3,
+};
 use vpng_core::{Error, Limits, PixelFormat, Result};
 use vpng_encoder::{select_payload, EncodeOptions};
 
@@ -61,6 +63,12 @@ pub struct CommitOptions {
     /// the encoder's own selection function so a re-encoded tile is exactly
     /// the tile the encoder would have produced.
     pub codec_id: Option<u8>,
+    /// Which codecs the per-tile selector may choose from.
+    ///
+    /// The default is [`vpng_codecs::CodecSet::V0_1`], the same set the
+    /// encoder uses by default, so a commit that does not ask for anything
+    /// produces the same bytes the encoder would have produced.
+    pub codec_set: vpng_codecs::CodecSet,
     /// Make the write fail on purpose.
     pub failure: Option<FailurePoint>,
     /// The suffix of the temporary file.
@@ -71,6 +79,7 @@ impl Default for CommitOptions {
     fn default() -> Self {
         CommitOptions {
             codec_id: None,
+            codec_set: vpng_codecs::CodecSet::V0_1,
             failure: None,
             temp_suffix: ".vpng-edit.tmp".to_string(),
         }
@@ -172,9 +181,13 @@ pub(crate) fn write_document<S: TileSource>(
         let encode_options = match options.codec_id {
             Some(codec_id) => EncodeOptions {
                 codec_id,
+                codec_set: options.codec_set,
                 ..EncodeOptions::default()
             },
-            None => EncodeOptions::default(),
+            None => EncodeOptions {
+                codec_set: options.codec_set,
+                ..EncodeOptions::default()
+            },
         };
         let (codec_id, payload) = select_payload(pixels, &ctx, &encode_options)?;
         rewritten.insert(*index, Rewritten { codec_id, payload });
@@ -250,9 +263,21 @@ pub(crate) fn write_document<S: TileSource>(
     // informational — the per-tile entry is authoritative — so it is carried
     // over unchanged. The pyramid flag is cleared, because the committed file
     // holds the original level only.
+    //
+    // The minor version moves up if a rewritten tile names a codec that only
+    // a newer format defines: a v0.1 file edited into a file that uses the
+    // dictionary codec becomes a v0.3 file. It never moves down.
+    let uses_v0_3_codec = rewritten
+        .values()
+        .any(|tile| vpng_codecs::is_v0_3_codec(tile.codec_id));
+    let minor = if uses_v0_3_codec {
+        template.minor.max(MINOR_V0_3)
+    } else {
+        template.minor
+    };
     let header = Header {
         major: template.major,
-        minor: template.minor,
+        minor,
         width,
         height,
         color_model: template.color_model,

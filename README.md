@@ -4,11 +4,11 @@ A lossless, adaptive, tiled, random-access image format and editing engine.
 
 **Primary requirement:** exact pixel reconstruction.
 **Secondary target:** fit eligible images within 10 MB — measured, never promised.
-**Status:** v0.2 container implemented, compiled, and tested; the editing engine
+**Status:** v0.3 container implemented, compiled, and tested; the editing engine
 (P4), the compression research (P3.5), the interactive engine (P5) and the
 parallel/streaming encoder (P5.1) have landed, and so have the preview pyramid
-(P6) and the adaptive partition (P7) in one format revision. `cargo build
---workspace` and `cargo test --workspace --all-targets`
+(P6), the adaptive partition (P7) and the promoted stable codecs 4–6, in two
+format revisions. `cargo build --workspace` and `cargo test --workspace --all-targets`
 both pass on `stable-x86_64-pc-windows-gnu` rustc
 1.100.0. Large-image stress runs, a 16K memory matrix, an editing benchmark, a
 16K viewing benchmark, a 16K encoding benchmark and a seed-corpus measurement
@@ -20,7 +20,8 @@ are recorded in `docs/BENCHMARKS.md`, `docs/P5_REPORT.md` and
 * A precise, ADR-backed binary format: `docs/VPNG_SPEC_0_1.md`, revised as
   `docs/VPNG_SPEC_0_2.md` (the same layout, with the level index carried in
   the directory entry's `flags` and a level's tiles allowed to differ in
-  size).
+  size) and `docs/VPNG_SPEC_0_3.md` (the same layout again, with the rule
+  that lets the promoted codecs 4–6 reach a file).
 * All eight v0.1 pixel formats (Gray/GrayAlpha/RGB/RGBA at 8 and 16 bits).
 * A validated container: 64-byte header, 40-byte directory entries, CRC32C
   checksums, whole-image canonical SHA-256 digest.
@@ -37,6 +38,17 @@ are recorded in `docs/BENCHMARKS.md`, `docs/P5_REPORT.md` and
   over the whole 750-image corpus it is a compression **wash** (−0.22%
   bytes, and it hurts UI screenshots) and it delivers **half the tiles at the
   median**. The unfavourable result is kept. See `docs/P6_P7_REPORT.md`.
+* The **promoted stable codecs 4, 5 and 6** (format v0.3): an LZ77
+  dictionary, a predictor over a dictionary, and a gradient-conditioned
+  context-adaptive entropy coder, under the ids ADR-0004 reserved for them.
+  A file may name one only if its minor version is 3 or newer, and the
+  version states what the file **contains** — the default path still writes
+  v0.1 bytes. Measured over the whole 750-image corpus with the production
+  encoder, the extended set writes **−10.46%** bytes (453,767,460 →
+  406,294,626) with **643 images smaller, 107 identical and 0 larger**, and
+  all 1,500 files pass `vpng check` and **losslessly** `vpng verify`. It
+  costs **3.44×** the encode time, so it stays opt-in
+  (`--codec-set extended`). See `docs/P8_CODEC_REPORT.md`.
 * An **editing engine**: region reads and writes, dirty-tile tracking,
   transactions, bounded tile-level undo/redo, and a copy-on-write save that
   reuses every untouched payload byte for byte and replaces the file
@@ -69,7 +81,7 @@ are recorded in `docs/BENCHMARKS.md`, `docs/P5_REPORT.md` and
 * Conformance tests: exhaustive round-trip, region-vs-crop, malformed-input
   sweeps, a bounded mutation sweep, golden files, the `default_codec`
   clarification, and a deterministic fuzzing harness over seven targets.
-  418 tests, all passing.
+  447 tests, all passing.
 * Layered integrity: `info` (structure only), `check` (every payload CRC32C),
   `verify` (exact pixels against a reference).
 * Measured evidence: large-image stress (up to a 15360×8640 photo and
@@ -80,20 +92,21 @@ are recorded in `docs/BENCHMARKS.md`, `docs/P5_REPORT.md` and
 * A **compression study** of eleven codecs on identical pixels and identical
   tile layouts: the four stable codecs, four context-adaptive residual models
   (CARC A–D), an LZ77 dictionary codec and three hybrids, each with a pinned
-  golden vector. Across the corpus the best research codec (CARC C) reaches
-  0.3062× of the canonical bytes against PNG's 0.3445× — and 0.2575× for
-  WebP lossless and 0.2189× for JPEG XL lossless, neither of which VPNG
-  beats. **No research codec is promoted.**
-  See `docs/P3_5_COMPRESSION_RESEARCH_REPORT.md`.
+  golden vector. Across the seed corpus the best research codec (CARC C)
+  reaches 0.3062× of the canonical bytes against PNG's 0.3445× — and 0.2575×
+  for WebP lossless and 0.2189× for JPEG XL lossless, neither of which VPNG
+  beats. Three of those research pipelines are **now promoted** to stable
+  ids 4, 5 and 6 and measured over the whole 750-image corpus.
+  See `docs/P3_5_COMPRESSION_RESEARCH_REPORT.md` and
+  `docs/P8_CODEC_REPORT.md`.
 
 ## What is explicitly not here yet
 
 The Python bindings, the WebAssembly package, HTTP Range streaming, layers and
-masks, GPU-ready payloads, and a frozen v1.0 format. The stable codec ids 4–6
-are still reserved; the LZ77, CARC and hybrid codecs that were measured in the
-P3.5 study
-are **research-only** — their ids live in `0x80..=0xFF`, they cannot reach a
-file, and the decoder rejects a file that names one. Coverage-guided fuzzing runs
+masks, GPU-ready payloads, and a frozen v1.0 format. The research-only
+pipelines that were **not** promoted — the other CARC models and the other
+hybrids — keep their ids in `0x80..=0xFF`: they cannot reach a file, and the
+decoder rejects a file that names one. Coverage-guided fuzzing runs
 in CI's nightly job on Linux —
 132,429,711 executions across seven targets in the first run, a second run
 that found a real defect (`Header::parse` accepted a zero-dimension header
@@ -146,10 +159,16 @@ v0.1 bytes, so every golden fixture and every existing file is untouched.
 The pyramid puts the whole 16K picture on screen 66× sooner at 1/64 scale,
 for +32.7% bytes and +44.2% encode time. The adaptive partition was measured
 over the whole 750-image corpus and is a compression **wash** — it is kept
-because it halves the tile count, not because it compresses better. The
-next steps are the stable codec ids 4–6, then the ecosystem: Python, WASM,
-HTTP Range, layers, GPU payloads and the graphical UI. See
-`docs/P6_P7_REPORT.md`.
+because it halves the tile count, not because it compresses better.
+
+The stable codec ids 4–6 are done as well, in a second revision: the
+container's minor version is **0.3** and the layout did not move with it
+either. The three promoted codecs are worth **−10.46%** bytes over the whole
+corpus with **no image worse**, at **3.44×** the encode time — so the
+extended set is opt-in and the default path's published bytes did not move by
+one. The next steps are the ecosystem: Python, WASM, HTTP Range, layers, GPU
+payloads and the graphical UI, then the release cadence from v0.2 to v0.23 and
+the v1.0 freeze last. See `docs/P8_CODEC_REPORT.md`.
 
 The roadmap also carries a **feature backlog** — a preview pyramid, Python
 bindings, a graphical editor, a WebAssembly package, HTTP Range streaming,
@@ -190,6 +209,8 @@ vpng decode-region output.vpng crop.png --x 100 --y 200 --width 512 --height 512
 vpng extract-tile output.vpng --tile-x 0 --tile-y 1 --output tile.png
 vpng encode input.png out.vpng --max-size 10MB      # decimal ceiling (ADR-0006)
 vpng encode input.png out.vpng --codec predictor  # raw | palette | rle | predictor | auto (default)
+vpng encode input.png out.vpng --codec-set extended  # stable (default) | extended (ids 0-6)
+vpng encode input.png out.vpng --codec context-entropy  # lz77 | predictor+dictionary | context-entropy
 ```
 
 `info` reads only the header and directory, so it is O(1) in the tile count and
@@ -204,8 +225,9 @@ limit, `6` size limit, `7` verification failed, `8` I/O.
 ```text
 crates/vpng-core        formats, geometry, checked arithmetic, errors, limits
 crates/vpng-container   header, directory, checksums, canonical digest
-crates/vpng-codecs      TileCodec trait + Raw, Palette, Run-length, Predictor (ids 0-3; 4-6 reserved)
-                         + research-only CARC / LZ77 / hybrids under src/experimental/
+crates/vpng-codecs      TileCodec trait + Raw, Palette, Run-length, Predictor (ids 0-3)
+                         + the promoted LZ77, predictor+dictionary and context-entropy codecs (ids 4-6)
+                         + the remaining research-only CARC / hybrid pipelines under src/experimental/
 crates/vpng-tiling      TileGrid and region-to-tile mapping
 crates/vpng-encoder     canonical pixels -> .vpng bytes
 crates/vpng-decoder     .vpng bytes -> full / tile / region pixels

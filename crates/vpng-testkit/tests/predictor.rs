@@ -141,9 +141,44 @@ fn auto_selection_prefers_predictor_for_smooth_data() {
 fn auto_selection_never_loses_to_the_best_forced_codec() {
     // The selector must pick the smallest payload per tile. Forcing each codec
     // in turn and taking the smallest file must never beat `auto`.
+    //
+    // The comparison is like for like: `auto` may only use the codecs its set
+    // permits, so the forced run must cover the same set. The extended set is
+    // checked separately, below.
     for &(width, height) in &[(64u32, 64u32), (150, 100), (257, 130)] {
         let image = ramp_image(width, height, PixelFormat::rgba8());
         let options = EncodeOptions::default().with_tile_size(64, 64);
+
+        let auto = encode(&image, &options).unwrap();
+        let mut best_forced = u64::MAX;
+        for &id in vpng_codecs::CODEC_IDS_V0_2 {
+            match encode(&image, &options.with_codec(id)) {
+                Ok(report) => best_forced = best_forced.min(report.file_size),
+                Err(err) => assert_eq!(
+                    err.kind(),
+                    ErrorKind::UnsupportedFeature,
+                    "codec {id} should only refuse tiles it cannot represent"
+                ),
+            }
+        }
+        assert!(
+            auto.file_size <= best_forced,
+            "auto {} must not lose to the best forced {} at {width}x{height}",
+            auto.file_size,
+            best_forced
+        );
+    }
+}
+
+#[test]
+fn the_extended_selection_never_loses_to_the_best_forced_codec() {
+    // The same invariant, over the set that includes the three codecs
+    // promoted in v0.3.
+    for &(width, height) in &[(64u32, 64u32), (150, 100), (257, 130)] {
+        let image = ramp_image(width, height, PixelFormat::rgba8());
+        let options = EncodeOptions::default()
+            .with_tile_size(64, 64)
+            .with_extended_codecs();
 
         let auto = encode(&image, &options).unwrap();
         let mut best_forced = u64::MAX;

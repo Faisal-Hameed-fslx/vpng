@@ -642,6 +642,253 @@ def check_adaptive() -> None:
         quoted(row["adaptive_larger"], "d")
 
 
+def check_codecs() -> None:
+    """Check the codec-promotion report against the raw data."""
+    report = (REPO / "docs/P8_CODEC_REPORT.md").read_text(encoding="utf-8")
+    # The reports write a negative number with a typographic minus; the
+    # figures in the raw data use the ASCII one.
+    report = report.replace("−", "-")
+    prod = json.loads(
+        (REPO / "benchmarks/p8_codec_production_results.json").read_text(encoding="utf-8")
+    )
+    research = json.loads(
+        (REPO / "benchmarks/p8_codec_corpus_results.json").read_text(encoding="utf-8")
+    )
+    manifest = json.loads((REPO / "benchmarks/corpus_manifest.json").read_text(encoding="utf-8"))
+    summary = prod["summary"]
+    overall = summary["overall"]
+    images = prod["images"]
+
+    def quoted(value, fmt) -> None:
+        text = format(value, fmt)
+        check(text in report, f"the codec report does not contain the figure {text!r}")
+
+    # ---- the corpus is the corpus ------------------------------------------
+    manifest_ids = {entry["id"] for entry in manifest["images"]}
+    result_ids = {image["id"] for image in images}
+    check(
+        manifest_ids == result_ids,
+        "the manifest and the codec measurement file do not hold the same images",
+    )
+    check(
+        len(images) == manifest["total_images"],
+        f"the codec measurement file holds {len(images)} images, the manifest says "
+        f"{manifest['total_images']}",
+    )
+    quoted(len(images), ",")
+    quoted(len(images), "d")
+
+    # ---- every file was checked and verified --------------------------------
+    for name in ("stable", "extended"):
+        check_failures = [
+            image["id"]
+            for image in images
+            if image[name]["check_exit"] != 0
+        ]
+        check(
+            not check_failures,
+            f"{len(check_failures)} {name} files failed `vpng check`",
+        )
+        verify_failures = [
+            image["id"]
+            for image in images
+            if image[name]["verify_exit"] != 0
+        ]
+        check(
+            not verify_failures,
+            f"{len(verify_failures)} {name} files failed `vpng verify`",
+        )
+        quoted(overall[name]["check_failures"], "d")
+        quoted(overall[name]["verify_failures"], "d")
+
+    # ---- the default path did not move --------------------------------------
+    check(
+        overall["compared_with_p5"] == len(images),
+        "not every image was compared with the P5 baseline",
+    )
+    check(
+        overall["stable_matches_p5"] == len(images),
+        f"{len(images) - overall['stable_matches_p5']} stable files differ from the P5 baseline",
+    )
+    quoted(overall["stable_matches_p5"], "d")
+    # Every stable file is a v0.1 file.
+    check(
+        overall["stable"]["files_by_minor"] == {"1": len(images)},
+        f"the stable run wrote {overall['stable']['files_by_minor']}, not all v0.1 files",
+    )
+
+    # ---- the headline figures -------------------------------------------------
+    quoted(overall["stable"]["total_bytes"], ",")
+    quoted(overall["extended"]["total_bytes"], ",")
+    delta = overall["extended"]["total_bytes"] - overall["stable"]["total_bytes"]
+    quoted(delta, ",")
+    quoted(f"{100.0 * delta / overall['stable']['total_bytes']:.2f}%", "")
+    quoted(overall["extended_smaller"], "d")
+    quoted(overall["extended_larger"], "d")
+    quoted(overall["extended_equal"], "d")
+    quoted(overall["stable"]["ratio"]["median"], ".6f")
+    quoted(overall["extended"]["ratio"]["median"], ".6f")
+
+    # The extended selection must never be larger.
+    check(
+        overall["extended_larger"] == 0,
+        f"{overall['extended_larger']} images are larger under the extended set",
+    )
+    check(
+        overall["extended_smaller"] + overall["extended_equal"] == len(images),
+        "the smaller/equal/larger counts do not add up",
+    )
+
+    # ---- the per-category figures --------------------------------------------
+    for name, row in summary["categories"].items():
+        quoted(row["count"], "d")
+        quoted(row["stable"]["total_bytes"], ",")
+        quoted(row["extended"]["total_bytes"], ",")
+        quoted(row["stable"]["ratio"]["median"], ".6f")
+        quoted(row["extended"]["ratio"]["median"], ".6f")
+        quoted(row["extended_smaller"], "d")
+        quoted(row["extended_larger"], "d")
+        check(
+            row["extended_larger"] == 0,
+            f"{name}: {row['extended_larger']} images are larger under the extended set",
+        )
+
+    # ---- the version states what the file contains --------------------------
+    minors = overall["extended"]["files_by_minor"]
+    check(
+        minors.get("3", 0) == overall["extended_smaller"],
+        f"the extended run wrote {minors.get('3', 0)} v0.3 files, but "
+        f"{overall['extended_smaller']} images differ from the stable set",
+    )
+    check(
+        minors.get("1", 0) == overall["extended_equal"],
+        f"the extended run wrote {minors.get('1', 0)} v0.1 files, but "
+        f"{overall['extended_equal']} images are unchanged",
+    )
+    for image in images:
+        uses_promoted = any(
+            codec in ("lz77", "predictor+dictionary", "context-entropy")
+            for codec in image["extended"]["header"]["tiles_by_codec"]
+        )
+        if uses_promoted:
+            check(
+                image["extended"]["header"]["minor"] == 3,
+                f"{image['id']}: names a promoted codec but is not a v0.3 file",
+            )
+        else:
+            check(
+                image["extended"]["header"]["minor"] == 1,
+                f"{image['id']}: names no promoted codec but is not a v0.1 file",
+            )
+
+    # ---- the encode-time cost -------------------------------------------------
+    stable_ms = sum(image["stable"]["encode_ms"] for image in images)
+    extended_ms = sum(image["extended"]["encode_ms"] for image in images)
+    quoted(stable_ms, ",")
+    quoted(extended_ms, ",")
+    quoted(f"{extended_ms / stable_ms:.2f}", "")
+    check(
+        extended_ms > stable_ms,
+        "the extended set was not slower than the stable set",
+    )
+
+    # ---- the candidates, measured on their own --------------------------------
+    research_overall = research["summary"]["overall"]
+    for name in ("context-entropy", "predictor+dictionary", "lz77", "predictor"):
+        candidate = name
+        if name == "predictor+dictionary":
+            candidate = "pred-lz77"
+        if name == "context-entropy":
+            candidate = "carc-c"
+        row = research_overall.get(candidate)
+        check(row is not None, f"the research harness has no {candidate}")
+        if row is None or row.get("count", 0) == 0:
+            continue
+        quoted(row["total_bytes"], ",")
+        quoted(row["ratio"]["median"], ".6f")
+        quoted(row["ratio"]["p95"], ".6f")
+        quoted(row["exact"], "d")
+
+    # The research projection and the production run must agree exactly.
+    check(
+        research_overall["stable_auto"]["total_bytes"] == overall["stable"]["total_bytes"],
+        "the research projection and the production run disagree on the stable total",
+    )
+    check(
+        research_overall["extended_auto"]["total_bytes"] == overall["extended"]["total_bytes"],
+        "the research projection and the production run disagree on the extended total",
+    )
+
+    # ---- the determinism spot check --------------------------------------------
+    check(
+        overall["determinism_checked"] > 0,
+        "no image was re-encoded with a different worker count",
+    )
+    check(
+        overall["determinism_failures"] == 0,
+        f"{overall['determinism_failures']} images changed with the worker count",
+    )
+    quoted(overall["determinism_checked"], "d")
+    quoted(overall["determinism_failures"], "d")
+
+    # ---- the 16K photograph -------------------------------------------------
+    big = [image for image in images if image["canonical_bytes"] > 100_000_000]
+    check(len(big) == 1, "the corpus does not hold exactly one 16K-scale image")
+    if big:
+        photo = big[0]
+        quoted(photo["stable"]["bytes"], ",")
+        quoted(photo["extended"]["bytes"], ",")
+        quoted(photo["delta_bytes"], ",")
+        quoted(photo["stable"]["sha256"], "")
+        quoted(photo["extended"]["sha256"], "")
+        # The stable file must be the P5.2 baseline's tile-256 file.
+        bench = json.loads(
+            (REPO / "benchmarks/p5_bench_results.json").read_text(encoding="utf-8")
+        )
+        rows = [
+            row
+            for row in bench["report"]["scenarios"]["compression"]
+            if row["tile_size"] == 256
+        ]
+        check(len(rows) == 1, "the P5.2 baseline does not have one tile-256 row")
+        if rows:
+            check(
+                rows[0]["sha256"] == photo["stable"]["sha256"],
+                "the 16K stable file is not the P5.2 baseline file",
+            )
+            check(
+                rows[0]["file_size_bytes"] == photo["stable"]["bytes"],
+                "the 16K stable file size moved since the P5.2 baseline",
+            )
+
+    # ---- the size ceiling ------------------------------------------------------
+    check(
+        overall["stable"]["under_10mb"] == 748,
+        f"{overall['stable']['under_10mb']} stable files are under 10 MB, not 748",
+    )
+    check(
+        overall["extended"]["under_10mb"] == 748,
+        f"{overall['extended']['under_10mb']} extended files are under 10 MB, not 748",
+    )
+    quoted(overall["stable"]["under_10mb"], "d")
+    quoted(overall["extended"]["under_10mb"], "d")
+    for image in images:
+        if image["extended"]["bytes"] > 10_000_000:
+            quoted(image["extended"]["bytes"], ",")
+
+    # ---- the report has to state its rules -----------------------------------
+    check("nearest-rank" in report.lower(), "the codec report does not define the p95 rule")
+    check("median" in report.lower(), "the codec report does not mention the median")
+    check("included" in report.lower() and "excluded" in report.lower(),
+          "the codec report does not state the memory scope")
+    check("sha256" in report.lower() or "digest" in report.lower(),
+          "the codec report does not mention the digest")
+    check("PASS" in report and "BLOCKED" in report,
+          "the codec report does not use the gate vocabulary")
+    check("lossless" in report.lower() or "exact" in report.lower(),
+          "the codec report does not state the lossless property")
+
+
 def main() -> int:
     raw = json.loads((REPO / "benchmarks/p3_5_raw_results.json").read_text(encoding="utf-8"))
     report = (REPO / "docs/P3_5_COMPRESSION_RESEARCH_REPORT.md").read_text(encoding="utf-8")
@@ -884,6 +1131,9 @@ def main() -> int:
     # ---- Phase B: the preview pyramid and the adaptive partition ---------------
     check_preview()
     check_adaptive()
+
+    # ---- Step 5: the promoted codecs ------------------------------------------
+    check_codecs()
 
     if problems:
         print(f"{len(problems)} problem(s):")

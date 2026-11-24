@@ -1,13 +1,27 @@
 //! `vpng-codecs` — tile codecs behind a single trait.
 //!
-//! Implemented: Raw (id 0), Palette (id 1), Run-length (id 2) and the spatial
-//! predictor with an arithmetic entropy coder (id 3). Every other id is reserved
-//! and rejected with [`vpng_core::ErrorKind::UnsupportedFeature`] rather than
+//! Implemented: Raw (id 0), Palette (id 1), Run-length (id 2), the spatial
+//! predictor with an arithmetic entropy coder (id 3), the tile-local LZ77
+//! dictionary (id 4), prediction layered over that dictionary (id 5), and
+//! context-adaptive entropy coding (id 6). Every other id is reserved and
+//! rejected with [`vpng_core::ErrorKind::UnsupportedFeature`] rather than
 //! silently mis-decoded. See ADR-0004 for the id table.
+//!
+//! # The two codec generations
+//!
+//! Ids 0 to 3 are the **v0.1 generation**: they may appear in any file. Ids 4
+//! to 6 are the **v0.3 generation**: they may appear only in a file whose
+//! minor version is 3 or later. A v0.1 or v0.2 file that names one of them is
+//! malformed, and a build that predates the promotion rejects them with
+//! [`vpng_core::ErrorKind::UnsupportedFeature`] as well.
 
 #![forbid(unsafe_code)]
 
+pub mod carc;
+pub mod entropy;
 pub mod experimental;
+pub mod hybrid;
+pub mod lz77;
 pub mod palette;
 pub mod predictor;
 pub mod raw;
@@ -23,11 +37,11 @@ pub const CODEC_PALETTE: u8 = 1;
 pub const CODEC_RLE: u8 = 2;
 /// Codec id 3: spatial prediction plus an adaptive arithmetic entropy coder.
 pub const CODEC_PREDICTOR: u8 = 3;
-/// Codec id 4: LZ77-style dictionary. Reserved in v0.1.
+/// Codec id 4: LZ77-style dictionary. Stable from format v0.3.
 pub const CODEC_LZ77: u8 = 4;
-/// Codec id 5: prediction layered over a dictionary. Reserved in v0.1.
+/// Codec id 5: prediction layered over a dictionary. Stable from format v0.3.
 pub const CODEC_PREDICTOR_DICTIONARY: u8 = 5;
-/// Codec id 6: context-adaptive entropy coding. Reserved in v0.1.
+/// Codec id 6: context-adaptive entropy coding. Stable from format v0.3.
 pub const CODEC_CONTEXT_ENTROPY: u8 = 6;
 
 /// Sentinel for "let the encoder pick the smallest codec for each tile".
@@ -41,7 +55,69 @@ pub const CODEC_AUTO: u8 = u8::MAX;
 /// A cost-based selector iterates this in order, so when two codecs produce
 /// payloads of equal size the lowest id wins (a defined, deterministic
 /// tie-break).
-pub const IMPLEMENTED_CODEC_IDS: &[u8] = &[CODEC_RAW, CODEC_PALETTE, CODEC_RLE, CODEC_PREDICTOR];
+pub const IMPLEMENTED_CODEC_IDS: &[u8] = &[
+    CODEC_RAW,
+    CODEC_PALETTE,
+    CODEC_RLE,
+    CODEC_PREDICTOR,
+    CODEC_LZ77,
+    CODEC_PREDICTOR_DICTIONARY,
+    CODEC_CONTEXT_ENTROPY,
+];
+
+/// The codec ids a **v0.1 or v0.2** file may name.
+///
+/// The three dictionary and context-adaptive codecs were promoted in format
+/// v0.3, so an older file that names one of them is malformed.
+pub const CODEC_IDS_V0_2: &[u8] = &[CODEC_RAW, CODEC_PALETTE, CODEC_RLE, CODEC_PREDICTOR];
+
+/// The codec ids a **v0.3** file may name.
+///
+/// This is every implemented codec.
+pub const CODEC_IDS_V0_3: &[u8] = IMPLEMENTED_CODEC_IDS;
+
+/// Whether a codec id was promoted in format v0.3.
+pub fn is_v0_3_codec(id: u8) -> bool {
+    !CODEC_IDS_V0_2.contains(&id) && IMPLEMENTED_CODEC_IDS.contains(&id)
+}
+
+/// The set of codecs a selector may choose from.
+///
+/// The two sets exist because the two codec generations are not equally
+/// cheap. The v0.1 generation is fast; the v0.3 generation costs several
+/// times more to run, because a dictionary match search and a
+/// context-adaptive model are both far more work than a predictor pass. A
+/// caller that wants the smallest file pays for that; a caller that wants the
+/// old speed does not have to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CodecSet {
+    /// The four original stable codecs: raw, palette, rle and predictor.
+    ///
+    /// A file that uses only these codecs is a v0.1 or v0.2 file.
+    V0_1,
+    /// Every implemented codec, including the three promoted in v0.3.
+    ///
+    /// A file that uses one of the promoted codecs is a v0.3 file.
+    V0_3,
+}
+
+impl CodecSet {
+    /// The codec ids in this set, in ascending order.
+    ///
+    /// The order is the tie-break order of a cost-based selector: when two
+    /// codecs produce payloads of equal size, the lower id wins.
+    pub const fn ids(self) -> &'static [u8] {
+        match self {
+            CodecSet::V0_1 => CODEC_IDS_V0_2,
+            CodecSet::V0_3 => CODEC_IDS_V0_3,
+        }
+    }
+
+    /// Whether this set contains the given codec id.
+    pub fn contains(self, id: u8) -> bool {
+        self.ids().contains(&id)
+    }
+}
 
 /// Everything a codec needs to encode one tile.
 #[derive(Debug, Clone, Copy)]
@@ -122,11 +198,14 @@ pub fn get_codec(id: u8) -> Result<&'static dyn TileCodec> {
         CODEC_PALETTE => Ok(&palette::PALETTE_CODEC),
         CODEC_RLE => Ok(&rle::RLE_CODEC),
         CODEC_PREDICTOR => Ok(&predictor::PREDICTOR_CODEC),
+        CODEC_LZ77 => Ok(&lz77::LZ77_CODEC),
+        CODEC_PREDICTOR_DICTIONARY => Ok(&hybrid::PREDICTOR_DICTIONARY_CODEC),
+        CODEC_CONTEXT_ENTROPY => Ok(&carc::CONTEXT_ENTROPY_CODEC),
         other => {
             let name = codec_name(other).unwrap_or("unknown");
             if codec_name(other).is_some() {
                 Err(Error::unsupported(format!(
-                    "codec id {other} ({name}) is reserved but not implemented in v0.1"
+                    "codec id {other} ({name}) is reserved but not implemented"
                 )))
             } else {
                 Err(Error::unsupported(format!("unknown codec id {other}")))
@@ -183,15 +262,28 @@ mod tests {
     }
 
     #[test]
-    fn reserved_codecs_are_unsupported() {
-        for id in [
-            CODEC_LZ77,
-            CODEC_PREDICTOR_DICTIONARY,
-            CODEC_CONTEXT_ENTROPY,
+    fn the_promoted_codecs_are_available() {
+        for (id, name) in [
+            (CODEC_LZ77, "lz77"),
+            (CODEC_PREDICTOR_DICTIONARY, "predictor+dictionary"),
+            (CODEC_CONTEXT_ENTROPY, "context-entropy"),
         ] {
-            let err = get_codec(id).err().unwrap();
-            assert_eq!(err.kind(), vpng_core::ErrorKind::UnsupportedFeature);
-            assert!(!is_implemented(id));
+            assert!(is_implemented(id), "codec id {id} must be implemented");
+            let codec = get_codec(id).unwrap();
+            assert_eq!(codec.codec_id(), id);
+            assert_eq!(codec.name(), name);
+            assert_eq!(codec_name(id), Some(name));
+            assert!(is_v0_3_codec(id));
+            assert!(!CODEC_IDS_V0_2.contains(&id));
+        }
+    }
+
+    #[test]
+    fn the_v0_2_codec_set_is_the_four_original_codecs() {
+        assert_eq!(CODEC_IDS_V0_2, &[0, 1, 2, 3]);
+        assert_eq!(CODEC_IDS_V0_3, IMPLEMENTED_CODEC_IDS);
+        for &id in CODEC_IDS_V0_2 {
+            assert!(!is_v0_3_codec(id));
         }
     }
 

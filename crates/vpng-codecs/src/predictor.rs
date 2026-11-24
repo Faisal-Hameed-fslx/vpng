@@ -144,10 +144,11 @@ pub static PREDICTOR_CODEC: PredictorCodec = PredictorCodec;
 /// The sample grid of one tile: pixel width, interleaved channel count, and the
 /// byte width of one channel sample.
 ///
-/// The geometry helpers are shared with the experimental research codecs in
-/// [`crate::experimental`]. They are `pub(crate)` so a research codec can reuse
-/// the exact same sample arithmetic — the stable codec's *behaviour* is
-/// unchanged; only the visibility of these items changed.
+/// The geometry helpers are shared with the dictionary and context-adaptive
+/// codecs in [`crate::lz77`], [`crate::hybrid`] and [`crate::carc`]. They are
+/// `pub(crate)` so those codecs can reuse the exact same sample arithmetic —
+/// the stable codec's *behaviour* is unchanged; only the visibility of these
+/// items changed.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Layout {
     pub(crate) width: usize,

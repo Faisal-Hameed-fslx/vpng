@@ -132,9 +132,26 @@ fn parse_codec(text: &str) -> Result<u8> {
         "palette" | "1" => Ok(vpng_codecs::CODEC_PALETTE),
         "rle" | "2" => Ok(vpng_codecs::CODEC_RLE),
         "predictor" | "3" => Ok(vpng_codecs::CODEC_PREDICTOR),
+        "lz77" | "4" => Ok(vpng_codecs::CODEC_LZ77),
+        "predictor+dictionary" | "predictor-dictionary" | "5" => {
+            Ok(vpng_codecs::CODEC_PREDICTOR_DICTIONARY)
+        }
+        "context-entropy" | "context_adaptive" | "6" => Ok(vpng_codecs::CODEC_CONTEXT_ENTROPY),
         other => Err(Error::unsupported(format!(
-            "codec `{other}` is not implemented in v0.1 \
-             (available: auto, raw, palette, rle, predictor)"
+            "codec `{other}` is not implemented \
+             (available: auto, raw, palette, rle, predictor, lz77, \
+              predictor+dictionary, context-entropy)"
+        ))),
+    }
+}
+
+/// The set of codecs the per-tile selector may choose from.
+fn parse_codec_set(text: &str) -> Result<vpng_codecs::CodecSet> {
+    match text.to_ascii_lowercase().as_str() {
+        "stable" => Ok(vpng_codecs::CodecSet::V0_1),
+        "extended" => Ok(vpng_codecs::CodecSet::V0_3),
+        other => Err(Error::unsupported(format!(
+            "codec set `{other}` is not known (available: stable, extended)"
         ))),
     }
 }
@@ -161,6 +178,9 @@ fn cmd_encode(args: &Args) -> Result<()> {
     }
     if let Some(codec) = args.get("codec") {
         options = options.with_codec(parse_codec(codec)?);
+    }
+    if let Some(set) = args.get("codec-set") {
+        options = options.with_codec_set(parse_codec_set(set)?);
     }
     if let Some(text) = args.get("max-size") {
         options = options.with_max_size(size::parse_size(text)?);
@@ -564,7 +584,12 @@ OPTIONS:
     --tile-size <n>        Square tile edge for encoding (default 256)
     --tile-width <n>       Non-square tile width
     --tile-height <n>      Non-square tile height
-    --codec <name>         Codec: auto (default), raw, palette, rle, predictor
+    --codec <name>         Codec: auto (default), raw, palette, rle, predictor,
+                           lz77, predictor+dictionary, context-entropy
+    --codec-set <set>      Which codecs the per-tile selector may use:
+                           stable (default: raw, palette, rle, predictor) or
+                           extended (every codec, including the three
+                           promoted in v0.3)
     --max-size <size>      Decimal byte ceiling, e.g. 10MB (ADR-0006)
     --max-size-mib <n>     Binary MiB ceiling
     --pyramid              Build a preview pyramid (a v0.2 file). The original

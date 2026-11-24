@@ -1,9 +1,10 @@
-//! VPNG-LZ77 — an experimental, tile-local, bounded dictionary codec.
+//! VPNG-LZ77 — the stable, tile-local, bounded dictionary codec (id 4).
 //!
-//! This is **research code**. It carries a research-only codec id
-//! (`0x90`), is not reachable through [`crate::get_codec`], and is not in
-//! [`crate::IMPLEMENTED_CODEC_IDS`]. A file that somehow carried this id
-//! would be rejected by the production decoder with `UnsupportedFeature`.
+//! This is a **stable** codec: it is reachable through [`crate::get_codec`],
+//! it is in [`crate::IMPLEMENTED_CODEC_IDS`], and a file may carry it from
+//! format v0.3 onwards. Before that promotion it was research code with the
+//! id `0x90`; the payload format never changed, so the bytes this codec
+//! writes are the bytes the research study measured.
 //!
 //! # Tile locality
 //!
@@ -97,10 +98,10 @@
 
 use vpng_core::{Error, Result};
 
-use crate::experimental::entropy;
+use crate::entropy;
 use crate::{DecodeContext, EncodeContext, TileCodec};
 
-use super::EXP_LZ77;
+use crate::CODEC_LZ77;
 
 /// Payload version. Anything else is corrupt, never best-effort decoded.
 pub const VERSION: u8 = 1;
@@ -841,9 +842,16 @@ impl Lz77Codec {
     }
 }
 
+/// The stable LZ77 dictionary codec (id 4), with the default parameters.
+///
+/// The parameters are the balanced defaults the research study measured; the
+/// payload layout records every parameter, so a decoder needs no out-of-band
+/// knowledge.
+pub static LZ77_CODEC: Lz77Codec = Lz77Codec::new(Lz77Params::DEFAULT);
+
 impl TileCodec for Lz77Codec {
     fn codec_id(&self) -> u8 {
-        EXP_LZ77
+        CODEC_LZ77
     }
 
     fn name(&self) -> &'static str {

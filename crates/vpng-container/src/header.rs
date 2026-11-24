@@ -50,8 +50,17 @@ pub const MINOR_V0_1: u16 = 1;
 /// sizes rather than forming one uniform grid.
 pub const MINOR_V0_2: u16 = 2;
 
+/// The minor version that promotes the dictionary and context-adaptive codecs.
+///
+/// v0.3 keeps the 64-byte header and the 40-byte directory entry exactly as
+/// v0.1 and v0.2 define them. It changes one *rule*: a directory entry may
+/// name codec id 4 (LZ77 dictionary), 5 (predictor over a dictionary) or 6
+/// (context-adaptive entropy). A v0.1 or v0.2 file that names one of them is
+/// malformed.
+pub const MINOR_V0_3: u16 = 3;
+
 /// Highest minor format version this build accepts.
-pub const FORMAT_MINOR: u16 = MINOR_V0_2;
+pub const FORMAT_MINOR: u16 = MINOR_V0_3;
 
 pub const HEADER_CHECKSUM_OFFSET: usize = 52;
 pub const HEADER_CHECKSUM_LEN: usize = 4;
@@ -94,7 +103,8 @@ impl Header {
     /// project has written so far uses, and the golden fixtures pin its exact
     /// bytes, so the default writer does not move the version on its own.
     /// Use [`Header::new_v2`] for a file that carries a preview pyramid or an
-    /// adaptive (variable-size) partition.
+    /// adaptive (variable-size) partition, and [`Header::new_v3`] for a file
+    /// whose directory names codec id 4, 5 or 6.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         width: u32,
@@ -156,6 +166,34 @@ impl Header {
     pub fn with_feature_flags(mut self, flags: u32) -> Self {
         self.feature_flags = flags;
         self
+    }
+
+    /// Build a **v0.3** header for a new file.
+    ///
+    /// The layout is identical to v0.1 and v0.2 — the same 64 bytes, the same
+    /// field offsets — and only the minor version differs. v0.3 is the
+    /// version that permits codec ids 4, 5 and 6 in the directory.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_v3(
+        width: u32,
+        height: u32,
+        format: PixelFormat,
+        default_codec: u8,
+        tile_count: u32,
+        directory_offset: u64,
+        declared_file_size: u64,
+    ) -> Result<Self> {
+        let mut header = Header::new(
+            width,
+            height,
+            format,
+            default_codec,
+            tile_count,
+            directory_offset,
+            declared_file_size,
+        )?;
+        header.minor = MINOR_V0_3;
+        Ok(header)
     }
 
     /// Whether the file declares derived preview levels.
@@ -278,7 +316,7 @@ impl Header {
         }
 
         if buf[RESERVED_OFFSET..HEADER_SIZE].iter().any(|&b| b != 0) {
-            return Err(Error::corrupt("reserved header bytes must be zero in v0.1"));
+            return Err(Error::corrupt("reserved header bytes must be zero"));
         }
 
         if feature_flags & !KNOWN_FEATURE_FLAGS != 0 {
