@@ -6,6 +6,7 @@ members = [
     "crates/vpng-cache",
     "crates/vpng-codecs",
     "crates/vpng-tiling",
+    "crates/vpng-image",
     "crates/vpng-encoder",
     "crates/vpng-decoder",
     "crates/vpng-source",
@@ -16,6 +17,7 @@ members = [
     "crates/vpng-cli",
     "crates/vpng-research",
     "crates/vpng-validation",
+    "crates/vpng-python",
 ]
 
 [workspace.package]
@@ -33,6 +35,7 @@ vpng-container = { path = "crates/vpng-container" }
 vpng-cache = { path = "crates/vpng-cache" }
 vpng-codecs = { path = "crates/vpng-codecs" }
 vpng-tiling = { path = "crates/vpng-tiling" }
+vpng-image = { path = "crates/vpng-image" }
 vpng-encoder = { path = "crates/vpng-encoder" }
 vpng-decoder = { path = "crates/vpng-decoder" }
 vpng-source = { path = "crates/vpng-source" }

@@ -329,6 +329,102 @@ rectangles and repeating runs are what a dictionary codes well.
 ceiling is met by **748 of 750** in both sets; the two that miss it are the
 same two as in the corpus report.
 
+## Measured: the Python bindings (2026-11-25)
+
+Phase C step 1, the Python API. The question this measurement answers is
+narrow and answerable: **does the Python API write the same bytes as the
+command line?** Drivers `benchmarks/python/run_python_bench.py` (the corpus
+comparison) and `benchmarks/python/run_python_memory.py` (the editing path's
+memory, measured in a fresh child process); raw runs preserved in
+`benchmarks/p9_python_results.json` and
+`benchmarks/p9_python_memory_results.json`; the full report, with the twelve
+questions, is `docs/P9_PYTHON_REPORT.md`.
+
+Host: Intel Core i5-1235U, 7.7 GB RAM, Windows `x86_64-pc-windows-gnu`,
+`rustc 1.100.0`, CPython 3.13.0, the extension built with `maturin develop
+--release`. Tile size 256, four encoder workers, one image at a time.
+
+### The binding against the command line, over the whole corpus
+
+Every one of the 750 images was encoded **twice** — once by the real `vpng`
+binary from the same canonical pixels, once by the Python extension from the
+same canonical pixels — and the two files were compared **byte for byte** by
+SHA-256. Each Python-written file was then checked with `vpng check` and
+**verified** with `vpng verify` (which decodes every tile and compares it
+with the original pixels).
+
+| | Result |
+|---|---:|
+| Images measured | **750** |
+| Byte-identical to the CLI | **750** |
+| Differing | **0** |
+| `vpng check` failures | **0** |
+| `vpng verify` failures | **0** |
+| Digests that moved when the worker count changed | **0** |
+| Total bytes | **453,767,460** |
+
+The total is the published stable baseline's, to the byte, and so is every
+file: the 16K photograph's Python digest is the P5.2 tile-256 baseline's,
+`d029a7ebc1e0347cb3399ab6f9de9653da5853c96b38d95cddc3b8bb45a14dbf`. All 750
+files report minor version **1** — the binding does not move the default
+path's version either.
+
+Per category, the bytes the Python API wrote:
+
+| Category | n | Bytes | Canonical bytes | Ratio |
+|---|---:|---:|---:|---:|
+| photos | 300 | 234,827,986 | 592,678,520 | 0.396215 |
+| pixel_art | 100 | 365,091 | 3,849,799 | 0.094834 |
+| scans | 100 | 67,871,353 | 199,028,456 | 0.341013 |
+| textures | 150 | 133,872,854 | 387,416,819 | 0.345553 |
+| ui | 100 | 16,830,176 | 267,389,736 | 0.062942 |
+
+### The timings
+
+| Path | median | p95 | mean | stdev | max |
+|---|---:|---:|---:|---:|---:|
+| CLI, wall clock | 126.9835 ms | 285.174 ms | 176.588527 ms | 1050.911477 ms | 28,581.094 ms |
+| Python, wall clock | **124.369 ms** | 270.628 ms | 167.661888 ms | 945.640446 ms | 25,688.263 ms |
+| Python, the encoder's own timer | **116.0 ms** | 261.0 ms | 157.22 ms | 907.762921 ms | 24,637 ms |
+
+The median is the middle sample, or the mean of the two middle samples when
+the count is even; the p95 is the **nearest-rank** percentile; the standard
+deviation is the sample one, with n − 1 in the denominator. The CLI's wall
+clock includes the process start and the process exit, and the Python path
+does not, so the two are comparable in size but not identical in what they
+count: the Python wall clock includes the FFI call, the buffer copy into the
+extension and the file write.
+
+### The editing path's memory, on the 16K picture
+
+A **localized edit** of the 16K photograph through the Python API — open the
+file, read a 1024×1024 region, write it back, commit — measured in a **fresh
+child process** so the figure is the edit's own:
+
+| | |
+|---|---:|
+| Edit elapsed | 687.935 ms |
+| Tiles rewritten | 16 |
+| Tiles copied payload-for-payload | 2,024 |
+| Peak working set | **44,249,088 B** |
+| Target | 67,108,864 B (64 MB) |
+
+**Within target**, at 66.0% of the budget.
+
+**Included** in the figure: the whole child process — the CPython
+interpreter, the extension module, the decoded-tile cache, the undo history,
+the tile payloads in flight, the rewritten payloads waiting to be written, the
+container metadata, the stacks and the allocator's own bookkeeping.
+**Excluded**: the `.vpng` file on disk, the operating system's page cache, and
+the memory of other processes.
+
+The corpus run's own process figure — **809,496,576 B** — is a *different*
+measurement and is not a target claim: it is the peak of the whole benchmark
+process across all 750 images, and it is dominated by the 16K picture's
+398,131,200 canonical bytes plus the encoder's own buffers. The **encode**
+path materialises the whole image, exactly as the CLI does; §6 of the report
+says so.
+
 ## Measured: large-image stress (2026-11-15, with Predictor)
 
 Host: 12 logical CPUs, 7,916 MB physical RAM, Windows `x86_64-pc-windows-gnu`,

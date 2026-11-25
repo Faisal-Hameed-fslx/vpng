@@ -1,0 +1,12 @@
+[package]
+name = "vpng-image"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Image and container conversion for VPNG: PNG and raw files in and out of canonical pixels."
+
+[dependencies]
+vpng-core.workspace = true
+png.workspace = true

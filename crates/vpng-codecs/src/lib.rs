@@ -185,6 +185,42 @@ pub fn codec_name(id: u8) -> Option<&'static str> {
     })
 }
 
+/// The codec id a name refers to.
+///
+/// The names are the ones [`codec_name`] returns, plus the decimal id and
+/// a few aliases that spell the same codec. `"auto"` is [`CODEC_AUTO`], which
+/// asks the encoder to choose the smallest payload per tile.
+///
+/// This is the **only** name table in the workspace: the command line and
+/// the Python extension both use it, so they cannot disagree about which
+/// name means which codec.
+pub fn codec_id_by_name(name: &str) -> Option<u8> {
+    Some(match name.to_ascii_lowercase().as_str() {
+        "auto" => CODEC_AUTO,
+        "raw" | "0" => CODEC_RAW,
+        "palette" | "1" => CODEC_PALETTE,
+        "rle" | "2" => CODEC_RLE,
+        "predictor" | "3" => CODEC_PREDICTOR,
+        "lz77" | "4" => CODEC_LZ77,
+        "predictor+dictionary" | "predictor-dictionary" | "5" => CODEC_PREDICTOR_DICTIONARY,
+        "context-entropy" | "context_adaptive" | "6" => CODEC_CONTEXT_ENTROPY,
+        _ => return None,
+    })
+}
+
+/// The codec set a name refers to.
+///
+/// `"stable"` is the four original codecs, the set the published
+/// measurements and the golden fixtures pin. `"extended"` adds the three
+/// codecs promoted in format v0.3.
+pub fn codec_set_by_name(name: &str) -> Option<CodecSet> {
+    match name.to_ascii_lowercase().as_str() {
+        "stable" => Some(CodecSet::V0_1),
+        "extended" => Some(CodecSet::V0_3),
+        _ => None,
+    }
+}
+
 /// Whether this build can decode and encode the given codec id.
 pub fn is_implemented(id: u8) -> bool {
     IMPLEMENTED_CODEC_IDS.contains(&id)

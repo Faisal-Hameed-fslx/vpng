@@ -8,6 +8,56 @@ separately as major.minor in the header.
 
 ### Added
 
+* **The Python bindings, measured against the command line over the whole
+  corpus (Phase C, P9).** A PyO3 extension (`crates/vpng-python`) and a
+  Python package (`python/vpng`) expose the stable engine to other
+  applications. The binding is a **thin wrapper**: every pixel operation is
+  the same Rust code the CLI runs, so the two cannot disagree about what a
+  file means.
+  * **The binding writes the same bytes as the command line.** Measured over
+    the **whole 750-image corpus**, the Python API's file is
+    **byte-identical** to the CLI's on **750 of 750 images** — one SHA-256
+    each — and the totals are the published stable baseline's:
+    **453,767,460** bytes. The 16K photograph's digest is the P5.2 tile-256
+    baseline's, `d029a7ebc1e0347cb3399ab6f9de9653da5853c96b38d95cddc3b8bb45a14dbf`.
+  * **Every Python-written file is lossless.** All 750 pass `vpng check`
+    (every payload CRC32C) and `vpng verify` (every tile decoded and
+    compared with the original pixels): **0 check failures, 0 verify
+    failures**. The worker count does not move the bytes: 750 of 750
+    digests match with a different worker count.
+  * **The editing path stays inside the memory target.** A localized edit of
+    the 16K photograph through Python — read a 1024×1024 region, write it
+    back, commit — peaks at **44,249,088 bytes** of working set against the
+    67,108,864-byte target, rewriting **16** tiles and copying **2,024**
+    payload-for-payload. The memory scope is stated with the figure.
+  * **The surface.** `encode`, `encode_pixels`, `decode`, `decode_to_bytes`,
+    `decode_region`, `verify`, `check`, `info`, and `open_document` →
+    `Document` with `read_region`, `write_region`, `edit()` →
+    `Transaction` with `write_region`, `commit` and `rollback`. A
+    transaction that is not committed is **rolled back** when its block
+    ends.
+  * **The exceptions are a real hierarchy.** Every failure carries its stable
+    error label, and each class is also a builtin Python exception:
+    `InvalidArgumentError` is a `ValueError`, `VpngIOError` is an
+    `OSError`, and so on, so either `except` clause catches it.
+  * **A lossy request is refused.** `lossless=False` raises; it is never
+    quietly ignored, and a refused encode leaves no partial file behind.
+  * **The stable ABI.** The extension is built with `abi3-py38`, so one wheel
+    works on every CPython from 3.8 onwards. `maturin` is the build backend
+    and the root `pyproject.toml` is the build definition.
+  * **One source of truth for PNG.** The PNG and raw conversion moved out of
+    the CLI into a new shared crate (`crates/vpng-image`), so the CLI and
+    the binding cannot disagree about what a PNG means. The three unit
+    tests moved with it, so the Rust test count did not change.
+  * **New documentation and evidence.** `docs/P9_PYTHON_REPORT.md` (the
+    report, with the twelve questions and the acceptance gates),
+    `benchmarks/p9_python_results.json` and
+    `benchmarks/p9_python_memory_results.json` (the raw data), the
+    measurement drivers `benchmarks/python/run_python_bench.py` and
+    `benchmarks/python/run_python_memory.py`, and `check_python()` in
+    `benchmarks/verify_reports.py`, which binds every quoted figure to the
+    raw data. A dedicated CI job builds the extension with `maturin` and
+    runs the 45 Python tests.
 * **The stable codecs 4, 5 and 6, promoted and measured over the whole
   corpus (Step 5).** The three research pipelines that ADR-0004 reserved are
   now stable codec ids, and the container's minor version moves **0.2 → 0.3**
@@ -465,7 +515,33 @@ separately as major.minor in the header.
   * 17 tests, including the ordering and cancellation rules checked
     exactly.
 
+### Changed
+
+* **The codec-name table now lives in one place.** The command line and the
+  Python extension both need to turn a codec's *name* into its id. That
+  mapping lived in the CLI and was about to be copied into the binding, so it
+  was lifted into `vpng-codecs` as `codec_id_by_name` and
+  `codec_set_by_name` and **both** front ends call it. The table is the
+  CLI's own — the same names, the same decimal aliases, the same
+  rejections — so the CLI's accepted surface did not move by one name.
+
 ### Fixed
+
+* **The Python binding's raw-byte region write assumed RGBA8.** The
+  binding read a raw byte block as four channels per pixel, whatever the
+  document's own format was, so a write to a grayscale or RGB document was
+  refused with a message about the wrong channel count — and a block that
+  happened to be the right size would have been interpreted with the wrong
+  number of channels.
+  * **Found by the measurement, not by the unit tests:** the 16K localized-edit
+    memory run failed on an RGB picture with *"the pixel block is 3145728
+    bytes but 4194304 were expected for 1024x1024 rgba8"*. The unit tests
+    had not caught it because they only ever used RGBA.
+  * **The fix:** the binding asks the document for its own format and reads
+    the bytes in it. The Python suite now pins it with a grayscale document
+    and a wrong-sized block.
+  * **No format change.** The bytes the format stores are unchanged; only
+    the binding's reading of a caller's buffer changed.
 
 * **The file-backed source now validates a file exactly the way the
   in-memory decoder does.** Two checks were missing from `FileSource`:

@@ -8,19 +8,19 @@
 #![forbid(unsafe_code)]
 
 mod args;
-mod convert;
 mod size;
 
 use std::process::ExitCode;
 
 use args::Args;
-use convert::FileKind;
 use vpng_container::{canonical_digest, to_hex, Header};
 use vpng_core::{Error, Limits, Rect, Result};
 use vpng_decoder::Document;
 use vpng_encoder::parallel::ParallelOptions;
 use vpng_encoder::stream::encode_to_file;
 use vpng_encoder::EncodeOptions;
+use vpng_image as convert;
+use vpng_image::FileKind;
 
 fn main() -> ExitCode {
     let argv: Vec<String> = std::env::args().skip(1).collect();
@@ -126,34 +126,24 @@ fn write_output_image(args: &Args, path: &str, image: &vpng_core::CanonicalImage
 }
 
 fn parse_codec(text: &str) -> Result<u8> {
-    match text.to_ascii_lowercase().as_str() {
-        "auto" => Ok(vpng_codecs::CODEC_AUTO),
-        "raw" | "0" => Ok(vpng_codecs::CODEC_RAW),
-        "palette" | "1" => Ok(vpng_codecs::CODEC_PALETTE),
-        "rle" | "2" => Ok(vpng_codecs::CODEC_RLE),
-        "predictor" | "3" => Ok(vpng_codecs::CODEC_PREDICTOR),
-        "lz77" | "4" => Ok(vpng_codecs::CODEC_LZ77),
-        "predictor+dictionary" | "predictor-dictionary" | "5" => {
-            Ok(vpng_codecs::CODEC_PREDICTOR_DICTIONARY)
-        }
-        "context-entropy" | "context_adaptive" | "6" => Ok(vpng_codecs::CODEC_CONTEXT_ENTROPY),
-        other => Err(Error::unsupported(format!(
-            "codec `{other}` is not implemented \
+    vpng_codecs::codec_id_by_name(text).ok_or_else(|| {
+        Error::unsupported(format!(
+            "codec `{}` is not implemented \
              (available: auto, raw, palette, rle, predictor, lz77, \
-              predictor+dictionary, context-entropy)"
-        ))),
-    }
+              predictor+dictionary, context-entropy)",
+            text.to_ascii_lowercase()
+        ))
+    })
 }
 
 /// The set of codecs the per-tile selector may choose from.
 fn parse_codec_set(text: &str) -> Result<vpng_codecs::CodecSet> {
-    match text.to_ascii_lowercase().as_str() {
-        "stable" => Ok(vpng_codecs::CodecSet::V0_1),
-        "extended" => Ok(vpng_codecs::CodecSet::V0_3),
-        other => Err(Error::unsupported(format!(
-            "codec set `{other}` is not known (available: stable, extended)"
-        ))),
-    }
+    vpng_codecs::codec_set_by_name(text).ok_or_else(|| {
+        Error::unsupported(format!(
+            "codec set `{}` is not known (available: stable, extended)",
+            text.to_ascii_lowercase()
+        ))
+    })
 }
 
 fn cmd_encode(args: &Args) -> Result<()> {

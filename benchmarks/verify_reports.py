@@ -889,6 +889,123 @@ def check_codecs() -> None:
           "the codec report does not state the lossless property")
 
 
+def check_python() -> None:
+    """Check the Python-binding report against the raw data."""
+    report = (REPO / "docs/P9_PYTHON_REPORT.md").read_text(encoding="utf-8")
+    report = report.replace("−", "-")
+    raw = json.loads(
+        (REPO / "benchmarks/p9_python_results.json").read_text(encoding="utf-8")
+    )
+    manifest = json.loads((REPO / "benchmarks/corpus_manifest.json").read_text(encoding="utf-8"))
+    summary = raw["summary"]
+    images = raw["images"]
+
+    def quoted(value, fmt) -> None:
+        text = format(value, fmt)
+        check(text in report, f"the Python report does not contain the figure {text!r}")
+
+    # ---- the corpus is the corpus ------------------------------------------
+    manifest_ids = {entry["id"] for entry in manifest["images"]}
+    result_ids = {image["id"] for image in images}
+    check(
+        manifest_ids == result_ids,
+        "the manifest and the Python measurement file do not hold the same images",
+    )
+    check(
+        len(images) == manifest["total_images"],
+        f"the Python measurement file holds {len(images)} images, the manifest says "
+        f"{manifest['total_images']}",
+    )
+    quoted(len(images), ",")
+    quoted(len(images), "d")
+
+    # ---- the binding writes the same bytes as the command line ---------------
+    check(
+        summary["identical"] == len(images),
+        f"{summary['identical_differing']} Python files differ from the command line's",
+    )
+    check(
+        summary["check_failures"] == 0,
+        f"{summary['check_failures']} Python-written files failed `vpng check`",
+    )
+    check(
+        summary["verify_failures"] == 0,
+        f"{summary['verify_failures']} Python-written files failed `vpng verify`",
+    )
+    check(
+        summary["deterministic_differing"] == 0,
+        f"{summary['deterministic_differing']} files changed with the worker count",
+    )
+    for image in images:
+        check(
+            image["identical"],
+            f"{image['id']}: the Python file differs from the command line's",
+        )
+        check(
+            image["check_exit"] == 0,
+            f"{image['id']}: the Python-written file failed `vpng check`",
+        )
+        check(
+            image["verify_exit"] == 0,
+            f"{image['id']}: the Python-written file failed `vpng verify`",
+        )
+        check(
+            image["deterministic"],
+            f"{image['id']}: the worker count changed the bytes",
+        )
+
+    # ---- the bytes are the published baseline's ------------------------------
+    check(
+        summary["file_bytes_total"] == 453_767_460,
+        f"the Python total is {summary['file_bytes_total']}, the published stable "
+        "baseline is 453767460",
+    )
+    quoted(summary["file_bytes_total"], ",")
+    baseline = next(
+        (image for image in images if image["id"] == "user-photo-15360x8640"), None
+    )
+    check(baseline is not None, "the 16K photograph is not in the Python measurement")
+    if baseline is not None:
+        check(
+            baseline["python_sha256"]
+            == "d029a7ebc1e0347cb3399ab6f9de9653da5853c96b38d95cddc3b8bb45a14dbf",
+            "the Python 16K digest is not the published P5.2 baseline digest",
+        )
+        check(
+            baseline["file_bytes"] == 124_197_035,
+            f"the Python 16K file is {baseline['file_bytes']} bytes, the published "
+            "baseline is 124197035",
+        )
+        quoted(baseline["file_bytes"], ",")
+        check(
+            baseline["python_sha256"] in report,
+            "the Python report does not contain the 16K digest",
+        )
+
+    # ---- the timings --------------------------------------------------------
+    quoted(summary["cli_ms"]["median"], ",")
+    quoted(summary["python_wall_ms"]["median"], ",")
+    quoted(summary["python_encode_ms"]["median"], ",")
+
+    # ---- the report says what it does and does not claim --------------------
+    check(
+        "included" in report.lower() and "excluded" in report.lower(),
+        "the Python report does not state the memory scope",
+    )
+    check(
+        "PASS" in report and "BLOCKED" in report,
+        "the Python report does not use the gate vocabulary",
+    )
+    check(
+        "lossless" in report.lower() or "exact" in report.lower(),
+        "the Python report does not state the lossless property",
+    )
+    check(
+        "12" in report and "Q12" in report,
+        "the Python report does not answer all twelve questions",
+    )
+
+
 def main() -> int:
     raw = json.loads((REPO / "benchmarks/p3_5_raw_results.json").read_text(encoding="utf-8"))
     report = (REPO / "docs/P3_5_COMPRESSION_RESEARCH_REPORT.md").read_text(encoding="utf-8")
@@ -1134,6 +1251,9 @@ def main() -> int:
 
     # ---- Step 5: the promoted codecs ------------------------------------------
     check_codecs()
+
+    # ---- Phase C: the Python bindings ----------------------------------------
+    check_python()
 
     if problems:
         print(f"{len(problems)} problem(s):")

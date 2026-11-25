@@ -85,18 +85,22 @@ vpng/ (root = E:\VPNG)
 │   ├── vpng-container/            header, directory, checksums, canonical digest
 │   ├── vpng-codecs/               TileCodec trait + Raw/Palette/RLE/Predictor codecs; ids 4-6 reserved
 │   ├── vpng-tiling/               TileGrid, region-to-tile mapping
+│   ├── vpng-image/                PNG and raw conversion: the one place that knows what a PNG means
 │   ├── vpng-encoder/              canonical pixels -> .vpng bytes
 │   ├── vpng-decoder/              .vpng bytes -> full/tile/region pixels
 │   ├── vpng-testkit/              deterministic fixtures + conformance tests
+│   ├── vpng-python/               the PyO3 extension behind the Python package
 │   └── vpng-cli/                  encode/decode/info/check/verify/decode-region/extract-tile
 ├── docs/                          spec, audit, status, threat model, ADRs
 ├── benchmarks/
 │   ├── corpus_manifest.json       provenance, license, dimensions, SHA-256
 │   ├── stress/                    large-image stress harness (Python + PowerShell)
 │   ├── corpus/                    seed corpus assembler + benchmark runner
+│   ├── python/                    the Python-binding measurement drivers
 │   └── results/                   git-ignored JSON/Markdown run output
 ├── corpus-data/                   git-ignored image bytes (provenance in the manifest)
-└── python/                        experiment + corpus + tools skeleton
+├── python/                        the `vpng` package, its tests, and the experiment tooling
+├── pyproject.toml                 the maturin build definition for the extension
 ```
 
 ## 4. Third-party dependencies
@@ -107,7 +111,8 @@ Chosen to be minimal, stable, and audited:
 |-------|---------|----------|-----------|
 | `crc32c` | 0.6 | header, directory, tile checksums | hardware-accelerated, tiny |
 | `sha2` | 0.10 | canonical digest | the roadmap forbids hand-rolling SHA-256 |
-| `png` | 0.17 | CLI PNG I/O only | keeps the core free of image-format code |
+| `png` | 0.17 | PNG I/O, in `vpng-image` | keeps the core free of image-format code |
+| `pyo3` | 0.27 | the Python extension | the binding, not the engine; `abi3-py38` so one wheel covers every CPython from 3.8 |
 
 No dependency is used inside `vpng-core`, `vpng-codecs`, or `vpng-tiling`.
 

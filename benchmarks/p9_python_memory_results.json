@@ -1,0 +1,33 @@
+{
+  "generated": "2026-11-25T13:12:04",
+  "host": {
+    "platform": "Windows-10-10.0.19045-SP0",
+    "python": "3.13.0"
+  },
+  "target": {
+    "id": "user-photo-15360x8640",
+    "width": 15360,
+    "height": 8640,
+    "pixel_format": "rgb8",
+    "canonical_bytes": 398131200,
+    "file_bytes": 124197035
+  },
+  "encode_ms": 69359.077,
+  "edit": {
+    "width": 15360,
+    "height": 8640,
+    "elapsed_ms": 687.935,
+    "tiles_rewritten": 16,
+    "tiles_copied": 2024,
+    "copied_payload_bytes": 123157626,
+    "rewritten_payload_bytes": 957741,
+    "peak_working_set_bytes": 44249088
+  },
+  "target_bytes": 67108864,
+  "peak_working_set_bytes": 44249088,
+  "within_target": true,
+  "memory_scope": {
+    "included": "the whole child process: the CPython interpreter, the extension module, the decoded-tile cache, the undo history, the tile payloads in flight, the rewritten payloads waiting to be written, the container metadata, the stacks and the allocator's bookkeeping",
+    "excluded": "the .vpng file on disk, the operating system's page cache, and the memory of other processes"
+  }
+}

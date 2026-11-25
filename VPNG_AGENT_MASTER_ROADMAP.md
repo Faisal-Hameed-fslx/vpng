@@ -1162,6 +1162,15 @@ with vpng.open_document("output.vpng", cache_bytes=16_000_000) as doc:
 This is a target API. Implement only when the underlying Rust behavior
 exists and is tested.
 
+**Status (2026-11-25):** implemented, with one deliberate difference from the
+proposal — the transaction's `write_region` takes the pixels as the **first**
+positional argument (`tx.write_region(region)`), because the region's own
+shape and position are what the caller already has. The binding also gained
+`encode_pixels`, which takes canonical pixel bytes directly and never writes
+an intermediate PNG, and it **refuses** `lossless=False` rather than ignoring
+it: VPNG has no lossy mode and no lossy fallback. Evidence:
+`docs/P9_PYTHON_REPORT.md`.
+
 ------------------------------------------------------------------------
 
 # 13. Security and robustness
@@ -1473,6 +1482,15 @@ Gate P8:
 
 ## Phase 9 --- Python API and editor integration
 
+**Status (2026-11-25):** the bindings are in and were **measured against the
+command line over the whole 750-image corpus** — **750 of 750** files are
+**byte-identical** to the CLI's, the total is the published stable baseline's,
+all 750 pass `vpng check` and **losslessly** `vpng verify` (**0 failures**),
+and the worker count does not move the bytes. The editing path stays inside
+the memory target: a localized edit of the 16K photograph through Python
+peaks at **44,249,088 bytes** against the 67,108,864-byte target. Evidence:
+`docs/P9_PYTHON_REPORT.md`.
+
 Implement:
 
 -   Stable Python bindings.
@@ -1695,7 +1713,7 @@ and where they belong.
 | Parallel encoding | P5.1 | **Done.** The encoder's per-tile work is independent, so worker threads encode chunks of tiles while a coordinator consumes them in tile order; the serial, parallel and streaming paths assemble the container through one function. Eight workers cut the 16K encode 4.27× (128962.99 ms → 30174.82 ms), and every worker count wrote the same file — one SHA-256 over 144 encode cases. Evidence: `docs/P5_ENCODER_REPORT.md`. |
 | Streaming encoder | P5.1 | **Done.** A `PixelSource` hands the encoder one tile at a time, so a 16K image is encoded without ever being in memory (19,296,256 B resident-set peak). The streamed file is byte-identical to the batch encoder's. `vpng encode` uses it, with `--workers N`. Evidence: `docs/P5_ENCODER_REPORT.md`. |
 | Multi-run benchmark harness | P5.2 | **Done.** Every benchmark case is repeated ten times and reported with a median and a nearest-rank p95, against a sequential baseline measured in the same run, on the corpus's native 16K photograph, over a tile-size × worker-count matrix. The 16K case ran: 120 encodes, eight workers cutting the encode 6.15× (78793.67 ms → 12811.94 ms) with one SHA-256 per tile size across all forty of its runs, and a run-to-run spread of 18.5%–52.4% of the median — which is why every earlier single-run figure in this project could not be compared. The tile size dominates interactive latency: a pan costs 125.87 ms at 1024 against 21.44 ms at 256. Evidence: `docs/P5_BENCH_REPORT.md`, `docs/BENCHMARKS.md` §Method. |
-| Python bindings | P9 | The same engine, not a second implementation of it. |
+| Python bindings | P9 | **Done**, and measured against the command line over the whole 750-image corpus: **750 of 750** files are **byte-identical** to the CLI's, the total is the published stable baseline's (453,767,460 bytes), all 750 pass `vpng check` and **losslessly** `vpng verify` (**0 failures**), and the worker count does not move the bytes. The editing path stays inside the memory target: a localized edit of the 16K photograph through Python peaks at **44,249,088 bytes** against the 67,108,864-byte target. The extension is built with the **stable ABI**, so one wheel covers every CPython from 3.8 onwards, and CI builds it with `maturin` and runs the 45 Python tests. The PNG semantics now live in one shared crate (`crates/vpng-image`) that the CLI and the binding both use. Evidence: `docs/P9_PYTHON_REPORT.md`. |
 | Adaptive tiling and advanced codecs | P7 and P2 | **The tiling is done**, as the same v0.2 format revision: variable tile sizes forming an exact cover of the level, validated before a file is written, measured over the whole 750-image corpus on the same canonical pixels — a compression wash (−0.22% bytes, and it hurts UI screenshots) and half the tiles at the median. **The reserved stable ids 4&#8211;6 are still reserved.** A research codec is promoted only after a specification update, a version bump, a migration policy and compatibility tests. |
 | Graphical UI editor | P11 | A desktop front end over `vpng-view` and `vpng-editing`. No graphical editor exists in this repository yet. |
 | WebAssembly (WASM) package | P12 | A `wasm32` build of the decoder, the viewer and the editor. |

@@ -7,8 +7,9 @@ A lossless, adaptive, tiled, random-access image format and editing engine.
 **Status:** v0.3 container implemented, compiled, and tested; the editing engine
 (P4), the compression research (P3.5), the interactive engine (P5) and the
 parallel/streaming encoder (P5.1) have landed, and so have the preview pyramid
-(P6), the adaptive partition (P7) and the promoted stable codecs 4–6, in two
-format revisions. `cargo build --workspace` and `cargo test --workspace --all-targets`
+(P6), the adaptive partition (P7), the promoted stable codecs 4–6, in two
+format revisions, and the Python bindings (P9). `cargo build --workspace` and
+`cargo test --workspace --all-targets`
 both pass on `stable-x86_64-pc-windows-gnu` rustc
 1.100.0. Large-image stress runs, a 16K memory matrix, an editing benchmark, a
 16K viewing benchmark, a 16K encoding benchmark and a seed-corpus measurement
@@ -72,6 +73,15 @@ are recorded in `docs/BENCHMARKS.md`, `docs/P5_REPORT.md` and
   count wrote the same file** — one SHA-256, checked over 144 encode cases.
   The whole run peaks at 19.3 MB of resident set against the 64 MB target.
   `vpng encode` uses it, with `--workers N`. See `docs/P5_ENCODER_REPORT.md`.
+* A **Python binding** (`crates/vpng-python`, `python/vpng`): a PyO3
+  extension that wraps the same Rust engine the CLI runs, so the two can
+  never disagree about what a file means. Encode, decode, verify, check,
+  info, region reads, and a transactional editor with undo/redo and an
+  atomic save. Measured over the whole 750-image corpus, the Python API
+  writes **byte-identical files to the command line on 750 of 750 images**,
+  and the bytes are the published stable baseline's. A localized edit of a
+  16K picture through Python peaks at **44.2 MB** of working set against
+  the 64 MB target. See `docs/P9_PYTHON_REPORT.md`.
 * A **measurement foundation** (`crates/vpng-validation`): every benchmark
   case is repeated ten times and reported with a **median** and a **p95**,
   not a single figure, against a sequential baseline measured in the same
@@ -81,7 +91,7 @@ are recorded in `docs/BENCHMARKS.md`, `docs/P5_REPORT.md` and
 * Conformance tests: exhaustive round-trip, region-vs-crop, malformed-input
   sweeps, a bounded mutation sweep, golden files, the `default_codec`
   clarification, and a deterministic fuzzing harness over seven targets.
-  447 tests, all passing.
+  447 Rust tests and 45 Python tests, all passing.
 * Layered integrity: `info` (structure only), `check` (every payload CRC32C),
   `verify` (exact pixels against a reference).
 * Measured evidence: large-image stress (up to a 15360×8640 photo and
@@ -102,8 +112,8 @@ are recorded in `docs/BENCHMARKS.md`, `docs/P5_REPORT.md` and
 
 ## What is explicitly not here yet
 
-The Python bindings, the WebAssembly package, HTTP Range streaming, layers and
-masks, GPU-ready payloads, and a frozen v1.0 format. The research-only
+The WebAssembly package, HTTP Range streaming, layers and masks, GPU-ready
+payloads, and a frozen v1.0 format. The research-only
 pipelines that were **not** promoted — the other CARC models and the other
 hybrids — keep their ids in `0x80..=0xFF`: they cannot reach a file, and the
 decoder rejects a file that names one. Coverage-guided fuzzing runs
@@ -166,9 +176,12 @@ container's minor version is **0.3** and the layout did not move with it
 either. The three promoted codecs are worth **−10.46%** bytes over the whole
 corpus with **no image worse**, at **3.44×** the encode time — so the
 extended set is opt-in and the default path's published bytes did not move by
-one. The next steps are the ecosystem: Python, WASM, HTTP Range, layers, GPU
-payloads and the graphical UI, then the release cadence from v0.2 to v0.23 and
-the v1.0 freeze last. See `docs/P8_CODEC_REPORT.md`.
+one. The **Python binding** is done too: the extension writes the same bytes
+as the command line on 750 of 750 corpus images, and the bytes are the
+published stable baseline's. The next steps are the rest of the ecosystem:
+WASM, HTTP Range, layers, GPU payloads and the graphical UI, then the release
+cadence from v0.2 to v0.23 and the v1.0 freeze last. See
+`docs/P8_CODEC_REPORT.md` and `docs/P9_PYTHON_REPORT.md`.
 
 The roadmap also carries a **feature backlog** — a preview pyramid, Python
 bindings, a graphical editor, a WebAssembly package, HTTP Range streaming,
@@ -220,6 +233,30 @@ is **not** an integrity check. Use `check` to validate a file on its own, and
 Exit codes: `0` ok, `2` bad args, `3` unsupported, `4` corrupt, `5` resource
 limit, `6` size limit, `7` verification failed, `8` I/O.
 
+### Python
+
+```bash
+maturin develop --release        # build and install the extension
+python -m unittest discover -s python/tests -v
+```
+
+```python
+import vpng
+
+vpng.encode("input.png", "output.vpng")
+assert vpng.verify("input.png", "output.vpng")
+
+with vpng.open_document("output.vpng") as doc:
+    region = doc.read_region(x=0, y=0, width=512, height=512)
+    with doc.edit() as tx:
+        tx.write_region(region)
+        tx.commit()
+```
+
+The binding uses the **stable ABI**, so one wheel works on every CPython
+from 3.8 onwards. `lossless=False` is **refused**, not ignored: VPNG has no
+lossy mode and no lossy fallback.
+
 ## Layout
 
 ```text
@@ -229,6 +266,7 @@ crates/vpng-codecs      TileCodec trait + Raw, Palette, Run-length, Predictor (i
                          + the promoted LZ77, predictor+dictionary and context-entropy codecs (ids 4-6)
                          + the remaining research-only CARC / hybrid pipelines under src/experimental/
 crates/vpng-tiling      TileGrid and region-to-tile mapping
+crates/vpng-image       PNG and raw conversion: the one place that knows what a PNG means
 crates/vpng-encoder     canonical pixels -> .vpng bytes
 crates/vpng-decoder     .vpng bytes -> full / tile / region pixels
 crates/vpng-source      the streaming reader: container metadata + per-tile payload reads
@@ -240,6 +278,9 @@ crates/vpng-fuzzing     fuzz targets + the deterministic mutation harness
 crates/vpng-validation  memory accounting, the streaming writer, the editing benchmark
 crates/vpng-testkit     deterministic fixtures + conformance tests
 crates/vpng-cli         the `vpng` binary
+crates/vpng-python      the PyO3 extension behind the `vpng` Python package
+python/vpng/            the Python package: the exception hierarchy and the wrappers
+python/tests/           the extension's test suite (standard library only)
 fuzz/                    cargo-fuzz wrappers over the vpng-fuzzing targets
 docs/                   spec, audit, status, threat model, ADRs, milestone reports
 ```

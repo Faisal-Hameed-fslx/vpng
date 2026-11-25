@@ -16,6 +16,7 @@ name: CI
 # * `release`    — the release profile builds.
 # * `python`     — the benchmark and corpus scripts still parse, and the
 #                  milestone reports still match the raw data.
+# * `python-ext` — the native extension builds and its own test suite passes.
 
 on:
   push:
@@ -204,3 +205,43 @@ jobs:
         run: python benchmarks/memory/run_memory.py --help
       - name: The reports must match the raw data
         run: python benchmarks/verify_reports.py
+
+  python-ext:
+    name: python extension
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Create a virtual environment
+        # `maturin develop` installs into a virtual environment, and the
+        # interpreter that `setup-python` provides is not one. The
+        # environment lives in `.venv`, where maturin also finds it.
+        run: python -m venv .venv
+      - name: Install maturin
+        # maturin is the build backend the root `pyproject.toml` names, so
+        # the wheel is built exactly the way a user would build it.
+        run: .venv/bin/python -m pip install --upgrade "maturin>=1.5,<2.0"
+      - name: Build and install the extension
+        # `maturin develop` puts the compiled module on the interpreter's
+        # path. The extension uses the stable ABI, so the same wheel works on
+        # every CPython from 3.8 onwards.
+        run: .venv/bin/maturin develop --release
+      - name: Run the extension test suite
+        # The tests use nothing but the standard library: they write and read
+        # their own PNG files, so the job needs no imaging dependency.
+        run: .venv/bin/python -m unittest discover -s python/tests -v
+      - name: The extension must be importable on its own
+        # `import vpng._vpng` must work without the Python wrapper, so the
+        # module never depends on the wrapper being imported first.
+        run: .venv/bin/python -c "import vpng._vpng as m; print(m.FORMAT_VERSION, m.__version__)"
+      - name: Build the wheel
+        run: .venv/bin/maturin build --release --out dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: python-wheels
+          path: dist
+          if-no-files-found: error

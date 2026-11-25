@@ -11,6 +11,14 @@ __pycache__/
 .venv/
 venv/
 
+# The compiled extension an editable `maturin develop` install drops into the
+# source tree, and the wheels `maturin build` writes. The extension is built
+# from `crates/vpng-python`; the committed artifact is the Rust source.
+python/vpng/_vpng.pyd
+python/vpng/_vpng.so
+python/vpng/_vpng.dylib
+/dist/
+
 # Benchmark raw runs (keep manifests and reports, ignore bulk data)
 /benchmarks/results/*
 !/benchmarks/results/.gitkeep

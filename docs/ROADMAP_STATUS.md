@@ -1,6 +1,6 @@
 # Roadmap status
 
-**Updated:** 2026-11-18
+**Updated:** 2026-11-25
 **Legend:**
 
 * `PASS` — the required test **exists and was executed**, and the observed result
@@ -18,7 +18,7 @@
 | Default host | `x86_64-pc-windows-gnu` |
 | Active toolchain | overridden by `E:\VPNG\rust-toolchain.toml` |
 | `cargo build --workspace` | **exit 0**, `Finished dev profile ... in 3.85s` |
-| `cargo test --workspace --all-targets` | **exit 0**, `418 passed; 0 failed` |
+| `cargo test --workspace --all-targets` | **exit 0**, `447 passed; 0 failed` |
 | `cargo fmt --all --check` | **exit 0**, no diffs |
 | `cargo clippy --workspace --all-targets` | **exit 0**, zero warnings |
 
@@ -48,7 +48,7 @@ No Visual Studio is required: the GNU host ships `rust-lld` and a
 | P6 — 16K and memory engineering | 16K stress; streaming; budgets | **PARTIAL** | A tile-by-tile streaming writer and a 12-case memory matrix now exist: 4096², 8192² and 16384² × {gray8, rgb8, rgba8, rgba16}, **12 PASS / 0 FAIL / 0 BLOCKED**. The 16384×16384 RGBA16 case (2 GiB of canonical pixels) writes in an 8.8 MB heap peak and edits with a 13.2 MB resident-set growth, against a 64 MB target. A bounded cache and a bounded history are implemented. The parallel engine is now measured on a 16K workload: a full viewing run peaks at 47.9 MB of resident set and 43.8 MB of heap against the 64 MB target (`docs/P5_REPORT.md` §3.5). The **streaming encoder** and the **parallel encoder** are both done: `vpng encode` writes through the streaming writer with `--workers N`, one worker and N workers produce the same file byte for byte (144 encode cases), and the streaming writer holds a 1 GiB image to **19,296,256 B** of resident set. **Still open:** a streaming *input* decoder — `vpng encode` still reads the whole input PNG into memory before it encodes. Evidence: `docs/P4_MEMORY_VALIDATION.md`, `docs/P5_ENCODER_REPORT.md`, `benchmarks/p4_memory_results.json`, `benchmarks/p5_view_results.json`, `benchmarks/p5_encode_results.json`. |
 | P7 — compression research | controlled experiments | **PARTIAL** | Eleven codecs were measured on identical pixels and identical tile layouts: the four stable codecs, four context-adaptive residual models (CARC A–D), an LZ77 dictionary codec and three hybrids, with pinned golden vectors for each. Every image was also measured against PNG, WebP lossless and JPEG XL lossless, so every column of the comparison shares one denominator. The results are in `benchmarks/p3_5_raw_results.json` (per-image, per-tile, per-category, per-resolution, aggregate and worst-case) and `benchmarks/p3_5_comparison.csv`. The **750-image corpus now exists** (`benchmarks/corpus_manifest.json`, version 2) and the study has **not** been re-run on it: the eleven-codec comparison is still the nine-image seed, and the research codecs are still unpromoted. Evidence: `docs/P3_5_COMPRESSION_RESEARCH_REPORT.md`, `docs/P5_CORPUS_REPORT.md`. |
 | P8 — 10 MB target evaluation | exact accounting; honest failure | **PARTIAL** | Exact size accounting passes (`size_accounting_is_exact`); refusal is honest and typed (`--max-size 1024` → exit 6 reporting the smallest lossless size 240,148). The **750-image corpus now exists and the per-category success distribution is measured**: 748 of 750 images (99.7%) land under the decimal 10,000,000-byte ceiling — photographs 299/300, screenshots 100/100, pixel art 100/100, scans 100/100, textures 149/150 — and both failures are named (the 16K photograph at 124,197,035 bytes, one 2,048 × 2,048 texture at 11,397,940 bytes). Evidence: `docs/P5_CORPUS_REPORT.md`, `benchmarks/p5_corpus_results.json`. |
-| P9 — Python API | bindings around Rust | **NOT STARTED** | CLI-driver tooling only. |
+| P9 — Python API | bindings around Rust | **PASS** | The binding exists: a PyO3 extension (`crates/vpng-python`) and a Python package (`python/vpng`) that wrap the **same Rust engine** the CLI runs. It was **measured**, not asserted: over the **whole 750-image corpus** the Python API's file is **byte-identical** to the command line's on **750 of 750 images**, and the total is the published stable baseline's (**453,767,460** bytes) — the 16K photograph's digest is the P5.2 tile-256 baseline's. All 750 Python-written files pass `vpng check` and **losslessly** `vpng verify` (**0 failures**), and the worker count does not move the bytes (750 of 750 digests match). A localized edit of the 16K photograph through Python peaks at **44,249,088 bytes** of working set against the 67,108,864-byte target. The surface is `encode`, `encode_pixels`, `decode`, `decode_to_bytes`, `decode_region`, `verify`, `check`, `info`, and a transactional `open_document` editor with undo/redo and an atomic save; `lossless=False` is **refused**, never ignored. The extension uses the **stable ABI** (`abi3-py38`), so one wheel works on every CPython from 3.8 onwards, and a dedicated CI job builds it with `maturin` and runs the 45 Python tests. The PNG and raw conversion moved into a shared crate (`crates/vpng-image`) so the CLI and the binding cannot disagree about what a PNG means. Evidence: `docs/P9_PYTHON_REPORT.md`, `benchmarks/p9_python_results.json`, `benchmarks/p9_python_memory_results.json`. |
 | P10 — hardening and v1.0 | fuzzing; freeze | **PARTIAL** | A deterministic mutation harness over 7 targets runs in CI (200,000 iterations × 7 targets = 1,400,000 executions, 0 findings), and the 7 `cargo-fuzz` targets ran **coverage-guided in CI on Linux** (run 44264162940: 132,429,711 executions, 0 findings). A second run (44266490454) **found a real defect** — `Header::parse` accepted a zero-dimension header that `Header::to_bytes` refused to serialize — which is fixed and pinned by a regression test, and a third run (44274770109) re-verified the fix (78,850,985 executions, 0 findings). The coverage-guided fuzzer cannot run on this Windows-GNU host — the toolchain and `cargo-fuzz` install and run, but the AddressSanitizer runtime, LLVM's MSVC-only libFuzzer Windows build and rustc's ELF-only coverage module each stop it there — and the format is not frozen. |
 
 ### 2.1 The forward plan (2026-11-18) and how it maps onto the phases above
@@ -70,7 +70,7 @@ already been done.
 | P7 — adaptive tiling | variable tile dimensions and spatially adaptive layouts | P3 | **CLOSED** (2026-11-21): the variable-size partition is in the container and measured. A level's tiles are now an **exact partition** of the level's rectangle — every pixel covered once — validated by a sweep-line check before a file is written, with the partition representation shared by the encoder, the decoder, the viewer and the editing engine. The **whole 750-image corpus** was encoded both ways on the same canonical pixels: adaptive tiling is a **compression wash** — 452,762,594 bytes against the uniform grid's 453,767,460 (−0.22%), 330 images smaller, 241 larger, 179 identical — and it **hurts UI screenshots** (69 of 100 grow). What it does deliver is **half the tiles at the median** (4 → 2), a smaller directory and fewer requests to serve a region. All 750 adaptive files decode exactly and pass `vpng check`. Evidence: `docs/P6_P7_REPORT.md`, `docs/decisions/ADR-0014-levels-and-partitions.md`, `benchmarks/p7_adaptive_results.json` |
 | P7.5 — promoting the stable codecs 4–6 | turn the three measured research codecs into stable ids, with a format revision, a migration policy and compatibility tests | P2 (the codec table) and the v0.5–v0.7 release rows | **CLOSED** (2026-11-22): the three codecs are promoted under exactly the ids ADR-0004 reserved for them — id 4 `lz77`, id 5 `predictor+dictionary`, id 6 `context-entropy` — and the format's minor version goes to **3**. The revision changes **one rule** and moves no bytes: a directory entry may name id 4, 5 or 6 only if the file's minor version is 3 or newer, and the version states what the file **contains** (a file that ends up using only the original four stays v0.1). Measured over the **whole 750-image corpus** with the production encoder, the extended set writes **−10.46%** bytes — 453,767,460 → 406,294,626 — with **643 images smaller, 107 equal and 0 larger**, and all 1,500 files pass `vpng check` and `vpng verify`. The cost is stated: **3.44×** the encode time, so the extended set stays **opt-in** (`--codec-set extended`) and the default path's bytes did not move — 750 of 750 stable files match the P5 corpus baseline, and the 16K photograph's digest is the P5.2 baseline's. The research ids `0x80..=0xFF` still cannot reach a file. Evidence: `docs/P8_CODEC_REPORT.md`, `docs/VPNG_SPEC_0_3.md`, `docs/decisions/ADR-0015-promoting-codecs-4-to-6.md`, `benchmarks/p8_codec_production_results.json` |
 | P8 — production validation | the 750-image corpus, multiple platforms, 16K workloads | P8 | PARTIAL (the corpus exists and is measured; other platforms and 16K workloads are not) |
-| P9 — Python bindings and integration | expose the stable engine to other applications | P9 | NOT STARTED |
+| P9 — Python bindings and integration | expose the stable engine to other applications | P9 | **CLOSED** (2026-11-25): the binding is in and it was **measured against the command line over the whole 750-image corpus** — **750 of 750** files are **byte-identical** to the CLI's, the total is the published stable baseline's (453,767,460 bytes), all 750 pass `vpng check` and **losslessly** `vpng verify` (**0 failures**), and the worker count does not move the bytes. The editing path stays inside the memory target: a localized edit of the 16K photograph through Python peaks at **44,249,088 bytes** against the 67,108,864-byte target. The extension is built with the **stable ABI**, so one wheel covers every CPython from 3.8 onwards, and CI builds it with `maturin` and runs the 45 Python tests. The PNG semantics now live in one shared crate (`crates/vpng-image`) that the CLI and the binding both use. Evidence: `docs/P9_PYTHON_REPORT.md` |
 | P10 — format freeze and release | compatibility guarantees, security audit, v1.0 | P10 | PARTIAL (the format is not frozen) |
 | P11 — graphical viewer and editor | a desktop UI over `vpng-view` and `vpng-editing` | P9 (the binding surface) and P5 | NOT STARTED |
 | P12 — WebAssembly package | the decoder, the viewer and the editor in a browser | P9 | NOT STARTED |
@@ -91,7 +91,7 @@ not lost.
 | Multiresolution preview pyramid (mipmaps) | already in the roadmap | **P6** | DONE | The pyramid is in the container: more than one grid of tiles, the level a reader should fetch marked in the directory entry's `flags`, and a rule that picks the level. The format revision is **v0.1 → v0.2** — the header and the directory entry keep their layout, the golden fixtures do not move, and the default path still writes v0.1 bytes. Measured on the corpus's own 16K photograph: the whole picture in 197.94 ms at 1/64 scale against 13062.32 ms at full resolution, for +32.7% bytes and +44.2% encode time. Evidence: `docs/P6_P7_REPORT.md`, `docs/VPNG_SPEC_0_2.md`. |
 | Parallel tile decoding | already in the roadmap | **P5** | **DONE** | All six stages are done: the streaming reader (`vpng-source`), the bounded scheduler, the parallel worker pool, the predictive prefetch, and the acceptance benchmark. The 16K RGBA8 acceptance case **ran**: the first viewport takes 63.56 ms against the sequential baseline's 118.96 ms, only 16 of 4,096 tiles are decoded, and the whole run peaks at 47.9 MB of resident set against the 64 MB target. A 144-case matrix asserts every parallel tile is byte-identical to the sequential decoder's. Prefetch is measured, not assumed — it helps at 16K and does not help at 2K, and both runs are kept. Evidence: `docs/P5_REPORT.md`, `benchmarks/p5_view_results.json`, `benchmarks/p5_view_results_small.json`. |
 | Streaming reader and viewport priority | already in the roadmap | **P5** | DONE for local files | `crates/vpng-source` and the scheduler in `crates/vpng-view`. The proposal also suggested HTTP Range streaming, which is tracked separately as **P13**. |
-| Python bindings | already in the roadmap | **P9** | NOT STARTED | Native bindings returning NumPy arrays over the same engine, not a re-implementation of it. |
+| Python bindings | already in the roadmap | **P9** | **DONE** | Native bindings over the same engine, not a re-implementation of it. The PyO3 extension and the `vpng` Python package expose `encode`, `encode_pixels`, `decode`, `decode_to_bytes`, `decode_region`, `verify`, `check`, `info`, and a transactional editor with region writes, undo/redo and an atomic save. Measured over the whole 750-image corpus, the Python API writes **byte-identical files to the command line on 750 of 750 images** — the bytes are the published stable baseline's — with **0 check failures** and **0 verify failures**. A localized edit of the 16K photograph through Python peaks at **44.2 MB** against the 64 MB target. The stable ABI means one wheel works on every CPython from 3.8 onwards. Evidence: `docs/P9_PYTHON_REPORT.md`. |
 | Adaptive tiling and advanced codecs | already in the roadmap | **P7** and **P2** | **DONE** | **Adaptive tiling is done** in the v0.2 format revision: variable tile sizes, an exact-cover partition validated before a file is written, and the whole 750-image corpus measured both ways on the same canonical pixels (−0.22% bytes, half the tiles at the median, 750 of 750 exact). **The reserved stable codec ids 4–6 are now promoted** in the v0.3 format revision: id 4 `lz77`, id 5 `predictor+dictionary` and id 6 `context-entropy` are stable, reachable from a file, and measured over the same 750-image corpus — **−10.46%** bytes, 643 images smaller, 107 equal, **0 larger**, with the default path's bytes unchanged. The research ids `0x80..=0xFF` still cannot reach a file; a decoder rejects one with `UnsupportedFeature`. Evidence: `docs/P6_P7_REPORT.md`, `docs/P8_CODEC_REPORT.md`, `docs/VPNG_SPEC_0_3.md`. |
 | Graphical UI editor | proposed; not previously in the roadmap | **P11** | NOT STARTED | A desktop front end over `vpng-view` and `vpng-editing`. The engines exist; the window does not. No graphical editor exists in this repository today. |
 | WebAssembly (WASM) package | proposed; not previously in the roadmap | **P12** | NOT STARTED | A `wasm32` build of the decoder, the viewer and the editing engine. The constraint is the same as everywhere else: the browser must produce the same pixels, and the file format must not change to suit the browser. |
@@ -302,7 +302,7 @@ profiles, `x86_64-pc-windows-gnu`.
 | Suite | Tests | Result |
 |-------|------:|--------|
 | `vpng-cache` unit | 11 | ok |
-| `vpng-cli` unit | 11 | ok |
+| `vpng-cli` unit | 8 | ok |
 | `vpng-cli` `tests/encode_workers.rs` | 3 | ok |
 | `vpng-cli` `tests/v2_features.rs` | 6 | ok |
 | `vpng-cli` `tests/v3_features.rs` | 7 | ok (the v0.3 surface) |
@@ -318,6 +318,8 @@ profiles, `x86_64-pc-windows-gnu`.
 | `vpng-fuzzing` bin `vpng-fuzz-mutate` | 0 | ok |
 | `vpng-fuzzing` `tests/fuzz_smoke.rs` | 3 | ok |
 | `vpng-fuzzing` `tests/fuzz_regressions.rs` | 3 | ok |
+| `vpng-image` unit | 3 | ok (the PNG and raw conversion, moved from the CLI) |
+| `vpng-python` unit | 0 | ok (the extension is tested from Python) |
 | `vpng-source` unit | 11 | ok |
 | `vpng-view` unit | 38 | ok |
 | `vpng-view` `tests/parallel_matrix.rs` | 1 | ok (144 cases) |
@@ -339,6 +341,18 @@ profiles, `x86_64-pc-windows-gnu`.
 | `vpng-validation` bins | 0 | ok |
 | Doc-tests | 0 | ok |
 | **Total** | **447** | **447 passed, 0 failed** |
+
+**The Python binding adds 45 tests of its own**, run by
+`python -m unittest discover -s python/tests`: the round trip is exact for
+8-bit and 16-bit pixels and for grayscale; the worker count does not change
+the file; the stable and extended codec sets both round-trip; the palette
+codec refuses a picture it cannot hold; `lossless=False` is refused and
+leaves no partial file; a corrupt file raises a `VpngError` that is also a
+`ValueError`; a transaction that is not committed is rolled back; untouched
+tiles are copied rather than re-encoded; and the raw-byte region write uses
+the document's own pixel format. The three unit tests that used to live in
+the CLI's `convert.rs` moved with the code into `crates/vpng-image`, so the
+Rust total did not change.
 
 The 115 new tests are: 52 codec tests (22 LZ77, 14 CARC, 12 hybrids, plus
 the registry and entropy-stage tests), 51 editing tests, 3 fuzzing tests,
@@ -404,6 +418,7 @@ pyramid and adaptive planner, and the editing engine's pyramid commit.
 | 30 | the matched-subset aggregation was empty | the subset filter disqualified an image when a *codec* reported "unsupported", instead of when a *baseline measurement* was missing | the filter now considers only the baselines, so a codec that cannot represent a tile (palette) no longer disqualifies an image, and a baseline tool that is absent from every image disqualifies nothing either |
 | 31 | `cargo fuzz list` printed nothing and `cargo fuzz run <target>` failed with "no targets specified in the manifest" | the fuzz crate's `Cargo.toml` had no `[[bin]]` sections, and cargo-fuzz discovers its targets from the manifest, not from the files in `fuzz_targets/` | seven `[[bin]]` sections were added, one per target |
 | 32 | `cargo fuzz run <target> --fuzz-dir fuzz/corpus` failed with "could not read the manifest file: …\fuzz\corpus\Cargo.toml" | `--fuzz-dir` is cargo-fuzz's *fuzz project* directory (the one holding the fuzz crate's `Cargo.toml`), not the corpus directory; the corpus lives in `<fuzz-dir>/corpus/<target>` | the runner and the CI job now pass `--fuzz-dir fuzz` |
+| 33 | the Python binding's raw-byte region write rejected a grayscale document with "the pixel block is 3145728 bytes but 4194304 were expected for 1024x1024 rgba8" | the binding assumed **RGBA8** for a raw byte block instead of asking the document for its own format, so a write to a grayscale or RGB document was refused for the wrong reason | the binding now reads the bytes in the document's format; the Python suite pins it with a grayscale document and a wrong-sized block |
 
 No defect was found in the container, encoder, or decoder logic itself. The three
 `integrity_check_*` tests were added with the `check` command (5 → 8 decoder
@@ -632,26 +647,27 @@ not just a list.
 * **Two version numberings live side by side, and they are not the same
   thing.** The rows in this table are **product releases** (`v0.2` here is
   the next release). The **format's** minor version lives in the header
-  (bytes 8–9) and has already moved: it is now **0.2**, because the P6/P7
-  milestone landed the preview pyramid and the exact-partition tiling in one
-  revision (`docs/VPNG_SPEC_0_2.md`). That revision moved no field and no
-  offset — the header is still 64 bytes and the directory entry is still
-  40 bytes — and the default encoder path still writes **format 0.1**, so
-  every existing file stays readable and byte-identical. The rows below
-  therefore name a *format* change in the "Format revision?" column, not a
-  release number.
+  (bytes 8–9) and has already moved twice: it is now **0.3**, because the
+  P6/P7 milestone landed the preview pyramid and the exact-partition tiling
+  in one revision (`docs/VPNG_SPEC_0_2.md`) and the P8 milestone promoted the
+  three reserved codecs in another (`docs/VPNG_SPEC_0_3.md`). Neither
+  revision moved a field or an offset — the header is still 64 bytes and the
+  directory entry is still 40 bytes — and the default encoder path still
+  writes **format 0.1**, so every existing file stays readable and
+  byte-identical. The rows below therefore name a *format* change in the
+  "Format revision?" column, not a release number.
 
 | Version | Theme | Compression work in this release | Format revision? | Draws on | State |
 |---|---|---|---|---|---|
 | v0.2 | streaming and parallel engine | extend the encoder's per-tile cost model so `auto` chooses among **all** stable codecs, and measure the change on the 9-image seed corpus | no | P5, P2 | PARTIAL — the streaming and parallel encoder is done (P5.1: one worker and N workers write the same file; the CLI streams to disk with `--workers N`), and the cost-model extension has not been made against the 750-image corpus |
 | v0.3 | adaptive tiling | variable-size tiles give the predictor more context: measure the ratio change against the fixed grid on the same corpus and the same denominator | **yes** — the partition representation | P7 | **DONE as a format revision** (the partition representation shipped in format 0.2 with the P6/P7 milestone) — but the *result* is unfavourable and recorded: adaptive tiling is a compression wash over the 750-image corpus (−0.22% bytes), and it **hurts UI screenshots**. The partition it enables is the point: half the tiles at the median. Evidence: `docs/P6_P7_REPORT.md` |
 | v0.4 | preview pyramid | the pyramid levels are written with the same stable codecs, and the level a reader actually fetches is measured rather than assumed | **yes** — a second grid of tiles | P6 | **DONE as a format revision** (the pyramid shipped in format 0.2 with the P6/P7 milestone): the level index travels in the directory entry's `flags`, the whole picture is available 66× sooner at 1/64 scale, and the cost — +32.7% bytes, +44.2% encode time — is measured and stated. Evidence: `docs/P6_P7_REPORT.md`, `docs/VPNG_SPEC_0_2.md` |
-| v0.5 | stable codec id 4 (LZ77) | implement the reserved LZ77 codec as stable id 4: golden vectors, conformance tests, and a measured ratio against ids 1–3 | **yes** — the codec table | P2 | NOT STARTED |
-| v0.6 | stable codec id 5 (dictionary) | implement predictor + dictionary as stable id 5, with the dictionary scope stated exactly (tile-local, per the ADR) | **yes** — the codec table | P2 | NOT STARTED |
-| v0.7 | stable codec id 6 (context-adaptive entropy) | implement the context-adaptive entropy codec as stable id 6, with the per-tile model cost included in the encoder's choice | **yes** — the codec table | P2 | NOT STARTED |
+| v0.5 | stable codec id 4 (LZ77) | implement the reserved LZ77 codec as stable id 4: golden vectors, conformance tests, and a measured ratio against ids 1–3 | **yes** — the codec table | P2 | **DONE** (the codec shipped in format **0.3** with the P8 milestone: id 4 `lz77` is stable, reachable from a file, and measured over the whole 750-image corpus; a v0.1 or v0.2 file that names it is rejected with `UnsupportedFeature`) |
+| v0.6 | stable codec id 5 (dictionary) | implement predictor + dictionary as stable id 5, with the dictionary scope stated exactly (tile-local, per the ADR) | **yes** — the codec table | P2 | **DONE** (the codec shipped in format **0.3** with the P8 milestone: id 5 `predictor+dictionary` is stable, tile-local as the ADR requires, and measured over the whole 750-image corpus) |
+| v0.7 | stable codec id 6 (context-adaptive entropy) | implement the context-adaptive entropy codec as stable id 6, with the per-tile model cost included in the encoder's choice | **yes** — the codec table | P2 | **DONE** (the codec shipped in format **0.3** with the P8 milestone: id 6 `context-entropy` is stable, it is the selector's most-chosen codec on the corpus — 7,094 of 8,944 tiles — and the model's bounded per-tile cost is stated) |
 | v0.8 | the 750-image corpus | replace the seed corpus with the full one and re-derive the auto-selection thresholds from it; every ratio is reported against PNG, WebP lossless and JPEG XL lossless | no | P8, P7 | **PARTIAL** (the corpus exists and is measured — 750 images, a SHA-256 manifest, and the per-category distribution with PNG, WebP lossless and JPEG XL lossless on the same canonical pixels; the **auto-selection thresholds have not been re-derived** from it yet, which is the v0.20 row) |
 | v0.9 | network streaming | add a `recompress` operation: re-encode a file's payloads with the current best codec set, changing the bytes and not the pixels | no | P13, P2 | NOT STARTED |
-| v0.10 | Python bindings | expose the per-tile codec choice and the measured ratio through the API, so a pipeline can select codecs itself against the same numbers | no | P9 | NOT STARTED |
+| v0.10 | Python bindings | expose the per-tile codec choice and the measured ratio through the API, so a pipeline can select codecs itself against the same numbers | no | P9 | **DONE** (the PyO3 extension and the `vpng` package landed with the P9 milestone: `EncodeResult.codec_ids` is the per-tile choice and `EncodeResult.compression_ratio` is the measured ratio, and the whole API writes **byte-identical files to the command line on 750 of 750 corpus images**) |
 | v0.11 | graphical viewer | the viewer reports the codec mix of the file it opened, so a user can see why the file is the size it is | no | P11 | NOT STARTED |
 | v0.12 | WebAssembly package | measure decode time per codec **on the target device** and re-tune the auto-selection thresholds for that device; the build ships the stable codecs only | no | P12 | NOT STARTED |
 | v0.13 | graphical editor | the editor shows a dry-run comparison — what the file would weigh under a different codec — before the commit, measured with the encoder's own selection function | no | P11 | NOT STARTED |

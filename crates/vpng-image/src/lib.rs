@@ -1,4 +1,4 @@
-//! Image and container conversion for the CLI.
+//! Image and container conversion for VPNG.
 //!
 //! Three external representations are understood:
 //!
@@ -7,14 +7,35 @@
 //!   canonical little-endian order on read and back on write.
 //! * `.raw`  — headerless canonical pixel bytes; requires explicit `--width`,
 //!   `--height`, and `--format`. Useful for tests without image dependencies.
+//!
+//! This module is the **only** place in the workspace that knows how a PNG
+//! maps onto canonical pixels. The command line and the Python extension both
+//! use it, so they cannot disagree about what a PNG means.
+//!
+//! # The rules
+//!
+//! * PNG is **big-endian** for 16-bit samples; canonical pixels are
+//!   **little-endian**. The two are swapped on the way in and on the way out.
+//! * An explicit alpha channel is kept as it is. PNG's `tRNS` transparency is
+//!   **not** expanded into an alpha channel: a grayscale or RGB PNG with
+//!   `tRNS` stays a grayscale or RGB image.
+//! * An indexed PNG is **refused**, not expanded. Expanding it would invent
+//!   pixels the file does not state.
+//! * A bit depth below 8 is **refused**. The canonical formats are 8 and 16
+//!   bits per channel.
+//! * A PNG is never written with fewer channels than it was read with: alpha
+//!   is preserved.
 
 use vpng_core::{BitsPerChannel, CanonicalImage, ColorModel, Error, Limits, PixelFormat, Result};
 
-/// External file kinds the CLI recognizes.
+/// External file kinds VPNG recognizes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileKind {
+    /// The native `.vpng` container.
     Vpng,
+    /// A PNG image.
     Png,
+    /// Headerless canonical pixel bytes.
     Raw,
 }
 

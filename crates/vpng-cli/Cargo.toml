@@ -18,4 +18,4 @@ vpng-codecs.workspace = true
 vpng-encoder.workspace = true
 vpng-decoder.workspace = true
 vpng-tiling.workspace = true
-png.workspace = true
+vpng-image.workspace = true
