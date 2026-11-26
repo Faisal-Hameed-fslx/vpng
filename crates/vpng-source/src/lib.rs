@@ -11,8 +11,8 @@
 //! * [`ContainerMeta`] is what the file *says*: the header, the directory,
 //!   the tile grid and the pixel format. It is immutable and cheap to share.
 //! * [`ByteSource`] is where the bytes come from: a file on disk today, an
-//!   HTTP object store tomorrow. A source says how long the object is and
-//!   how to fetch a range of it.
+//!   HTTP object store tomorrow, a buffer in memory. A source says how long
+//!   the object is and how to fetch a range of it.
 //! * [`RangeReader`] is the reader over a source: it can fetch a tile's
 //!   payload, decode it, and count the bytes it has read. [`TileReader`] is
 //!   the reader over a local file, which is what the command line and the
@@ -50,4 +50,4 @@ mod source;
 mod tests;
 
 pub use reader::{ContainerMeta, RangeReader, TileReader};
-pub use source::{ByteSource, FileSource};
+pub use source::{ByteSource, FileSource, MemorySource};

@@ -8,7 +8,8 @@ A lossless, adaptive, tiled, random-access image format and editing engine.
 (P4), the compression research (P3.5), the interactive engine (P5) and the
 parallel/streaming encoder (P5.1) have landed, and so have the preview pyramid
 (P6), the adaptive partition (P7), the promoted stable codecs 4–6, in two
-format revisions, and the Python bindings (P9). `cargo build --workspace` and
+format revisions, the Python bindings (P9), the HTTP Range reader (P10) and
+the WebAssembly package (P11). `cargo build --workspace` and
 `cargo test --workspace --all-targets`
 both pass on `stable-x86_64-pc-windows-gnu` rustc
 1.100.0. Large-image stress runs, a 16K memory matrix, an editing benchmark, a
@@ -95,6 +96,19 @@ are recorded in `docs/BENCHMARKS.md`, `docs/P5_REPORT.md` and
   directory cost **0.0901%** of the corpus, and a 1024×1024 viewport of the
   16K photograph costs **0.8369%** of that file. No format change was needed
   or made. See `docs/P10_HTTP_REPORT.md`.
+* A **WebAssembly package** (`crates/vpng-wasm`, `wasm/`): the browser's copy
+  of the engine, with **no new dependency** and no `wasm-bindgen` — the
+  module exports a raw `extern "C"` ABI that any WebAssembly runtime can
+  call, and `wasm/vpng.js` is a hundred lines of ordinary JavaScript on top
+  of it. It is the **same** decoder the command line runs: the same
+  `vpng-decoder`, the same `vpng-codecs`, the same shared container
+  validation. Measured over the whole 750-image corpus, the module's
+  canonical digest for a region is the command line's on **750 of 750
+  images**, on the whole-file path **and** on the range path, and the range
+  path moves **exactly** the bytes the native streaming reader moves. The
+  module was **slower** than the native reader — by about 10% at the median —
+  and that is reported rather than hidden. No format change was needed or
+  made. See `docs/P11_WASM_REPORT.md`.
 * A **measurement foundation** (`crates/vpng-validation`): every benchmark
   case is repeated ten times and reported with a **median** and a **p95**,
   not a single figure, against a sequential baseline measured in the same
@@ -104,7 +118,7 @@ are recorded in `docs/BENCHMARKS.md`, `docs/P5_REPORT.md` and
 * Conformance tests: exhaustive round-trip, region-vs-crop, malformed-input
   sweeps, a bounded mutation sweep, golden files, the `default_codec`
   clarification, and a deterministic fuzzing harness over seven targets.
-  460 Rust tests and 45 Python tests, all passing.
+  468 Rust tests, 45 Python tests and 13 WebAssembly tests, all passing.
 * Layered integrity: `info` (structure only), `check` (every payload CRC32C),
   `verify` (exact pixels against a reference).
 * Measured evidence: large-image stress (up to a 15360×8640 photo and
@@ -125,9 +139,11 @@ are recorded in `docs/BENCHMARKS.md`, `docs/P5_REPORT.md` and
 
 ## What is explicitly not here yet
 
-The WebAssembly package, layers and masks, GPU-ready
+Layers and masks, GPU-ready
 payloads, and a frozen v1.0 format. (HTTP Range streaming **is** here — see
-`docs/P10_HTTP_REPORT.md`.) The research-only
+`docs/P10_HTTP_REPORT.md` — and so is the **WebAssembly decoder**, see
+`docs/P11_WASM_REPORT.md`; the module does not encode and does not edit yet.)
+The research-only
 pipelines that were **not** promoted — the other CARC models and the other
 hybrids — keep their ids in `0x80..=0xFF`: they cannot reach a file, and the
 decoder rejects a file that names one. Coverage-guided fuzzing runs
@@ -196,12 +212,16 @@ published stable baseline's. The **HTTP Range reader** is done as well: the
 byte source became an abstraction, so the local and the network readers are
 the same code path, and a container can be read without downloading it — the
 16K photograph's viewport costs **0.8369%** of that file, and the HTTP read
-returns exactly the local pixels on **750 of 750** corpus images. The next
+returns exactly the local pixels on **750 of 750** corpus images. The
+**WebAssembly package** is done as well: the module is the same decoder with
+a raw C ABI, its pixels are the command line's on **750 of 750** corpus
+images, and its range path moves exactly the bytes the native reader moves.
+The next
 steps are the rest of the ecosystem:
-WASM, layers, GPU payloads and the graphical UI, then the release
+layers, GPU payloads and the graphical UI, then the release
 cadence from v0.2 to v0.23 and the v1.0 freeze last. See
-`docs/P8_CODEC_REPORT.md`, `docs/P9_PYTHON_REPORT.md` and
-`docs/P10_HTTP_REPORT.md`.
+`docs/P8_CODEC_REPORT.md`, `docs/P9_PYTHON_REPORT.md`,
+`docs/P10_HTTP_REPORT.md` and `docs/P11_WASM_REPORT.md`.
 
 The roadmap also carries a **feature backlog** — a preview pyramid, Python
 bindings, a graphical editor, a WebAssembly package, HTTP Range streaming,
@@ -292,6 +312,29 @@ clear error rather than quietly turned into a whole-file download. The two
 commands accept `--json`, so a caller can read the byte counts and the
 request counts without parsing the text.
 
+### WebAssembly
+
+```bash
+rustup target add wasm32-unknown-unknown
+cargo build --release --target wasm32-unknown-unknown -p vpng-wasm
+cargo build --release -p vpng-cli
+node --test wasm/test/vpng.test.mjs
+```
+
+```javascript
+import { Vpng } from './wasm/vpng.js';
+
+const vpng = await Vpng.instantiate(await fetch('vpng_wasm.wasm'));
+const image = vpng.open(containerBytes);
+const pixels = vpng.decodeRegion(image, 0, 0, 1024, 1024);
+```
+
+The module exports a **raw `extern "C"` ABI** — no `wasm-bindgen`, no
+generated glue and no new dependency — so any WebAssembly runtime can call
+it. `wasm/vpng.js` is the optional JavaScript wrapper. The module is a
+**decoder**: it reads containers, it does not write them. See
+`wasm/README.md` and `docs/P11_WASM_REPORT.md`.
+
 ## Layout
 
 ```text
@@ -315,9 +358,11 @@ crates/vpng-validation  memory accounting, the streaming writer, the editing ben
 crates/vpng-testkit     deterministic fixtures + conformance tests
 crates/vpng-cli         the `vpng` binary
 crates/vpng-http        the HTTP Range source: a container fetched over the network
+crates/vpng-wasm        the WebAssembly decoder: the browser's copy of the engine
 crates/vpng-python      the PyO3 extension behind the `vpng` Python package
 python/vpng/            the Python package: the exception hierarchy and the wrappers
 python/tests/           the extension's test suite (standard library only)
+wasm/                   the JavaScript wrapper, the module's test suite and its README
 fuzz/                    cargo-fuzz wrappers over the vpng-fuzzing targets
 docs/                   spec, audit, status, threat model, ADRs, milestone reports
 ```

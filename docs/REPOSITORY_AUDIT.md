@@ -91,6 +91,7 @@ vpng/ (root = E:\VPNG)
 │   ├── vpng-testkit/              deterministic fixtures + conformance tests
 │   ├── vpng-python/               the PyO3 extension behind the Python package
 │   ├── vpng-http/                 the HTTP Range source: a container fetched over the network
+│   ├── vpng-wasm/                 the WebAssembly decoder: a raw `extern "C"` ABI, no wasm-bindgen
 │   └── vpng-cli/                  encode/decode/info/check/verify/decode-region/extract-tile
 │                                    + http-info/http-decode-region
 ├── docs/                          spec, audit, status, threat model, ADRs
@@ -100,9 +101,11 @@ vpng/ (root = E:\VPNG)
 │   ├── corpus/                    seed corpus assembler + benchmark runner
 │   ├── python/                    the Python-binding measurement drivers
 │   ├── http/                      the HTTP Range measurement driver
+│   ├── wasm/                      the WebAssembly measurement driver
 │   └── results/                   git-ignored JSON/Markdown run output
 ├── corpus-data/                   git-ignored image bytes (provenance in the manifest)
 ├── python/                        the `vpng` package, its tests, and the experiment tooling
+├── wasm/                          the JavaScript wrapper, the module's tests, its README
 ├── pyproject.toml                 the maturin build definition for the extension
 ```
 
@@ -119,6 +122,11 @@ Chosen to be minimal, stable, and audited:
 | `ureq` | 3.2 | the HTTP Range source | a blocking client, so no async runtime enters the workspace; rustls, so no system OpenSSL is needed; pinned to 3.2 because 3.3 needs rustc 1.85 and the workspace's MSRV is 1.74 |
 
 No dependency is used inside `vpng-core`, `vpng-codecs`, or `vpng-tiling`.
+
+The WebAssembly package adds **none**: it is a raw `extern "C"` ABI over the
+crates that are already here, so `cargo build --release --target
+wasm32-unknown-unknown -p vpng-wasm` needs no `wasm-bindgen`, no code
+generation and no extra toolchain.
 
 ## 5. Risks and unknowns carried into the next phase
 

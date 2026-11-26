@@ -17,6 +17,8 @@ name: CI
 # * `python`     — the benchmark and corpus scripts still parse, and the
 #                  milestone reports still match the raw data.
 # * `python-ext` — the native extension builds and its own test suite passes.
+# * `wasm`       — the WebAssembly module builds for `wasm32` and produces the
+#                  command line's pixels.
 #
 # The HTTP Range crate and the WebAssembly package are covered by the
 # ordinary `build`, `clippy` and `test` jobs: they are workspace members
@@ -209,6 +211,8 @@ jobs:
         run: python benchmarks/memory/run_memory.py --help
       - name: The HTTP runner must show its help
         run: python benchmarks/http/run_http_bench.py --help
+      - name: The WebAssembly runner must show its help
+        run: python benchmarks/wasm/run_wasm_bench.py --help
       - name: The reports must match the raw data
         run: python benchmarks/verify_reports.py
 
@@ -251,3 +255,31 @@ jobs:
           name: python-wheels
           path: dist
           if-no-files-found: error
+
+  wasm:
+    name: wasm module
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Build the module for wasm32
+        # The module is a plain `cdylib`: the target and a release build are
+        # the whole toolchain. There is no `wasm-pack` and no code generation.
+        run: cargo build --release --target wasm32-unknown-unknown -p vpng-wasm
+      - name: Build the command line
+        # The tests compare the module against the real binary, so the binary
+        # has to exist.
+        run: cargo build --release -p vpng-cli
+      - name: Run the module's test suite
+        # The tests encode an image with the command line, decode it with
+        # both, and compare the canonical digests: the module's pixels are
+        # the command line's pixels.
+        run: node --test wasm/test/vpng.test.mjs
+      - name: The module must export its functions
+        run: node wasm/check_exports.mjs

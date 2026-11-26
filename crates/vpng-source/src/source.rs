@@ -3,13 +3,13 @@
 //! The reader's job is to fetch a header, a directory and a tile payload at
 //! a time. *Where* those bytes come from is a separate question: a file on
 //! disk, an HTTP object store, an in-memory buffer. This module names that
-//! question and answers it for the local file.
+//! question and answers it for the local file and for the buffer.
 
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
-use vpng_core::Result;
+use vpng_core::{Error, Result};
 
 /// A source of byte ranges.
 ///
@@ -102,5 +102,71 @@ impl ByteSource for FileSource {
 
     fn describe(&self) -> String {
         self.path.display().to_string()
+    }
+}
+
+/// A source backed by a buffer that is already in memory.
+///
+/// This is the source the WebAssembly package uses: a browser fetches a
+/// container's bytes into the module's linear memory, and the reader pulls
+/// its ranges out of them. It is also the source a caller uses when the whole
+/// container is in hand — a server that already has the bytes, a test, or a
+/// pipeline that decoded a file once and wants to read it many times.
+///
+/// The buffer is copied into the source, so the source owns its bytes and
+/// the reader may borrow from it for as long as it likes.
+#[derive(Debug, Clone)]
+pub struct MemorySource {
+    bytes: Vec<u8>,
+}
+
+impl MemorySource {
+    /// Take a buffer as the source.
+    pub fn new(bytes: Vec<u8>) -> Self {
+        MemorySource { bytes }
+    }
+
+    /// The source's bytes.
+    pub fn as_slice(&self) -> &[u8] {
+        &self.bytes
+    }
+
+    /// The number of bytes in the source.
+    pub fn len(&self) -> usize {
+        self.bytes.len()
+    }
+
+    /// Whether the source is empty.
+    pub fn is_empty(&self) -> bool {
+        self.bytes.is_empty()
+    }
+}
+
+impl ByteSource for MemorySource {
+    fn length(&mut self) -> Result<u64> {
+        Ok(self.bytes.len() as u64)
+    }
+
+    fn read_at(&mut self, offset: u64, len: usize) -> Result<Vec<u8>> {
+        let end = offset
+            .checked_add(len as u64)
+            .ok_or_else(|| Error::invalid(format!("the byte range {offset}..{len} overflows")))?;
+        let total = self.bytes.len() as u64;
+        if end > total {
+            return Err(Error::invalid(format!(
+                "the range {offset}..{end} is outside the {total} bytes the buffer has"
+            )));
+        }
+        Ok(self.bytes[offset as usize..end as usize].to_vec())
+    }
+
+    fn fork(&self) -> Result<Self> {
+        Ok(MemorySource {
+            bytes: self.bytes.clone(),
+        })
+    }
+
+    fn describe(&self) -> String {
+        format!("{} bytes in memory", self.bytes.len())
     }
 }

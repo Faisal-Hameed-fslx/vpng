@@ -11,6 +11,7 @@ members = [
     "crates/vpng-decoder",
     "crates/vpng-source",
     "crates/vpng-http",
+    "crates/vpng-wasm",
     "crates/vpng-view",
     "crates/vpng-editing",
     "crates/vpng-fuzzing",
@@ -41,6 +42,7 @@ vpng-encoder = { path = "crates/vpng-encoder" }
 vpng-decoder = { path = "crates/vpng-decoder" }
 vpng-source = { path = "crates/vpng-source" }
 vpng-http = { path = "crates/vpng-http" }
+vpng-wasm = { path = "crates/vpng-wasm" }
 vpng-view = { path = "crates/vpng-view" }
 vpng-editing = { path = "crates/vpng-editing" }
 vpng-fuzzing = { path = "crates/vpng-fuzzing" }

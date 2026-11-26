@@ -1162,6 +1162,130 @@ def check_http() -> None:
     )
 
 
+def check_wasm() -> None:
+    """Check the WebAssembly report against the raw data."""
+    report = (REPO / "docs/P11_WASM_REPORT.md").read_text(encoding="utf-8")
+    report = report.replace("−", "-")
+    raw = json.loads(
+        (REPO / "benchmarks/p11_wasm_results.json").read_text(encoding="utf-8")
+    )
+    manifest = json.loads((REPO / "benchmarks/corpus_manifest.json").read_text(encoding="utf-8"))
+    summary = raw["summary"]
+    images = raw["images"]
+
+    def quoted(value, fmt) -> None:
+        text = format(value, fmt)
+        check(text in report, f"the WebAssembly report does not contain the figure {text!r}")
+
+    # ---- the corpus is the corpus ---------------------------------------------
+    manifest_ids = {entry["id"] for entry in manifest["images"]}
+    result_ids = {image["id"] for image in images}
+    check(
+        manifest_ids == result_ids,
+        "the manifest and the WebAssembly measurement file do not hold the same images",
+    )
+    check(
+        len(images) == manifest["total_images"],
+        f"the WebAssembly measurement file holds {len(images)} images, the manifest says "
+        f"{manifest['total_images']}",
+    )
+    quoted(len(images), ",")
+    quoted(len(images), "d")
+
+    # ---- the module's pixels are the native pixels ----------------------------
+    check(
+        summary["identical"] == len(images),
+        f"{summary['identical_differing']} WebAssembly reads differ from the native read",
+    )
+    check(
+        summary["range_identical"] == len(images),
+        f"{summary['range_identical_differing']} WebAssembly range reads differ from the "
+        "native read",
+    )
+    for image in images:
+        check(
+            image["whole_identical"],
+            f"{image['id']}: the WebAssembly read differs from the native read",
+        )
+        check(
+            image["range_identical"],
+            f"{image['id']}: the WebAssembly range read differs from the native read",
+        )
+        check(
+            image["native_sha256"] == image["wasm_whole_sha256"] == image["wasm_range_sha256"],
+            f"{image['id']}: the three digests are not the same",
+        )
+
+    # ---- the bytes are the published baseline's -------------------------------
+    check(
+        summary["object_bytes_total"] == 453_767_460,
+        f"the WebAssembly corpus total is {summary['object_bytes_total']}, the published "
+        "stable baseline is 453767460",
+    )
+    quoted(summary["object_bytes_total"], ",")
+
+    # ---- the 16K photograph ---------------------------------------------------
+    baseline = next(
+        (image for image in images if image["id"] == "user-photo-15360x8640"), None
+    )
+    check(baseline is not None, "the 16K photograph is not in the WebAssembly measurement")
+    if baseline is not None:
+        check(
+            baseline["file_bytes"] == 124_197_035,
+            f"the 16K file is {baseline['file_bytes']} bytes, the published baseline is "
+            "124197035",
+        )
+        quoted(baseline["file_bytes"], ",")
+        check(
+            baseline["wasm_range_bytes"] < baseline["file_bytes"],
+            "the 16K viewport fetched the whole file",
+        )
+        quoted(baseline["wasm_range_bytes"], ",")
+        quoted(baseline["range_fraction"] * 100, ".4f")
+        quoted(baseline["wasm_range_requests"], "d")
+        quoted(baseline["wasm_range_payload_bytes"], ",")
+
+    # ---- the range path fetches what the viewport needs -----------------------
+    quoted(summary["range_bytes_total"], ",")
+    quoted(summary["range_fraction"] * 100, ".3f")
+    quoted(summary["native_bytes_read_total"], ",")
+
+    # ---- the timings ----------------------------------------------------------
+    quoted(summary["wasm_whole_ms"]["median"], ",")
+    quoted(summary["wasm_range_ms"]["median"], ",")
+    quoted(summary["native_memory_ms"]["median"], ",")
+    quoted(summary["native_file_ms"]["median"], ",")
+
+    # ---- the per-category table -----------------------------------------------
+    for category, bucket in sorted(summary["by_category"].items()):
+        quoted(bucket["images"], "d")
+        quoted(bucket["object_bytes"], ",")
+        quoted(bucket["range_bytes"], ",")
+        quoted(bucket["range_fraction"] * 100, ".4f")
+
+    # ---- the report says what it does and does not claim ----------------------
+    check(
+        "included" in report.lower() and "excluded" in report.lower(),
+        "the WebAssembly report does not state the measurement scope",
+    )
+    check(
+        "PASS" in report and "BLOCKED" in report,
+        "the WebAssembly report does not use the gate vocabulary",
+    )
+    check(
+        "lossless" in report.lower() or "exact" in report.lower(),
+        "the WebAssembly report does not state the lossless property",
+    )
+    check(
+        "12" in report and "Q12" in report,
+        "the WebAssembly report does not answer all twelve questions",
+    )
+    check(
+        "wasm-bindgen" in report,
+        "the WebAssembly report does not state the ABI choice",
+    )
+
+
 def main() -> int:
     raw = json.loads((REPO / "benchmarks/p3_5_raw_results.json").read_text(encoding="utf-8"))
     report = (REPO / "docs/P3_5_COMPRESSION_RESEARCH_REPORT.md").read_text(encoding="utf-8")
@@ -1413,6 +1537,9 @@ def main() -> int:
 
     # ---- Phase C: the HTTP Range reader --------------------------------------
     check_http()
+
+    # ---- Phase C: the WebAssembly package -------------------------------------
+    check_wasm()
 
     if problems:
         print(f"{len(problems)} problem(s):")

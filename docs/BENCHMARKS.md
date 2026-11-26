@@ -519,6 +519,118 @@ the decoded pixels, the driver's and the CLI's working sets, and the file on
 disk. This measurement reports **bytes over the wire, not process memory**;
 it makes no memory claim.
 
+## Measured: the WebAssembly package (2026-11-26)
+
+Phase C step 3. The question this measurement answers is the one that
+matters for a browser: **does the module produce the same pixels as the
+command line, and does its range path move the same bytes as the native
+streaming reader?** Driver `benchmarks/wasm/run_wasm_bench.py` with its Node
+half `wasm/run_wasm_bench.mjs`; the native counterpart is
+`vpng-region-bench`; the raw run is preserved in
+`benchmarks/p11_wasm_results.json`; the full report, with the twelve
+questions, is `docs/P11_WASM_REPORT.md`.
+
+Host: Intel Core i5-1235U, 7.7 GB RAM, Windows `x86_64-pc-windows-gnu`,
+`rustc 1.100.0`, CPython 3.13.0, Node.js v24.18.0. The CLI binary, the
+native benchmark and the WebAssembly module are all the **release** profile.
+Tile size 256, four encoder workers, one image at a time.
+
+### The module's pixels against the native reader's, over the whole corpus
+
+Every one of the 750 images was encoded locally, decoded by the native
+reader through the same `RangeReader` and the same `decode_region_from` the
+module uses, and decoded twice by the WebAssembly module — once through the
+whole file and once through the range path. The three canonical digests were
+compared.
+
+| | Result |
+|---|---:|
+| Images measured | **750** |
+| Regions identical to the native read — whole-file path | **750** |
+| Regions identical to the native read — range path | **750** |
+| Total object size | **453,767,460** |
+| Bytes moved for a 1024×1024 viewport, range path | **234,420,672** (**51.661%**) |
+| Bytes read by the native streaming reader | **234,420,672** — **exactly equal** |
+| Range requests | 4,518 |
+| Header + directory bytes | 408,760 (**0.0901%**) |
+
+The total object size is the published stable baseline's, to the byte. The
+module's range path and the native streaming reader move **exactly** the same
+bytes, image by image — not "about the same", the same number.
+
+### What it saves, and where it does not
+
+The 16K photograph — **124,197,035** bytes — is the clearest case:
+
+| | bytes | requests | share of the object |
+|---|---:|---:|---:|
+| Header and directory | 81,668 | — | **0.0658%** |
+| A 1024×1024 viewport, range path | **1,039,409** | 16 | **0.8369%** |
+| The whole object | 124,197,035 | — | 100% |
+
+The corpus-wide **51.661%** is **not** a good number, and it is kept as it
+is: **592 of the 750 images are smaller than the viewport**, so for them the
+whole file is the viewport and the reader fetches everything. Those 592
+images account for 151,851,134 of the 234,420,672 bytes. The subset where the
+range path can actually save something is the **158 images larger than the
+viewport**: their objects total 301,916,326 bytes and their viewport fetches
+total **82,569,538** — **27.3485%**.
+
+| Category | n | Object bytes | Header + directory | Viewport fetch | Viewport share |
+|---|---:|---:|---:|---:|---:|
+| photos | 300 | 234,827,986 | 158,960 | 104,628,889 | 44.5555% |
+| pixel_art | 100 | 365,091 | 11,200 | 365,091 | 100.0000% |
+| scans | 100 | 67,871,353 | 66,040 | 56,808,900 | 83.7009% |
+| textures | 150 | 133,872,854 | 93,040 | 60,736,581 | 45.3689% |
+| ui | 100 | 16,830,176 | 79,520 | 11,881,211 | 70.5947% |
+
+### The timings — the module is slower, and it is kept
+
+| Path | median | p95 | mean | stdev | max |
+|---|---:|---:|---:|---:|---:|
+| Native, bytes in memory | **26.569 ms** | **113.9322 ms** | 33.825952 ms | 36.276848 ms | 212.4112 ms |
+| Native, file on disk | 26.63475 ms | 111.4865 ms | 33.217343 ms | 35.367133 ms | 206.1177 ms |
+| WebAssembly, whole file | **29.51415 ms** | 125.0923 ms | 37.156452 ms | 41.662517 ms | 285.7832 ms |
+| WebAssembly, range path | **29.1638 ms** | 124.4701 ms | 36.897349 ms | 41.550719 ms | 265.5815 ms |
+
+**The module is slower than the native reader**, by about 10% at the median
+(1.1108× for the whole-file path, 1.0950× for the range path) and by about
+10% at the p95 (1.0980×). That is the honest number and no attempt is made
+to hide it: a WebAssembly build is not the native build. What the milestone
+claims is **equality of pixels**, not equality of speed.
+
+The one case where the difference is large is the 16K photograph, and it is
+the whole-file path: 278.7018 ms against the native 187.6339 ms, because it
+copies the whole 124,197,035-byte container into the module's linear memory
+before it decodes anything. The range path copies 1,039,409 bytes and lands
+within 1.01× of the native streaming reader (128.1419 ms against
+126.8556 ms) — the practical argument for the range path on a large picture.
+
+### The byte-count and timing scope
+
+**Included** in the range path's byte count: the 64-byte header, the
+directory (the entries plus its four-byte checksum trailer), and the
+compressed payload of every tile the viewport touches. **Excluded**: the
+decoded pixels, the module's heap overhead, the JavaScript wrapper's own
+allocations, the process working sets of the driver, of Node and of the
+native benchmark, and the file on disk.
+
+Each timing is **in-process** and excludes the disk read of the container,
+except the native `file` column, which includes it. This measurement reports
+**bytes moved and elapsed time, not process memory**; it makes no memory
+claim.
+
+### The shape of the package
+
+The ABI is a **raw `extern "C"`**: no `wasm-bindgen`, no generated glue and
+no new dependency for the workspace. `cargo build --release --target
+wasm32-unknown-unknown -p vpng-wasm` is the whole toolchain. The module
+calls the same `vpng-decoder`, the same `vpng-codecs` and the same
+`vpng-source` the command line calls, and validates a container through the
+one shared `vpng_decoder::parse_container_parts`. There is no second
+decoder to drift. The evidence for that is the table above: 750 of 750
+digests match, on both paths.
+
 ## Measured: large-image stress (2026-11-15, with Predictor)
 
 Host: 12 logical CPUs, 7,916 MB physical RAM, Windows `x86_64-pc-windows-gnu`,

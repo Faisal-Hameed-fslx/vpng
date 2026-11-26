@@ -8,6 +8,65 @@ separately as major.minor in the header.
 
 ### Added
 
+* **The WebAssembly package, measured over the whole 750-image corpus (Phase
+  C, P12).** The browser's copy of the engine. **No format change was needed
+  or made**, and **the workspace gains no dependency** for it.
+  * **The module is the *same* decoder.** `crates/vpng-wasm` contains no
+    codec, no predictor, no entropy coder and no container parser of its
+    own: it calls `vpng-decoder`, `vpng-codecs` and `vpng-source`, and it
+    validates a container through the one shared
+    `vpng_decoder::parse_container_parts`. The browser and the command line
+    therefore cannot disagree about what a file means, because there is only
+    one implementation to disagree with.
+  * **The ABI is a raw `extern "C"`.** No `wasm-bindgen`, no generated glue
+    and no build-time code generation: `cargo build --release --target
+    wasm32-unknown-unknown -p vpng-wasm` is the whole toolchain, and any
+    WebAssembly runtime can call the module. The conventions are the command
+    line's: a handle is `i32` and zero is always an error; a return value is
+    `i32` or `i64` and a negative value is the negative of the error's exit
+    code; the message is fetched separately; and **every pointer is checked
+    against the module's real memory size**, so a bad pointer from JavaScript
+    is an error and not undefined behaviour.
+  * **Two ways in.** `vpng_open` takes the whole container in the module's
+    memory. `vpng_open_parts` takes the **header and the directory** alone,
+    which is the path a container in an object store takes:
+    `vpng_region_tiles` says which tiles a rectangle touches, the caller
+    fetches exactly those payloads, and `vpng_decode_payload` hands them
+    back. The payload's CRC32C is verified against the directory before the
+    codec sees it, by the same `vpng_decoder::decode_tile_payload` the
+    native reader uses.
+  * **The module's pixels are the command line's pixels.** Measured over the
+    **whole 750-image corpus**, the module's canonical digest for a region is
+    the native digest on **750 of 750 images** — on the whole-file path
+    **and** on the range path. The reconstruction is **exact**.
+  * **The range path moves exactly the bytes the native reader moves.**
+    **234,420,672** bytes over the corpus, for both, image by image. A
+    1024×1024 viewport of the 16K photograph costs **1,039,409 bytes of
+    124,197,035** — **0.8369%** — in **16** range requests. The header and
+    the directory cost **0.0901%** of the corpus.
+  * **The module was slower, and that is reported.** The whole-file path's
+    median is **29.51415 ms** against the native reader's **26.569 ms**
+    (**1.1108×**); the range path's is **29.1638 ms** against the native
+    streaming reader's **26.63475 ms** (**1.0950×**). The claim is equality
+    of pixels, not equality of speed.
+  * **The JavaScript wrapper.** `wasm/vpng.js` is plain ES modules with no
+    dependency and no build step. It re-creates its views after every call
+    that can grow the module's memory, and it copies every result out, so a
+    caller never holds a view into the module's memory.
+  * **New documentation and evidence.** `docs/P11_WASM_REPORT.md` (the
+    report, with the twelve questions and the acceptance gates),
+    `docs/decisions/ADR-0017-wasm-abi.md` (the decision record),
+    `wasm/README.md` (the package's own documentation),
+    `benchmarks/p11_wasm_results.json` (the raw data), the measurement driver
+    `benchmarks/wasm/run_wasm_bench.py` and its Node half
+    `wasm/run_wasm_bench.mjs`, the native counterpart
+    `vpng-region-bench`, and `check_wasm()` in
+    `benchmarks/verify_reports.py`, which binds every quoted figure to the
+    raw data. Thirteen tests in `wasm/test/` compare the module against the
+    real `vpng` binary, `wasm/check_exports.mjs` asserts that all **28**
+    documented exports are really exported, and eight Rust unit tests cover
+    the registry on the host.
+
 * **The HTTP Range reader, measured over the whole 750-image corpus (Phase C,
   P13).** A container can now be read over the network without downloading
   it. **No format change was needed or made**: every tile payload already had

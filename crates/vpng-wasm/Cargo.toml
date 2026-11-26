@@ -1,0 +1,29 @@
+[package]
+name = "vpng-wasm"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "The VPNG decoder as a WebAssembly module: the browser's copy of the engine."
+repository.workspace = true
+publish = false
+
+[lib]
+# A `cdylib` is what `wasm32-unknown-unknown` produces: a `.wasm` file with
+# the exported functions and nothing else. There is no `rlib`, because nothing
+# in the workspace links against this crate.
+crate-type = ["cdylib"]
+
+[dependencies]
+vpng-core.workspace = true
+vpng-container.workspace = true
+vpng-codecs.workspace = true
+vpng-decoder.workspace = true
+vpng-source.workspace = true
+
+[dev-dependencies]
+# The tests encode an image with the production encoder and compare the
+# module's pixels with the native decoder's. The encoder is a test-only
+# dependency: the module itself never encodes.
+vpng-encoder.workspace = true
