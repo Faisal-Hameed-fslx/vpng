@@ -59,6 +59,8 @@ fn run(argv: &[String]) -> Result<()> {
         "verify" => cmd_verify(&args),
         "decode-region" => cmd_decode_region(&args),
         "extract-tile" => cmd_extract_tile(&args),
+        "http-info" => cmd_http_info(&args),
+        "http-decode-region" => cmd_http_decode_region(&args),
         "help" => {
             print_help();
             Ok(())
@@ -477,15 +479,28 @@ fn cmd_decode_region(args: &Args) -> Result<()> {
     let region = document.decode_region(rect, &limits)?;
     write_output_image(args, &output, &region)?;
 
-    println!(
-        "decoded region {}x{}+{}+{} -> {}  (sha256 {})",
-        rect.width,
-        rect.height,
-        rect.x,
-        rect.y,
-        output,
-        to_hex(&canonical_digest(&region))
-    );
+    if args.has("json") {
+        println!(
+            "{{\"input\":\"{}\",\"output\":\"{}\",\"x\":{},\"y\":{},\"width\":{},\"height\":{},\"sha256\":\"{}\"}}",
+            escape(&input),
+            escape(&output),
+            rect.x,
+            rect.y,
+            rect.width,
+            rect.height,
+            to_hex(&canonical_digest(&region)),
+        );
+    } else {
+        println!(
+            "decoded region {}x{}+{}+{} -> {}  (sha256 {})",
+            rect.width,
+            rect.height,
+            rect.x,
+            rect.y,
+            output,
+            to_hex(&canonical_digest(&region))
+        );
+    }
     Ok(())
 }
 
@@ -551,6 +566,119 @@ fn escape(text: &str) -> String {
     text.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
+/// Open a container over HTTP Range requests and print its summary.
+///
+/// The command reports the network volume as well as the container: how many
+/// requests were made and how many bytes came back, next to the size of the
+/// object. A reader that fetches only what it needs is visible in those two
+/// numbers.
+fn cmd_http_info(args: &Args) -> Result<()> {
+    let url = args.require_positional(0, "url")?.to_string();
+    let limits = limits();
+
+    let source = vpng_http::HttpSource::open(&url, vpng_http::HttpSourceOptions::default())?;
+    let object_size = source.length();
+    let reader = vpng_source::RangeReader::open_source(source, &limits)?;
+
+    let header: &Header = reader.meta().header();
+    let tile_count = header.tile_count;
+
+    if args.has("json") {
+        println!(
+            "{{\"url\":\"{}\",\"object_size\":{},\"bytes_read\":{},\"source_bytes_received\":{},\"requests\":{},\"major\":{},\"minor\":{},\"width\":{},\"height\":{},\"color_model\":\"{}\",\"bits_per_channel\":{},\"channels\":{},\"default_codec\":{},\"tile_count\":{},\"level_count\":{}}}",
+            escape(&url),
+            object_size,
+            reader.bytes_read(),
+            reader.source().info().bytes_received,
+            reader.source().info().requests,
+            header.major,
+            header.minor,
+            header.width,
+            header.height,
+            header.color_model.name(),
+            header.bits.bits(),
+            header.channels(),
+            header.default_codec,
+            tile_count,
+            reader.meta().levels().len(),
+        );
+    } else {
+        println!("url              {url}");
+        println!("object size      {object_size} bytes");
+        println!("bytes read       {} bytes", reader.bytes_read());
+        println!(
+            "bytes received   {} bytes (the source's own count, including the length probe)",
+            reader.source().info().bytes_received
+        );
+        println!("requests         {}", reader.source().info().requests);
+        println!(
+            "format           v{}.{}  {}x{}  {}  {} bpc",
+            header.major,
+            header.minor,
+            header.width,
+            header.height,
+            header.color_model.name(),
+            header.bits.bits()
+        );
+        println!("default codec    {}", header.default_codec);
+        println!("tiles            {tile_count}");
+        println!("levels           {}", reader.meta().levels().len());
+        println!();
+        println!("note: the header and the directory were fetched; tile payloads were NOT.");
+        println!("      run `vpng http-check {url}` to fetch and verify every payload.");
+    }
+    Ok(())
+}
+
+/// Decode one rectangle of a container fetched over HTTP Range requests.
+fn cmd_http_decode_region(args: &Args) -> Result<()> {
+    let url = args.require_positional(0, "url")?.to_string();
+    let output = args.require_positional(1, "output path")?.to_string();
+    let limits = limits();
+
+    let x = args.require_u32("x")?;
+    let y = args.require_u32("y")?;
+    let width = args.require_u32("width")?;
+    let height = args.require_u32("height")?;
+    let rect = Rect::new(x, y, width, height)?;
+
+    let source = vpng_http::HttpSource::open(&url, vpng_http::HttpSourceOptions::default())?;
+    let object_size = source.length();
+    let mut reader = vpng_source::RangeReader::open_source(source, &limits)?;
+    let region = reader.decode_region(rect, &limits)?;
+    write_output_image(args, &output, &region)?;
+
+    let digest = to_hex(&canonical_digest(&region));
+    if args.has("json") {
+        println!(
+            "{{\"url\":\"{}\",\"output\":\"{}\",\"x\":{},\"y\":{},\"width\":{},\"height\":{},\"sha256\":\"{}\",\"object_size\":{},\"bytes_read\":{},\"source_bytes_received\":{},\"requests\":{}}}",
+            escape(&url),
+            escape(&output),
+            rect.x,
+            rect.y,
+            rect.width,
+            rect.height,
+            digest,
+            object_size,
+            reader.bytes_read(),
+            reader.source().info().bytes_received,
+            reader.source().info().requests,
+        );
+    } else {
+        println!(
+            "decoded region {}x{}+{}+{} -> {}  (sha256 {})",
+            rect.width, rect.height, rect.x, rect.y, output, digest
+        );
+        println!(
+            "  fetched {} bytes of {} in {} requests",
+            reader.bytes_read(),
+            object_size,
+            reader.source().info().requests
+        );
+    }
+    Ok(())
+}
+
 fn print_help() {
     let version = env!("CARGO_PKG_VERSION");
     println!(
@@ -567,6 +695,8 @@ COMMANDS:
     verify <original> <candidate.vpng> Fail unless pixels round-trip exactly
     decode-region <input.vpng> <out>   Decode one rectangle (--x --y --width --height)
     extract-tile <input.vpng>          Decode one tile (--tile-x --tile-y --output)
+    http-info <url>                    Print the summary of a container fetched over HTTP
+    http-decode-region <url> <out>     Decode one rectangle fetched over HTTP
     help                               Show this help
     version                            Show the version
 

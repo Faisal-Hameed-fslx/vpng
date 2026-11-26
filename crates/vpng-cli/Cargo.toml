@@ -19,3 +19,10 @@ vpng-encoder.workspace = true
 vpng-decoder.workspace = true
 vpng-tiling.workspace = true
 vpng-image.workspace = true
+vpng-http.workspace = true
+vpng-source.workspace = true
+
+[dev-dependencies]
+# The hand-written HTTP/1.1 server, so the CLI's own tests can run against a
+# server the reader does not control.
+vpng-http = { workspace = true, features = ["test-support"] }

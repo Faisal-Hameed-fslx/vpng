@@ -90,13 +90,16 @@ vpng/ (root = E:\VPNG)
 │   ├── vpng-decoder/              .vpng bytes -> full/tile/region pixels
 │   ├── vpng-testkit/              deterministic fixtures + conformance tests
 │   ├── vpng-python/               the PyO3 extension behind the Python package
+│   ├── vpng-http/                 the HTTP Range source: a container fetched over the network
 │   └── vpng-cli/                  encode/decode/info/check/verify/decode-region/extract-tile
+│                                    + http-info/http-decode-region
 ├── docs/                          spec, audit, status, threat model, ADRs
 ├── benchmarks/
 │   ├── corpus_manifest.json       provenance, license, dimensions, SHA-256
 │   ├── stress/                    large-image stress harness (Python + PowerShell)
 │   ├── corpus/                    seed corpus assembler + benchmark runner
 │   ├── python/                    the Python-binding measurement drivers
+│   ├── http/                      the HTTP Range measurement driver
 │   └── results/                   git-ignored JSON/Markdown run output
 ├── corpus-data/                   git-ignored image bytes (provenance in the manifest)
 ├── python/                        the `vpng` package, its tests, and the experiment tooling
@@ -113,6 +116,7 @@ Chosen to be minimal, stable, and audited:
 | `sha2` | 0.10 | canonical digest | the roadmap forbids hand-rolling SHA-256 |
 | `png` | 0.17 | PNG I/O, in `vpng-image` | keeps the core free of image-format code |
 | `pyo3` | 0.27 | the Python extension | the binding, not the engine; `abi3-py38` so one wheel covers every CPython from 3.8 |
+| `ureq` | 3.2 | the HTTP Range source | a blocking client, so no async runtime enters the workspace; rustls, so no system OpenSSL is needed; pinned to 3.2 because 3.3 needs rustc 1.85 and the workspace's MSRV is 1.74 |
 
 No dependency is used inside `vpng-core`, `vpng-codecs`, or `vpng-tiling`.
 

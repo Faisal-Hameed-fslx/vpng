@@ -1,0 +1,28 @@
+[package]
+name = "vpng-http"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "HTTP Range-request streaming for VPNG containers"
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[features]
+# The hand-written HTTP/1.1 server the tests use. It is off by default and
+# is never compiled into a release build of the crate.
+test-support = []
+
+[dependencies]
+vpng-core.workspace = true
+vpng-source.workspace = true
+
+# The HTTP client. `ureq` is blocking, so the reader stays a plain
+# synchronous API and no async runtime enters the workspace. The TLS
+# provider is `rustls`, so there is no platform crypto library to install.
+# The version is pinned exactly: 3.3 and later require a newer Rust than
+# this workspace's MSRV of 1.74.
+ureq = { version = "=3.2.1", default-features = false, features = ["rustls", "gzip"] }
+
+[dev-dependencies]
+vpng-encoder.workspace = true

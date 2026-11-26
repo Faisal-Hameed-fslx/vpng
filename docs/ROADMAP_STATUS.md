@@ -1,6 +1,6 @@
 # Roadmap status
 
-**Updated:** 2026-11-25
+**Updated:** 2026-11-26
 **Legend:**
 
 * `PASS` — the required test **exists and was executed**, and the observed result
@@ -18,7 +18,7 @@
 | Default host | `x86_64-pc-windows-gnu` |
 | Active toolchain | overridden by `E:\VPNG\rust-toolchain.toml` |
 | `cargo build --workspace` | **exit 0**, `Finished dev profile ... in 3.85s` |
-| `cargo test --workspace --all-targets` | **exit 0**, `447 passed; 0 failed` |
+| `cargo test --workspace --all-targets` | **exit 0**, `460 passed; 0 failed` |
 | `cargo fmt --all --check` | **exit 0**, no diffs |
 | `cargo clippy --workspace --all-targets` | **exit 0**, zero warnings |
 
@@ -74,7 +74,7 @@ already been done.
 | P10 — format freeze and release | compatibility guarantees, security audit, v1.0 | P10 | PARTIAL (the format is not frozen) |
 | P11 — graphical viewer and editor | a desktop UI over `vpng-view` and `vpng-editing` | P9 (the binding surface) and P5 | NOT STARTED |
 | P12 — WebAssembly package | the decoder, the viewer and the editor in a browser | P9 | NOT STARTED |
-| P13 — network streaming | read the header, the directory and the tiles over HTTP Range requests | P5 | NOT STARTED |
+| P13 — network streaming | read the header, the directory and the tiles over HTTP Range requests | P5 | **CLOSED** (2026-11-26): the reader is in and it was **measured over the whole 750-image corpus**. The byte source became an abstraction — `ByteSource` with `FileSource` and `HttpSource` behind it — so there is **one** tile-reading path, not two, and the tile payload decoding and the container validation are now one shared `vpng_decoder::decode_tile_payload` and one shared `vpng_decoder::parse_container_parts`. **No format change was needed or made**: every payload already had its own offset and length, and the 64-byte header and the 40-byte directory entry are untouched. The reader fetches only what it needs: the header and the directory cost **0.0901%** of the corpus, and a 1024×1024 viewport of the 16K photograph costs **1,039,409 bytes of 124,197,035 — 0.8369%** of that file. Over HTTP the pixels are **identical to the local read on 750 of 750 images** (both the canonical digest and the PNG digest), and the client's own byte count matches the server's **exactly** — 234,830,932 bytes on both sides. The refusals are pinned by nine tests against a hand-written server: a `200 OK` answer to a range request, a wrong `Content-Range`, a short body and an out-of-range read are all **refused**, never accepted. The unfavourable numbers are kept: over HTTP was **slower** than the local read (51.8445 ms against 41.7015 ms at the median) and 592 of the 750 images are smaller than the viewport, so the corpus-wide fetch share is 51.661%, not a small number. Evidence: `docs/P10_HTTP_REPORT.md`, `docs/decisions/ADR-0016-http-range-source.md`, `benchmarks/p10_http_results.json` |
 | P14 — layers and masks | several named tile grids in one file | P7 (the partition representation) | NOT STARTED — needs a container format revision |
 | P15 — GPU-ready payloads | BC7/ASTC tile payloads for game-engine asset pipelines | P2 (the codec table) | NOT STARTED — needs a container format revision |
 
@@ -95,7 +95,7 @@ not lost.
 | Adaptive tiling and advanced codecs | already in the roadmap | **P7** and **P2** | **DONE** | **Adaptive tiling is done** in the v0.2 format revision: variable tile sizes, an exact-cover partition validated before a file is written, and the whole 750-image corpus measured both ways on the same canonical pixels (−0.22% bytes, half the tiles at the median, 750 of 750 exact). **The reserved stable codec ids 4–6 are now promoted** in the v0.3 format revision: id 4 `lz77`, id 5 `predictor+dictionary` and id 6 `context-entropy` are stable, reachable from a file, and measured over the same 750-image corpus — **−10.46%** bytes, 643 images smaller, 107 equal, **0 larger**, with the default path's bytes unchanged. The research ids `0x80..=0xFF` still cannot reach a file; a decoder rejects one with `UnsupportedFeature`. Evidence: `docs/P6_P7_REPORT.md`, `docs/P8_CODEC_REPORT.md`, `docs/VPNG_SPEC_0_3.md`. |
 | Graphical UI editor | proposed; not previously in the roadmap | **P11** | NOT STARTED | A desktop front end over `vpng-view` and `vpng-editing`. The engines exist; the window does not. No graphical editor exists in this repository today. |
 | WebAssembly (WASM) package | proposed; not previously in the roadmap | **P12** | NOT STARTED | A `wasm32` build of the decoder, the viewer and the editing engine. The constraint is the same as everywhere else: the browser must produce the same pixels, and the file format must not change to suit the browser. |
-| HTTP Range-request cloud streaming | proposed; not previously in the roadmap | **P13** | NOT STARTED | A reader that fetches the 64-byte header, the directory, and then tile payloads by byte range from an object store. The format already supports it: every tile payload has its own offset and length, so no format change is needed. |
+| HTTP Range-request cloud streaming | proposed; not previously in the roadmap | **P13** | **DONE** | A reader that fetches the 64-byte header, the directory, and then tile payloads by byte range from an object store. The format already supported it: every tile payload has its own offset and length, so **no format change was needed or made**. The byte source is now a trait (`ByteSource`) with a local implementation (`FileSource`) and a network one (`HttpSource`), and `RangeReader<S>` is generic over it — so the local and the network readers are the **same code path**, and the container validation and the tile payload decoding are **one** shared function each. Measured over the whole 750-image corpus: **750 of 750** HTTP reads return **exactly** the same pixels as the local read, the header and directory cost **0.0901%** of the corpus, and a 1024×1024 viewport of the 16K photograph costs **0.8369%** of that file. A server that ignores `Range`, answers the wrong range, truncates the body or claims a length that disagrees with the probe is **refused**. Evidence: `docs/P10_HTTP_REPORT.md`. |
 | Multi-layer / mask compositing | proposed; not previously in the roadmap | **P14** | NOT STARTED | Several named tile grids in one file. This **changes the container layout** and needs a format revision: a version bump, a migration policy and compatibility tests, with the v0.1 files still readable unchanged. |
 | GPU texture block support (BC7/ASTC) | proposed; not previously in the roadmap | **P15** | NOT STARTED | Optional GPU-ready tile payloads. This **changes the codec table** and needs a format revision on the same terms as P14. It is also the one item on this list that is not lossless in the same sense as the rest — a BC7 payload is a lossy GPU block format — so it must be a separate, explicitly named payload kind and never a silent substitute for a lossless tile. |
 
@@ -304,6 +304,7 @@ profiles, `x86_64-pc-windows-gnu`.
 | `vpng-cache` unit | 11 | ok |
 | `vpng-cli` unit | 8 | ok |
 | `vpng-cli` `tests/encode_workers.rs` | 3 | ok |
+| `vpng-cli` `tests/http_commands.rs` | 4 | ok (the HTTP commands against a hand-written server) |
 | `vpng-cli` `tests/v2_features.rs` | 6 | ok |
 | `vpng-cli` `tests/v3_features.rs` | 7 | ok (the v0.3 surface) |
 | `vpng-codecs` unit | 113 | ok |
@@ -318,6 +319,7 @@ profiles, `x86_64-pc-windows-gnu`.
 | `vpng-fuzzing` bin `vpng-fuzz-mutate` | 0 | ok |
 | `vpng-fuzzing` `tests/fuzz_smoke.rs` | 3 | ok |
 | `vpng-fuzzing` `tests/fuzz_regressions.rs` | 3 | ok |
+| `vpng-http` unit | 9 | ok (the HTTP Range source, against a hand-written server) |
 | `vpng-image` unit | 3 | ok (the PNG and raw conversion, moved from the CLI) |
 | `vpng-python` unit | 0 | ok (the extension is tested from Python) |
 | `vpng-source` unit | 11 | ok |
@@ -340,7 +342,7 @@ profiles, `x86_64-pc-windows-gnu`.
 | `vpng-validation` `tests/mem_tracking.rs` | 2 | ok |
 | `vpng-validation` bins | 0 | ok |
 | Doc-tests | 0 | ok |
-| **Total** | **447** | **447 passed, 0 failed** |
+| **Total** | **460** | **460 passed, 0 failed** |
 
 **The Python binding adds 45 tests of its own**, run by
 `python -m unittest discover -s python/tests`: the round trip is exact for

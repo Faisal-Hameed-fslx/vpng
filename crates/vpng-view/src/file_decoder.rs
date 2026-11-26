@@ -1,9 +1,10 @@
-//! The file-backed decoder.
+//! The source-backed decoder.
 //!
-//! A worker decodes tiles from a file on disk. Each worker gets its own
-//! [`TileReader`], forked from one that has already parsed the header and
-//! the directory: the metadata is parsed once and shared, while the file
-//! position — the part that cannot be shared — is private to the worker.
+//! A worker decodes tiles from a byte source: a file on disk today, an HTTP
+//! object store tomorrow. Each worker gets its own [`RangeReader`], forked
+//! from one that has already parsed the header and the directory: the
+//! metadata is parsed once and shared, while the source's position — the
+//! part that cannot be shared — is private to the worker.
 //!
 //! This is the decoder the parallel engine uses in practice. It is the same
 //! code path as the ordinary decoder: the payload's CRC32C is verified,
@@ -11,34 +12,34 @@
 //! checked against the directory's declaration. The pool changes *when* a
 //! tile is decoded, never *what* it decodes.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use vpng_core::{Limits, Result};
-use vpng_source::TileReader;
+use vpng_source::{ByteSource, FileSource, RangeReader};
 
 use crate::driver::TileDecoder;
 use crate::pool::DecoderFactory;
 
-/// A decoder that reads tiles from a file on disk.
+/// A decoder that reads tiles from a byte source.
 #[derive(Debug)]
-pub struct FileDecoder {
-    reader: TileReader,
+pub struct SourceDecoder<S> {
+    reader: RangeReader<S>,
     limits: Limits,
 }
 
-impl FileDecoder {
+impl<S: ByteSource> SourceDecoder<S> {
     /// The reader behind this decoder.
-    pub fn reader(&self) -> &TileReader {
+    pub fn reader(&self) -> &RangeReader<S> {
         &self.reader
     }
 
-    /// The number of bytes this decoder has read from the file.
+    /// The number of bytes this decoder has read from the source.
     pub fn bytes_read(&self) -> u64 {
         self.reader.bytes_read()
     }
 }
 
-impl TileDecoder for FileDecoder {
+impl<S: ByteSource> TileDecoder for SourceDecoder<S> {
     fn decode(&mut self, tile: usize) -> Result<Vec<u8>> {
         self.reader.decode_tile(tile, &self.limits)
     }
@@ -48,58 +49,74 @@ impl TileDecoder for FileDecoder {
     }
 }
 
-/// Makes one [`FileDecoder`] per worker.
+/// Makes one [`SourceDecoder`] per worker.
 ///
-/// The factory opens the file once, so the header and the directory are
+/// The factory opens the source once, so the header and the directory are
 /// parsed once for the whole session; every worker then forks its own
 /// reader from it.
 #[derive(Debug)]
-pub struct FileDecoderFactory {
-    reader: TileReader,
+pub struct SourceDecoderFactory<S> {
+    reader: RangeReader<S>,
     limits: Limits,
-    path: PathBuf,
 }
 
-impl FileDecoderFactory {
-    /// Open a file and keep it open as the source for every worker.
-    pub fn open(path: &Path, limits: &Limits) -> Result<Self> {
-        let reader = TileReader::open(path, limits)?;
-        Ok(FileDecoderFactory {
+impl<S: ByteSource> SourceDecoderFactory<S> {
+    /// Open a source and keep it open as the source for every worker.
+    pub fn open_source(source: S, limits: &Limits) -> Result<Self> {
+        let reader = RangeReader::open_source(source, limits)?;
+        Ok(SourceDecoderFactory {
             reader,
             limits: *limits,
-            path: path.to_path_buf(),
         })
     }
 
     /// Build a factory from a reader that is already open.
-    pub fn from_reader(reader: TileReader) -> Self {
-        let path = reader.path().to_path_buf();
+    pub fn from_reader(reader: RangeReader<S>) -> Self {
         let limits = *reader.limits();
-        FileDecoderFactory {
-            reader,
-            limits,
-            path,
-        }
-    }
-
-    /// The file the workers read from.
-    pub fn path(&self) -> &Path {
-        &self.path
+        SourceDecoderFactory { reader, limits }
     }
 
     /// The container's metadata.
     pub fn meta(&self) -> &vpng_source::ContainerMeta {
         self.reader.meta()
     }
+
+    /// The reader the workers fork from.
+    pub fn reader(&self) -> &RangeReader<S> {
+        &self.reader
+    }
 }
 
-impl DecoderFactory for FileDecoderFactory {
-    type Decoder = FileDecoder;
+impl<S: ByteSource + 'static> DecoderFactory for SourceDecoderFactory<S> {
+    type Decoder = SourceDecoder<S>;
 
     fn make_decoder(&self, _generation: crate::scheduler::Generation) -> Result<Self::Decoder> {
-        Ok(FileDecoder {
+        Ok(SourceDecoder {
             reader: self.reader.fork()?,
             limits: self.limits,
         })
+    }
+}
+
+/// A decoder that reads tiles from a file on disk.
+pub type FileDecoder = SourceDecoder<FileSource>;
+
+/// Makes one [`FileDecoder`] per worker.
+///
+/// The factory opens the file once, so the header and the directory are
+/// parsed once for the whole session; every worker then forks its own
+/// reader from it.
+pub type FileDecoderFactory = SourceDecoderFactory<FileSource>;
+
+impl FileDecoderFactory {
+    /// Open a file and keep it open as the source for every worker.
+    pub fn open(path: &Path, limits: &Limits) -> Result<Self> {
+        let reader = RangeReader::open(path, limits)?;
+        Ok(FileDecoderFactory::from_reader(reader))
+    }
+
+    /// The file the workers read from.
+    pub fn path(&self) -> &Path {
+        self.reader.path()
     }
 }

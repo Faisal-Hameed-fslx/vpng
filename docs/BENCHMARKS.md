@@ -425,6 +425,100 @@ process across all 750 images, and it is dominated by the 16K picture's
 path materialises the whole image, exactly as the CLI does; §6 of the report
 says so.
 
+## Measured: the HTTP Range reader (2026-11-26)
+
+Phase C step 2, HTTP Range streaming. The question this measurement answers is
+narrow and answerable: **does a reader that fetches a container over HTTP
+Range requests fetch only the bytes it needs, and does it return the same
+pixels as a local read?** Driver `benchmarks/http/run_http_bench.py`; raw run
+preserved in `benchmarks/p10_http_results.json`; the full report, with the
+twelve questions, is `docs/P10_HTTP_REPORT.md`.
+
+Host: Intel Core i5-1235U, 7.7 GB RAM, Windows `x86_64-pc-windows-gnu`,
+`rustc 1.100.0`, CPython 3.13.0, the CLI built in the release profile. Tile
+size 256, four encoder workers, one image at a time. The server is a **local
+HTTP/1.1 server written for this measurement**, which honours `Range` and
+counts its own requests and bytes.
+
+### The HTTP read against the local read, over the whole corpus
+
+Every one of the 750 images was encoded locally, served over HTTP, read back
+through `vpng http-info` (the header and the directory only) and
+`vpng http-decode-region` (a 1024×1024 viewport at the origin), and compared
+with the same region decoded from the local file — by the canonical pixel
+digest **and** by the SHA-256 of the two PNG files.
+
+| | Result |
+|---|---:|
+| Images measured | **750** |
+| Regions identical to the local read | **750** |
+| PNG files identical to the local read | **750** |
+| Total object size | **453,767,460** |
+| Bytes fetched for the header and the directory | **408,760** (**0.0901%**) |
+| Bytes fetched for a 1024×1024 viewport | **234,420,672** (**51.661%**) |
+| Server bytes sent | 234,830,932 |
+| Source bytes received | 234,830,932 — **exactly equal** |
+| HTTP requests | 10,518 (4 per command) |
+| Range requests | 9,018 |
+
+The total object size is the published stable baseline's, to the byte. The
+client's byte count and the server's independent byte count are **exactly
+equal**, which is the check that the reader fetched what it said it fetched.
+
+The container validation and the tile payload decoding are **one** shared
+function each — `vpng_decoder::parse_container_parts` and
+`vpng_decoder::decode_tile_payload` — so the in-memory decoder, the streaming
+reader and the HTTP reader cannot drift apart about which files are valid or
+what a tile means.
+
+### What it saves, and where it does not
+
+The 16K photograph — **124,197,035** bytes — is the clearest case:
+
+| | bytes | requests | share of the object |
+|---|---:|---:|---:|
+| Header and directory | 81,668 | 4 | **0.0658%** |
+| A 1024×1024 viewport | **1,039,409** | 20 | **0.8369%** |
+| The whole object | 124,197,035 | — | 100% |
+
+But the corpus-wide **51.661%** is **not** a good number, and it is kept as it
+is: **592 of the 750 images are smaller than the viewport**, so for them the
+whole file is the viewport and the reader fetches everything. Those 592
+images account for 151,851,134 of the 234,420,672 bytes. The subset where the
+range reader can actually save something is the **158 images larger than the
+viewport**: their objects total 301,916,326 bytes and their viewport fetches
+total **82,569,538** — **27.3485%**.
+
+| Category | n | Object bytes | Header + directory | Viewport fetch | Viewport share |
+|---|---:|---:|---:|---:|---:|
+| photos | 300 | 234,827,986 | 158,960 | 104,628,889 | 44.5555% |
+| pixel_art | 100 | 365,091 | 11,200 | 365,091 | 100.0000% |
+| scans | 100 | 67,871,353 | 66,040 | 56,808,900 | 83.7009% |
+| textures | 150 | 133,872,854 | 93,040 | 60,736,581 | 45.3689% |
+| ui | 100 | 16,830,176 | 79,520 | 11,881,211 | 70.5947% |
+
+### The timings
+
+| Path | median | p95 | mean | stdev | max |
+|---|---:|---:|---:|---:|---:|
+| Over HTTP | 51.8445 ms | 266.544 ms | 87.251991 ms | 94.212396 ms | 957.197 ms |
+| From the local file | **41.7015 ms** | **203.297 ms** | 65.734116 ms | 68.892275 ms | 610.457 ms |
+
+**Over HTTP was slower than the local read**, by about 24% at the median and
+31% at the p95. That is the loopback server's cost — four HTTP round trips
+per command, plus one per tile — and it is reported rather than hidden. The
+16K photograph is the one case where HTTP won (162.014 ms against
+222.366 ms), and it won because it decoded 16 tiles instead of 2,040.
+
+### The byte-count scope
+
+**Included**: every HTTP response **body** byte the source received,
+including the one-byte length probe, the header, the directory and every tile
+payload. **Excluded**: the request and response headers, the socket buffers,
+the decoded pixels, the driver's and the CLI's working sets, and the file on
+disk. This measurement reports **bytes over the wire, not process memory**;
+it makes no memory claim.
+
 ## Measured: large-image stress (2026-11-15, with Predictor)
 
 Host: 12 logical CPUs, 7,916 MB physical RAM, Windows `x86_64-pc-windows-gnu`,

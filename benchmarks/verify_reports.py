@@ -1006,6 +1006,162 @@ def check_python() -> None:
     )
 
 
+def check_http() -> None:
+    """Check the HTTP Range report against the raw data."""
+    report = (REPO / "docs/P10_HTTP_REPORT.md").read_text(encoding="utf-8")
+    report = report.replace("−", "-")
+    raw = json.loads(
+        (REPO / "benchmarks/p10_http_results.json").read_text(encoding="utf-8")
+    )
+    manifest = json.loads((REPO / "benchmarks/corpus_manifest.json").read_text(encoding="utf-8"))
+    summary = raw["summary"]
+    images = raw["images"]
+
+    def quoted(value, fmt) -> None:
+        text = format(value, fmt)
+        check(text in report, f"the HTTP report does not contain the figure {text!r}")
+
+    # ---- the corpus is the corpus ------------------------------------------
+    manifest_ids = {entry["id"] for entry in manifest["images"]}
+    result_ids = {image["id"] for image in images}
+    check(
+        manifest_ids == result_ids,
+        "the manifest and the HTTP measurement file do not hold the same images",
+    )
+    check(
+        len(images) == manifest["total_images"],
+        f"the HTTP measurement file holds {len(images)} images, the manifest says "
+        f"{manifest['total_images']}",
+    )
+    quoted(len(images), ",")
+    quoted(len(images), "d")
+
+    # ---- the HTTP read returns the same pixels as the local read -------------
+    check(
+        summary["identical"] == len(images),
+        f"{summary['identical_differing']} HTTP reads differ from the local read",
+    )
+    check(
+        summary["identical_file"] == len(images),
+        f"{summary['identical_file_differing']} HTTP-written PNGs differ from the "
+        "local ones",
+    )
+    for image in images:
+        check(
+            image["identical"],
+            f"{image['id']}: the HTTP read differs from the local read",
+        )
+        check(
+            image["identical_file"],
+            f"{image['id']}: the HTTP-written PNG differs from the local one",
+        )
+
+    # ---- the bytes are the published baseline's ------------------------------
+    check(
+        summary["object_bytes_total"] == 453_767_460,
+        f"the HTTP corpus total is {summary['object_bytes_total']}, the published "
+        "stable baseline is 453767460",
+    )
+    quoted(summary["object_bytes_total"], ",")
+    check(
+        all(image["minor"] == 1 for image in images),
+        "a file read over HTTP is not a minor version 1 file",
+    )
+
+    # ---- the reader fetches only what it needs -------------------------------
+    baseline = next(
+        (image for image in images if image["id"] == "user-photo-15360x8640"), None
+    )
+    check(baseline is not None, "the 16K photograph is not in the HTTP measurement")
+    if baseline is not None:
+        check(
+            baseline["file_bytes"] == 124_197_035,
+            f"the 16K object is {baseline['file_bytes']} bytes, the published "
+            "baseline is 124197035",
+        )
+        quoted(baseline["file_bytes"], ",")
+        check(
+            baseline["http_bytes_read"] < baseline["file_bytes"],
+            "the 16K viewport fetched the whole object",
+        )
+        quoted(baseline["http_bytes_read"], ",")
+        quoted(baseline["http_whole_object_fraction"] * 100, ".4f")
+        quoted(baseline["info_bytes_read"], ",")
+        quoted(baseline["info_whole_object_fraction"] * 100, ".4f")
+
+    # ---- the client and the server agree on the byte count -------------------
+    source_total = summary["http_source_bytes_total"] + summary["info_source_bytes_total"]
+    check(
+        source_total == summary["server_bytes_sent"],
+        f"the source received {source_total} bytes, the server sent "
+        f"{summary['server_bytes_sent']}",
+    )
+    quoted(summary["server_bytes_sent"], ",")
+    quoted(summary["server_requests"], ",")
+    quoted(summary["server_range_requests"], ",")
+
+    # ---- the corpus-level fractions ------------------------------------------
+    check(
+        summary["info_fraction"] is not None and summary["info_fraction"] < 0.001,
+        f"the header-and-directory share is {summary['info_fraction']}, not under "
+        "0.1%",
+    )
+    quoted(summary["info_fraction"] * 100, ".4f")
+    quoted(summary["http_fraction"] * 100, ".3f")
+    quoted(summary["info_bytes_total"], ",")
+    quoted(summary["http_bytes_total"], ",")
+
+    # ---- the subset that is larger than the viewport -------------------------
+    bigger = [
+        image for image in images if image["width"] > 1024 or image["height"] > 1024
+    ]
+    check(
+        len(bigger) == 158,
+        f"{len(bigger)} images are larger than the viewport, the report says 158",
+    )
+    quoted(len(bigger), "d")
+    bigger_object = sum(image["file_bytes"] for image in bigger)
+    bigger_region = sum(image["http_bytes_read"] for image in bigger)
+    quoted(bigger_object, ",")
+    quoted(bigger_region, ",")
+    quoted(bigger_region / bigger_object * 100, ".4f")
+
+    # ---- the per-category table ----------------------------------------------
+    for category, bucket in sorted(summary["by_category"].items()):
+        quoted(bucket["images"], "d")
+        quoted(bucket["object_bytes"], ",")
+        quoted(bucket["http_bytes"], ",")
+        quoted(bucket["http_fraction"] * 100, ".4f")
+
+    # ---- the timings ---------------------------------------------------------
+    quoted(summary["http_ms"]["median"], ",")
+    quoted(summary["http_ms"]["p95"], ",")
+    quoted(summary["local_ms"]["median"], ",")
+    quoted(summary["local_ms"]["p95"], ",")
+
+    # ---- the report says what it does and does not claim --------------------
+    check(
+        "included" in report.lower() and "excluded" in report.lower(),
+        "the HTTP report does not state the byte-count scope",
+    )
+    check(
+        "PASS" in report and "BLOCKED" in report,
+        "the HTTP report does not use the gate vocabulary",
+    )
+    check(
+        "lossless" in report.lower() or "exact" in report.lower(),
+        "the HTTP report does not state the lossless property",
+    )
+    check(
+        "12" in report and "Q12" in report,
+        "the HTTP report does not answer all twelve questions",
+    )
+    check(
+        "Range" in report and "206" in report and "Content-Range" in report,
+        "the HTTP report does not state the range rules",
+    )
+
+
 def main() -> int:
     raw = json.loads((REPO / "benchmarks/p3_5_raw_results.json").read_text(encoding="utf-8"))
     report = (REPO / "docs/P3_5_COMPRESSION_RESEARCH_REPORT.md").read_text(encoding="utf-8")
@@ -1254,6 +1410,9 @@ def main() -> int:
 
     # ---- Phase C: the Python bindings ----------------------------------------
     check_python()
+
+    # ---- Phase C: the HTTP Range reader --------------------------------------
+    check_http()
 
     if problems:
         print(f"{len(problems)} problem(s):")

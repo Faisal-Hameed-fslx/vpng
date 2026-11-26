@@ -82,6 +82,19 @@ are recorded in `docs/BENCHMARKS.md`, `docs/P5_REPORT.md` and
   and the bytes are the published stable baseline's. A localized edit of a
   16K picture through Python peaks at **44.2 MB** of working set against
   the 64 MB target. See `docs/P9_PYTHON_REPORT.md`.
+* An **HTTP Range reader** (`crates/vpng-http`): a container can be read over
+  the network without downloading it. The byte source became an abstraction —
+  `ByteSource` with a local implementation and an HTTP one — so the local and
+  the network readers are the **same code path**, and the container
+  validation and the tile payload decoding are **one** shared function each.
+  A server that ignores
+  `Range`, answers the wrong range, truncates the body or claims a length
+  that disagrees with the probe is **refused**, never accepted. Measured over
+  the whole 750-image corpus, the HTTP read returns **exactly** the same
+  pixels as the local read on **750 of 750 images**; the header and the
+  directory cost **0.0901%** of the corpus, and a 1024×1024 viewport of the
+  16K photograph costs **0.8369%** of that file. No format change was needed
+  or made. See `docs/P10_HTTP_REPORT.md`.
 * A **measurement foundation** (`crates/vpng-validation`): every benchmark
   case is repeated ten times and reported with a **median** and a **p95**,
   not a single figure, against a sequential baseline measured in the same
@@ -91,7 +104,7 @@ are recorded in `docs/BENCHMARKS.md`, `docs/P5_REPORT.md` and
 * Conformance tests: exhaustive round-trip, region-vs-crop, malformed-input
   sweeps, a bounded mutation sweep, golden files, the `default_codec`
   clarification, and a deterministic fuzzing harness over seven targets.
-  447 Rust tests and 45 Python tests, all passing.
+  460 Rust tests and 45 Python tests, all passing.
 * Layered integrity: `info` (structure only), `check` (every payload CRC32C),
   `verify` (exact pixels against a reference).
 * Measured evidence: large-image stress (up to a 15360×8640 photo and
@@ -112,8 +125,9 @@ are recorded in `docs/BENCHMARKS.md`, `docs/P5_REPORT.md` and
 
 ## What is explicitly not here yet
 
-The WebAssembly package, HTTP Range streaming, layers and masks, GPU-ready
-payloads, and a frozen v1.0 format. The research-only
+The WebAssembly package, layers and masks, GPU-ready
+payloads, and a frozen v1.0 format. (HTTP Range streaming **is** here — see
+`docs/P10_HTTP_REPORT.md`.) The research-only
 pipelines that were **not** promoted — the other CARC models and the other
 hybrids — keep their ids in `0x80..=0xFF`: they cannot reach a file, and the
 decoder rejects a file that names one. Coverage-guided fuzzing runs
@@ -178,10 +192,16 @@ corpus with **no image worse**, at **3.44×** the encode time — so the
 extended set is opt-in and the default path's published bytes did not move by
 one. The **Python binding** is done too: the extension writes the same bytes
 as the command line on 750 of 750 corpus images, and the bytes are the
-published stable baseline's. The next steps are the rest of the ecosystem:
-WASM, HTTP Range, layers, GPU payloads and the graphical UI, then the release
+published stable baseline's. The **HTTP Range reader** is done as well: the
+byte source became an abstraction, so the local and the network readers are
+the same code path, and a container can be read without downloading it — the
+16K photograph's viewport costs **0.8369%** of that file, and the HTTP read
+returns exactly the local pixels on **750 of 750** corpus images. The next
+steps are the rest of the ecosystem:
+WASM, layers, GPU payloads and the graphical UI, then the release
 cadence from v0.2 to v0.23 and the v1.0 freeze last. See
-`docs/P8_CODEC_REPORT.md` and `docs/P9_PYTHON_REPORT.md`.
+`docs/P8_CODEC_REPORT.md`, `docs/P9_PYTHON_REPORT.md` and
+`docs/P10_HTTP_REPORT.md`.
 
 The roadmap also carries a **feature backlog** — a preview pyramid, Python
 bindings, a graphical editor, a WebAssembly package, HTTP Range streaming,
@@ -224,6 +244,8 @@ vpng encode input.png out.vpng --max-size 10MB      # decimal ceiling (ADR-0006)
 vpng encode input.png out.vpng --codec predictor  # raw | palette | rle | predictor | auto (default)
 vpng encode input.png out.vpng --codec-set extended  # stable (default) | extended (ids 0-6)
 vpng encode input.png out.vpng --codec context-entropy  # lz77 | predictor+dictionary | context-entropy
+vpng http-info https://example.com/picture.vpng          # header + directory over HTTP Range
+vpng http-decode-region https://example.com/picture.vpng crop.png --x 0 --y 0 --width 1024 --height 1024
 ```
 
 `info` reads only the header and directory, so it is O(1) in the tile count and
@@ -257,6 +279,19 @@ The binding uses the **stable ABI**, so one wheel works on every CPython
 from 3.8 onwards. `lossless=False` is **refused**, not ignored: VPNG has no
 lossy mode and no lossy fallback.
 
+### HTTP Range
+
+```bash
+vpng http-info https://example.com/picture.vpng
+vpng http-decode-region https://example.com/picture.vpng crop.png \
+  --x 0 --y 0 --width 1024 --height 1024
+```
+
+The server must honour `Range`. One that ignores it is **refused** with a
+clear error rather than quietly turned into a whole-file download. The two
+commands accept `--json`, so a caller can read the byte counts and the
+request counts without parsing the text.
+
 ## Layout
 
 ```text
@@ -270,6 +305,7 @@ crates/vpng-image       PNG and raw conversion: the one place that knows what a 
 crates/vpng-encoder     canonical pixels -> .vpng bytes
 crates/vpng-decoder     .vpng bytes -> full / tile / region pixels
 crates/vpng-source      the streaming reader: container metadata + per-tile payload reads
+                         over any byte source (a file, or HTTP Range requests)
 crates/vpng-cache       the bounded, byte-budgeted LRU cache of decoded tiles
 crates/vpng-view        the interactive engine: scheduler, worker pool, prefetch
 crates/vpng-editing     the editing engine: regions, transactions, undo/redo, atomic save
@@ -278,6 +314,7 @@ crates/vpng-fuzzing     fuzz targets + the deterministic mutation harness
 crates/vpng-validation  memory accounting, the streaming writer, the editing benchmark
 crates/vpng-testkit     deterministic fixtures + conformance tests
 crates/vpng-cli         the `vpng` binary
+crates/vpng-http        the HTTP Range source: a container fetched over the network
 crates/vpng-python      the PyO3 extension behind the `vpng` Python package
 python/vpng/            the Python package: the exception hierarchy and the wrappers
 python/tests/           the extension's test suite (standard library only)

@@ -8,6 +8,60 @@ separately as major.minor in the header.
 
 ### Added
 
+* **The HTTP Range reader, measured over the whole 750-image corpus (Phase C,
+  P13).** A container can now be read over the network without downloading
+  it. **No format change was needed or made**: every tile payload already had
+  its own offset and length, so a reader that can ask for byte ranges can
+  fetch the 64-byte header, the directory, and then exactly the payloads it
+  needs.
+  * **The byte source became an abstraction.** `vpng-source` gained the
+    `ByteSource` trait (`length`, `read_at`, `fork`, `describe`) and the
+    `FileSource` implementation; `RangeReader<S>` is now generic over it and
+    `TileReader` remains `RangeReader<FileSource>`, so every existing caller
+    keeps its exact type. `vpng-view` was generalised the same way —
+    `SourceDecoder<S>` and `SourceDecoderFactory<S>`, with `FileDecoder` and
+    `FileDecoderFactory` kept as aliases — so **the existing public API is
+    unchanged**.
+  * **There is one reader, not two.** The tile payload decoding is now one
+    shared `vpng_decoder::decode_tile_payload`, used by the in-memory
+    decoder, the streaming reader and the range reader alike, so all three
+    refuse the same corrupt payloads and produce the same pixels.
+  * **The new crate `crates/vpng-http`** provides `HttpSource`,
+    `HttpSourceOptions`, `HttpSourceInfo` and `HttpReader`, built on
+    `ureq` with rustls. It enforces the rules that make the byte counts
+    mean something: a `200 OK` answer to a range request is **refused** with
+    `UnsupportedFeature`; a `206` whose `Content-Range` disagrees with the
+    request is **refused** with `CorruptFile`; a short body is **refused**,
+    never handed back as a short buffer; a range past the end is **refused**
+    with `InvalidArgument`; a range larger than 8 MiB is fetched in several
+    requests; and `open()` always probes with a one-byte range, so a server
+    that will not honour `Range` is refused **before** the caller spends a
+    request on a whole-object download.
+  * **The HTTP read returns exactly the local pixels.** Measured over the
+    **whole 750-image corpus**, the region read over HTTP is **identical** to
+    the local read on **750 of 750 images** — both the canonical pixel digest
+    and the SHA-256 of the two PNG files.
+  * **The reader fetches only what it needs.** The header and the directory
+    cost **408,760 bytes** over the whole corpus — **0.0901%** of it — and a
+    1024×1024 viewport of the 16K photograph costs **1,039,409 bytes of
+    124,197,035**, which is **0.8369%** of that file. For the **158** images
+    larger than the viewport the transfer falls from 301,916,326 bytes to
+    **82,569,538** — **27.3485%**.
+  * **The accounting is cross-checked.** The client counts its own requests
+    and body bytes and the server counts its own; over the corpus the two are
+    **exactly equal** — 234,830,932 bytes on both sides.
+  * **New commands.** `vpng http-info <url>` prints the container's summary
+    and what it cost to fetch it; `vpng http-decode-region <url> <out>`
+    decodes one rectangle over HTTP. Both accept `--json`.
+  * **New documentation and evidence.** `docs/P10_HTTP_REPORT.md` (the
+    report, with the twelve questions and the acceptance gates),
+    `docs/decisions/ADR-0016-http-range-source.md` (the decision record),
+    `benchmarks/p10_http_results.json` (the raw data), the measurement driver
+    `benchmarks/http/run_http_bench.py`, and `check_http()` in
+    `benchmarks/verify_reports.py`, which binds every quoted figure to the
+    raw data. Nine new tests in `crates/vpng-http` and four in `vpng-cli`
+    pin the refusals against a hand-written HTTP/1.1 server.
+
 * **The Python bindings, measured against the command line over the whole
   corpus (Phase C, P9).** A PyO3 extension (`crates/vpng-python`) and a
   Python package (`python/vpng`) expose the stable engine to other
@@ -516,6 +570,22 @@ separately as major.minor in the header.
     exactly.
 
 ### Changed
+
+* **The container's metadata validation now lives in one place.** The reader
+  in `vpng-source` and the in-memory decoder in `vpng-decoder` each had their
+  own copy of the rules that decide which containers are acceptable — the
+  header's dimensions, the declared size against the bytes present, the
+  directory's length against the header's tile count, the flags against the
+  minor version, the promoted codecs against the version, the payload ranges
+  against the file's length, and the tile sizes against the pixel format.
+  * The rules are now one function, `vpng_decoder::parse_container_parts`,
+    and **both** readers call it. A container the range reader accepts is one
+    the in-memory decoder accepts, by construction rather than by agreement.
+  * The same function is what the WebAssembly package will use, so a browser
+    and the command line cannot disagree about which files are valid.
+  * The tile payload decoding was merged the same way:
+    `vpng_decoder::decode_tile_payload` is now the single place that verifies
+    a payload's CRC32C, decodes it and checks its length.
 
 * **The codec-name table now lives in one place.** The command line and the
   Python extension both need to turn a codec's *name* into its id. That

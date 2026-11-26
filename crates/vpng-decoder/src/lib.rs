@@ -14,6 +14,13 @@
 //! every other level holds derived preview pixels. The levels are derived from
 //! the directory by [`derive_levels`], which is the same function the
 //! file-backed reader uses, so the two readers cannot disagree.
+//!
+//! # One validation, every reader
+//!
+//! [`parse_container_parts`] holds the rules that decide which containers are
+//! acceptable. [`Document::parse`], the streaming reader in `vpng-source` and
+//! the WebAssembly package all call it, so no two of them can drift apart
+//! about which files are valid.
 
 #![forbid(unsafe_code)]
 
@@ -25,6 +32,150 @@ use vpng_codecs::{get_codec, DecodeContext};
 use vpng_container::{crc32c, Directory, DirectoryEntry, Header, HEADER_SIZE, MINOR_V0_3};
 use vpng_core::{CanonicalImage, Dimensions, Error, Limits, PixelFormat, Rect, Result};
 use vpng_tiling::{Partition, TileGeometry, TileGrid, TileRect};
+
+/// The pieces a validated container declares.
+///
+/// This is the metadata every reader needs and no reader may disagree about:
+/// the header, the tile directory, the levels derived from the directory, and
+/// the pixel format.
+#[derive(Debug, Clone)]
+pub struct ContainerParts {
+    header: Header,
+    directory: Directory,
+    levels: Vec<Level>,
+    format: PixelFormat,
+}
+
+impl ContainerParts {
+    /// The container's main header.
+    pub fn header(&self) -> &Header {
+        &self.header
+    }
+
+    /// The container's tile directory.
+    pub fn directory(&self) -> &Directory {
+        &self.directory
+    }
+
+    /// The container's levels: the original image first, then any derived
+    /// previews.
+    pub fn levels(&self) -> &[Level] {
+        &self.levels
+    }
+
+    /// The container's pixel format.
+    pub fn format(&self) -> PixelFormat {
+        self.format
+    }
+}
+
+/// Validate a container's header and directory and derive its levels.
+///
+/// **This is the one implementation of the rules that decide which containers
+/// are acceptable.** The in-memory decoder, the streaming reader over any byte
+/// source — a file or an HTTP object — and the WebAssembly package all call
+/// it, so a container one of them accepts is one all of them accept. The
+/// checks are:
+///
+/// * the header's dimensions and the file's declared size against the bytes
+///   actually present;
+/// * the directory's length against the header's tile count, and its flags
+///   against the minor version;
+/// * every payload's offset against the end of the directory, and its
+///   length against the decompression limits;
+/// * the three codecs promoted in v0.3 against the minor version, and every
+///   codec id against the set this build implements;
+/// * the payload ranges against the file's length, and the tile sizes
+///   against the pixel format;
+/// * the levels, derived from the directory by [`derive_levels`].
+///
+/// `file_size` is the number of bytes the object has. A source that knows the
+/// object's length passes that length; a caller that holds only the header
+/// and the directory — a browser that fetched two byte ranges — passes the
+/// header's declared size, so the payload *ranges* are checked against the
+/// size the container claims for itself.
+pub fn parse_container_parts(
+    header: Header,
+    directory_bytes: &[u8],
+    file_size: u64,
+    limits: &Limits,
+) -> Result<ContainerParts> {
+    let dims = header.dimensions()?;
+    limits.validate_dimensions(dims, "file")?;
+    let format = header.format()?;
+
+    if header.declared_file_size != file_size {
+        return Err(Error::corrupt(format!(
+            "declared file size {} does not match the {file_size} bytes actually present",
+            header.declared_file_size
+        )));
+    }
+
+    limits.validate_tile_count(header.tile_count)?;
+
+    if header.directory_offset < HEADER_SIZE as u64 {
+        return Err(Error::corrupt(
+            "directory offset points inside the fixed header",
+        ));
+    }
+
+    let directory_size = Directory::total_size(header.tile_count)?;
+    if directory_bytes.len() != directory_size {
+        return Err(Error::corrupt(format!(
+            "the tile directory is {} bytes, the header says {directory_size}",
+            directory_bytes.len()
+        )));
+    }
+    let directory = Directory::decode(directory_bytes, header.tile_count)?;
+
+    if directory.len() != header.tile_count as usize {
+        return Err(Error::corrupt(
+            "directory entry count disagrees with the header",
+        ));
+    }
+
+    directory.validate_flags(header.minor)?;
+
+    let directory_end = vpng_core::checked_add(header.directory_offset, directory_size as u64)?;
+
+    for (index, entry) in directory.entries.iter().enumerate() {
+        if entry.payload_offset < directory_end {
+            return Err(Error::corrupt(format!(
+                "tile {index} payload begins before the end of the tile directory"
+            )));
+        }
+        limits.validate_tile_payload(entry.compressed_length, entry.uncompressed_length as u64)?;
+        // The three codecs promoted in v0.3 may only be named by a file
+        // whose minor version says so.
+        if vpng_codecs::is_v0_3_codec(entry.codec_id) && header.minor < MINOR_V0_3 {
+            return Err(Error::unsupported(format!(
+                "tile {index} uses codec id {} ({}), which format v0.{} does not define",
+                entry.codec_id,
+                vpng_codecs::codec_name(entry.codec_id).unwrap_or("unknown"),
+                header.minor
+            )));
+        }
+        if !vpng_codecs::is_implemented(entry.codec_id) {
+            return Err(Error::unsupported(format!(
+                "tile {index} uses codec id {} ({}), which this build does not implement",
+                entry.codec_id,
+                vpng_codecs::codec_name(entry.codec_id).unwrap_or("unknown")
+            )));
+        }
+    }
+
+    directory.validate_payload_ranges(file_size)?;
+    directory.validate_tile_sizes(format.bytes_per_pixel())?;
+
+    let levels = derive_levels(&header, &directory, dims)?;
+
+    Ok(ContainerParts {
+        header,
+        directory,
+        levels,
+        format,
+    })
+}
 
 /// A validated, borrowable view over one VPNG file.
 #[derive(Debug)]
@@ -42,26 +193,10 @@ impl<'a> Document<'a> {
         limits.validate_file_size(bytes.len() as u64)?;
 
         let header = Header::parse(bytes)?;
-        let dims = header.dimensions()?;
-        limits.validate_dimensions(dims, "file")?;
-        let format = header.format()?;
 
-        if header.declared_file_size != bytes.len() as u64 {
-            return Err(Error::corrupt(format!(
-                "declared file size {} does not match the {} bytes actually present",
-                header.declared_file_size,
-                bytes.len()
-            )));
-        }
-
-        limits.validate_tile_count(header.tile_count)?;
-
-        if header.directory_offset < HEADER_SIZE as u64 {
-            return Err(Error::corrupt(
-                "directory offset points inside the fixed header",
-            ));
-        }
-
+        // The directory's own bytes are read out of the file, but every rule
+        // that decides whether the container is acceptable is applied by
+        // `parse_container_parts`, which every other reader shares.
         let directory_size = Directory::total_size(header.tile_count)?;
         vpng_core::checked_range(
             header.directory_offset,
@@ -70,58 +205,15 @@ impl<'a> Document<'a> {
         )?;
         let directory_start = header.directory_offset as usize;
         let directory_slice = &bytes[directory_start..directory_start + directory_size];
-        let directory = Directory::decode(directory_slice, header.tile_count)?;
 
-        if directory.len() != header.tile_count as usize {
-            return Err(Error::corrupt(
-                "directory entry count disagrees with the header",
-            ));
-        }
-
-        directory.validate_flags(header.minor)?;
-
-        let directory_end = vpng_core::checked_add(header.directory_offset, directory_size as u64)?;
-
-        // Per-tile structural checks that need cross-field context.
-        for (index, entry) in directory.entries.iter().enumerate() {
-            if entry.payload_offset < directory_end {
-                return Err(Error::corrupt(format!(
-                    "tile {index} payload begins before the end of the tile directory"
-                )));
-            }
-            limits
-                .validate_tile_payload(entry.compressed_length, entry.uncompressed_length as u64)?;
-            // The three codecs promoted in v0.3 may only be named by a file
-            // whose minor version says so. A v0.1 or v0.2 file that names one
-            // is malformed: those versions never defined them.
-            if vpng_codecs::is_v0_3_codec(entry.codec_id) && header.minor < MINOR_V0_3 {
-                return Err(Error::unsupported(format!(
-                    "tile {index} uses codec id {} ({}), which format v0.{} does not define",
-                    entry.codec_id,
-                    vpng_codecs::codec_name(entry.codec_id).unwrap_or("unknown"),
-                    header.minor
-                )));
-            }
-            if !vpng_codecs::is_implemented(entry.codec_id) {
-                return Err(Error::unsupported(format!(
-                    "tile {index} uses codec id {} ({}), which this build does not implement",
-                    entry.codec_id,
-                    vpng_codecs::codec_name(entry.codec_id).unwrap_or("unknown")
-                )));
-            }
-        }
-
-        directory.validate_payload_ranges(bytes.len() as u64)?;
-        directory.validate_tile_sizes(format.bytes_per_pixel())?;
-
-        let levels = derive_levels(&header, &directory, dims)?;
+        let parts = parse_container_parts(header, directory_slice, bytes.len() as u64, limits)?;
 
         Ok(Document {
             bytes,
-            header,
-            directory,
-            levels,
-            format,
+            header: parts.header,
+            directory: parts.directory,
+            levels: parts.levels,
+            format: parts.format,
         })
     }
 
@@ -209,31 +301,7 @@ impl<'a> Document<'a> {
             .get(index)
             .ok_or_else(|| Error::invalid(format!("tile index {index} is out of range")))?;
         let payload = self.tile_payload(index)?;
-
-        let computed = crc32c(payload);
-        if computed != entry.payload_checksum {
-            return Err(Error::corrupt(format!(
-                "tile {index} payload checksum mismatch: stored {:#010x}, computed {computed:#010x}",
-                entry.payload_checksum
-            )));
-        }
-
-        let codec = get_codec(entry.codec_id)?;
-        let ctx = DecodeContext {
-            limits: *limits,
-            format: self.format,
-        };
-        let mut out = Vec::new();
-        codec.decode(payload, entry.uncompressed_length as usize, &ctx, &mut out)?;
-
-        if out.len() != entry.uncompressed_length as usize {
-            return Err(Error::corrupt(format!(
-                "tile {index} decoded to {} bytes, directory declares {}",
-                out.len(),
-                entry.uncompressed_length
-            )));
-        }
-        Ok(out)
+        decode_tile_payload(index, payload, &entry, self.format, limits)
     }
 
     /// Decode the whole image. This is the only path that allocates a full-image
@@ -275,47 +343,9 @@ impl<'a> Document<'a> {
     /// No unrelated tile is decoded, and the returned image is sized to the
     /// requested rectangle. The region is taken from the **original** level.
     pub fn decode_region(&self, rect: Rect, limits: &Limits) -> Result<CanonicalImage> {
-        let dims = self.dimensions();
-        if !rect.is_within(dims) {
-            return Err(Error::invalid(format!(
-                "region {}x{}+{}+{} is outside the {}x{} image",
-                rect.width, rect.height, rect.x, rect.y, dims.width, dims.height
-            )));
-        }
-
-        let region_dims = Dimensions::new(rect.width, rect.height)?;
-        limits.validate_dimensions(region_dims, "region")?;
-
-        let mut out = CanonicalImage::new_zeroed(rect.width, rect.height, self.format, limits)?;
-        let bpp = self.format.bytes_per_pixel() as usize;
-        let out_row = out.row_bytes()? as usize;
-
-        let level = self.base_level();
-        for position in level.partition().tiles_for(rect)? {
-            let index = level
-                .entry_index(position)
-                .expect("a partition tile is always inside its level");
-            let pixels = self.decode_tile(index, limits)?;
-            let geom = level
-                .partition()
-                .tile(position)
-                .expect("a partition tile is always inside its level");
-
-            let ix0 = geom.x.max(rect.x);
-            let iy0 = geom.y.max(rect.y);
-            let ix1 = (geom.x + geom.width).min(rect.right()?);
-            let iy1 = (geom.y + geom.height).min(rect.bottom()?);
-
-            for y in iy0..iy1 {
-                let src =
-                    ((y - geom.y) as usize * geom.width as usize + (ix0 - geom.x) as usize) * bpp;
-                let n = (ix1 - ix0) as usize * bpp;
-                let dst = (y - rect.y) as usize * out_row + (ix0 - rect.x) as usize * bpp;
-                out.data_mut()[dst..dst + n].copy_from_slice(&pixels[src..src + n]);
-            }
-        }
-
-        Ok(out)
+        decode_region_from(self.base_level(), self.format, rect, limits, |index| {
+            self.decode_tile(index, limits)
+        })
     }
 
     /// Verify every tile payload's CRC32C without decoding a single pixel.
@@ -347,6 +377,109 @@ impl<'a> Document<'a> {
             payload_bytes,
         })
     }
+}
+
+/// Decode one tile's payload, checking its checksum and its length.
+///
+/// The payload's CRC32C is verified **before** the codec sees it, and the
+/// decoded length is checked against the directory's declaration. The codec
+/// is the one the directory names.
+///
+/// The helper is shared by the in-memory decoder, the streaming reader and
+/// the WebAssembly package, so that all three refuse the same payloads and
+/// decode the same pixels. `index` names the tile in the error messages.
+pub fn decode_tile_payload(
+    index: usize,
+    payload: &[u8],
+    entry: &DirectoryEntry,
+    format: PixelFormat,
+    limits: &Limits,
+) -> Result<Vec<u8>> {
+    let computed = crc32c(payload);
+    if computed != entry.payload_checksum {
+        return Err(Error::corrupt(format!(
+            "tile {index} payload checksum mismatch: stored {:#010x}, computed {computed:#010x}",
+            entry.payload_checksum
+        )));
+    }
+
+    let codec = get_codec(entry.codec_id)?;
+    let ctx = DecodeContext {
+        limits: *limits,
+        format,
+    };
+    let mut out = Vec::new();
+    codec.decode(payload, entry.uncompressed_length as usize, &ctx, &mut out)?;
+
+    if out.len() != entry.uncompressed_length as usize {
+        return Err(Error::corrupt(format!(
+            "tile {index} decoded to {} bytes, directory declares {}",
+            out.len(),
+            entry.uncompressed_length
+        )));
+    }
+    Ok(out)
+}
+
+/// Assemble a region from a level, fetching each tile's pixels with `fetch`.
+///
+/// The helper is shared by the in-memory decoder and the streaming reader so
+/// that the two cannot disagree about how a region is put together. The
+/// in-memory decoder fetches from the bytes it borrowed; the streaming
+/// reader fetches from a file, an HTTP object store, or anywhere else.
+///
+/// `fetch` is called with a **directory entry index** and must return that
+/// tile's decoded pixels. Only the tiles the region intersects are fetched:
+/// an unrelated tile is never asked for.
+pub fn decode_region_from<F>(
+    level: &Level,
+    format: PixelFormat,
+    rect: Rect,
+    limits: &Limits,
+    mut fetch: F,
+) -> Result<CanonicalImage>
+where
+    F: FnMut(usize) -> Result<Vec<u8>>,
+{
+    let dims = level.dimensions();
+    if !rect.is_within(dims) {
+        return Err(Error::invalid(format!(
+            "region {}x{}+{}+{} is outside the {}x{} image",
+            rect.width, rect.height, rect.x, rect.y, dims.width, dims.height
+        )));
+    }
+
+    let region_dims = Dimensions::new(rect.width, rect.height)?;
+    limits.validate_dimensions(region_dims, "region")?;
+
+    let mut out = CanonicalImage::new_zeroed(rect.width, rect.height, format, limits)?;
+    let bpp = format.bytes_per_pixel() as usize;
+    let out_row = out.row_bytes()? as usize;
+
+    for position in level.partition().tiles_for(rect)? {
+        let index = level
+            .entry_index(position)
+            .expect("a partition tile is always inside its level");
+        let pixels = fetch(index)?;
+        let geom = level
+            .partition()
+            .tile(position)
+            .expect("a partition tile is always inside its level");
+
+        let ix0 = geom.x.max(rect.x);
+        let iy0 = geom.y.max(rect.y);
+        let ix1 = (geom.x + geom.width).min(rect.right()?);
+        let iy1 = (geom.y + geom.height).min(rect.bottom()?);
+
+        for y in iy0..iy1 {
+            let src = ((y - geom.y) as usize * geom.width as usize + (ix0 - geom.x) as usize) * bpp;
+            let n = (ix1 - ix0) as usize * bpp;
+            let dst = (y - rect.y) as usize * out_row + (ix0 - rect.x) as usize * bpp;
+            out.data_mut()[dst..dst + n].copy_from_slice(&pixels[src..src + n]);
+        }
+    }
+
+    Ok(out)
 }
 
 /// Summary of a successful [`Document::check_integrity`] pass.

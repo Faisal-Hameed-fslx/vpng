@@ -17,6 +17,10 @@ name: CI
 # * `python`     — the benchmark and corpus scripts still parse, and the
 #                  milestone reports still match the raw data.
 # * `python-ext` — the native extension builds and its own test suite passes.
+#
+# The HTTP Range crate and the WebAssembly package are covered by the
+# ordinary `build`, `clippy` and `test` jobs: they are workspace members
+# with their own tests.
 
 on:
   push:
@@ -203,6 +207,8 @@ jobs:
         run: python benchmarks/stress/gen_synthetic.py --help
       - name: The memory runner must show its help
         run: python benchmarks/memory/run_memory.py --help
+      - name: The HTTP runner must show its help
+        run: python benchmarks/http/run_http_bench.py --help
       - name: The reports must match the raw data
         run: python benchmarks/verify_reports.py
 
