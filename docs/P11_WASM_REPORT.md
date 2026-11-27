@@ -300,6 +300,14 @@ handle zero **fails** rather than succeeds, and that the format version the
 module reports is the one this repository builds. A renamed or dropped
 function cannot pass silently.
 
+> **Later note (2026-11-27).** The v0.4 layer model added eight more
+> exports — the layer reports and `vpng_decode_layer`, plus
+> `vpng_open_parts_with_layers` — so the check now asserts **36**. The
+> count in this paragraph is the one this milestone measured; the check
+> itself is the live contract and it has grown with the format. The layer
+> exports are documented in `docs/P12_LAYERS_REPORT.md` and
+> `docs/decisions/ADR-0018-layers-and-masks.md`.
+
 ---
 
 ## 4. The twelve questions

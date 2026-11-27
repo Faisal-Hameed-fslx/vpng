@@ -1286,6 +1286,301 @@ def check_wasm() -> None:
     )
 
 
+def check_layers() -> None:
+    """Check the layers-and-masks report against the raw data."""
+    report = (REPO / "docs/P12_LAYERS_REPORT.md").read_text(encoding="utf-8")
+    report = report.replace("−", "-")
+    raw = json.loads(
+        (REPO / "benchmarks/p12_layers_results.json").read_text(encoding="utf-8")
+    )
+    memory = json.loads(
+        (REPO / "benchmarks/p12_layers_memory_results.json").read_text(encoding="utf-8")
+    )
+    manifest = json.loads((REPO / "benchmarks/corpus_manifest.json").read_text(encoding="utf-8"))
+    summary = raw["summary"]
+    overall = summary["overall"]
+    records = raw["records"]
+
+    def quoted(value, fmt) -> None:
+        text = format(value, fmt)
+        check(text in report, f"the layers report does not contain the figure {text!r}")
+
+    # ---- the corpus is the corpus ---------------------------------------------
+    manifest_ids = {entry["id"] for entry in manifest["images"]}
+    result_ids = {record["id"] for record in records}
+    check(
+        manifest_ids == result_ids,
+        "the manifest and the layers measurement file do not hold the same images",
+    )
+    check(
+        len(records) == manifest["total_images"],
+        f"the layers measurement file holds {len(records)} images, the manifest says "
+        f"{manifest['total_images']}",
+    )
+    quoted(len(records), ",")
+    quoted(len(records), "d")
+
+    # ---- the plain files are the published baseline's -------------------------
+    check(
+        overall["plain_bytes"] == 453_767_460,
+        f"the plain total is {overall['plain_bytes']}, the published stable baseline is "
+        "453767460",
+    )
+    quoted(overall["plain_bytes"], ",")
+    check(
+        overall["canonical_bytes"] == 1_450_363_330,
+        f"the canonical total is {overall['canonical_bytes']}, the published one is "
+        "1450363330",
+    )
+    quoted(overall["canonical_bytes"], ",")
+
+    # ---- the headline counts ---------------------------------------------------
+    check(
+        overall["one_composite_exact"] == len(records),
+        f"{len(records) - overall['one_composite_exact']} one-layer composites are not "
+        "exactly the base's pixels",
+    )
+    check(
+        overall["two_base_exact"] == len(records),
+        f"{len(records) - overall['two_base_exact']} base layers are not exactly the "
+        "original's pixels",
+    )
+    check(
+        overall["two_composite_differs"] == len(records),
+        f"{len(records) - overall['two_composite_differs']} two-layer composites do not "
+        "differ from the base",
+    )
+    check(overall["check_failures"] == 0, f"{overall['check_failures']} files failed the check")
+    quoted(overall["one_composite_exact"], "d")
+    quoted(overall["two_base_exact"], "d")
+    quoted(overall["two_composite_differs"], "d")
+    quoted(overall["check_failures"], "d")
+
+    # ---- the masks -------------------------------------------------------------
+    check(
+        overall["masked_images"] == 114,
+        f"{overall['masked_images']} images were given a mask, the report says 114",
+    )
+    check(
+        overall["masked_check_failures"] == 0,
+        f"{overall['masked_check_failures']} masked files failed the check",
+    )
+    check(
+        overall["masked_composite_differs"] == overall["masked_images"],
+        f"{overall['masked_composite_differs']} masked composites differ from the "
+        f"unmasked ones, not {overall['masked_images']}",
+    )
+    quoted(overall["masked_images"], "d")
+    quoted(overall["masked_check_failures"], "d")
+    quoted(overall["masked_composite_differs"], "d")
+
+    # Every image whose format has an alpha channel must have been masked.
+    alpha_formats = {"rgba8", "graya8"}
+    expected_masked = sum(
+        1 for record in records if record["pixel_format"] in alpha_formats
+    )
+    check(
+        expected_masked == overall["masked_images"],
+        f"{expected_masked} images have an alpha format, but {overall['masked_images']} "
+        "were masked",
+    )
+
+    # ---- the layer table's cost -------------------------------------------------
+    overheads = {record["one_bytes"] - record["plain_bytes"] for record in records}
+    check(
+        overheads == {60},
+        f"the layer table's cost is not 60 bytes on every file: {sorted(overheads)}",
+    )
+    check(
+        overall["one_overhead_bytes"] == 45_000,
+        f"the layer table's cost over the corpus is {overall['one_overhead_bytes']}, "
+        "not 45000",
+    )
+    quoted(overall["one_bytes"], ",")
+    quoted(overall["one_overhead_bytes"], ",")
+    quoted(overall["one_overhead_ratio"] * 100, ".6f")
+
+    # The worst per-file share: the smallest file in the corpus.
+    worst = max(
+        records,
+        key=lambda record: (record["one_bytes"] - record["plain_bytes"])
+        / record["plain_bytes"],
+    )
+    worst_share = (
+        (worst["one_bytes"] - worst["plain_bytes"]) / worst["plain_bytes"] * 100
+    )
+    check(
+        worst["plain_bytes"] == 111,
+        f"the worst overhead share belongs to a {worst['plain_bytes']}-byte file, not "
+        "a 111-byte one",
+    )
+    quoted(worst["plain_bytes"], "d")
+    quoted(worst_share, ".6f")
+
+    # The one-layer file must be bigger than the plain file and smaller than the
+    # two-layer file.
+    check(
+        overall["plain_bytes"] < overall["one_bytes"] < overall["two_bytes"],
+        "the three file sizes are not in order",
+    )
+    quoted(overall["two_bytes"], ",")
+    quoted(overall["two_overhead_bytes"], ",")
+
+    # ---- the layers are encoded independently ------------------------------------
+    for record in records:
+        base_one = record["one_layers"][0]
+        base_two = record["two_layers"][0]
+        check(
+            base_one["compressed_bytes"] == base_two["compressed_bytes"],
+            f"{record['id']}: the base layer's compressed bytes changed when the overlay "
+            "was added",
+        )
+        check(
+            base_one["uncompressed_bytes"] == base_two["uncompressed_bytes"],
+            f"{record['id']}: the base layer's uncompressed bytes changed when the "
+            "overlay was added",
+        )
+        check(
+            base_two["uncompressed_bytes"] == record["canonical_bytes"],
+            f"{record['id']}: the base layer's uncompressed bytes are not the canonical "
+            "bytes",
+        )
+
+    # ---- the per-category table -------------------------------------------------
+    for name, row in summary["by_category"].items():
+        quoted(row["count"], "d")
+        quoted(row["plain_bytes"], ",")
+        quoted(row["one_bytes"], ",")
+        quoted(row["one_overhead_bytes"], ",")
+        quoted(row["one_overhead_ratio"] * 100, ".6f")
+        check(
+            row["one_composite_exact"] == row["count"],
+            f"{name}: not every one-layer composite is exact",
+        )
+        check(
+            row["two_base_exact"] == row["count"],
+            f"{name}: not every base layer is exact",
+        )
+        check(
+            row["check_failures"] == 0,
+            f"{name}: {row['check_failures']} files failed the check",
+        )
+
+    # The category totals must add up to the overall total.
+    check(
+        sum(row["plain_bytes"] for row in summary["by_category"].values())
+        == overall["plain_bytes"],
+        "the per-category plain totals do not add up to the overall total",
+    )
+    check(
+        sum(row["one_bytes"] for row in summary["by_category"].values())
+        == overall["one_bytes"],
+        "the per-category one-layer totals do not add up to the overall total",
+    )
+
+    # ---- the 16K photograph ------------------------------------------------------
+    baseline = next(
+        (record for record in records if record["id"] == "user-photo-15360x8640"), None
+    )
+    check(baseline is not None, "the 16K photograph is not in the layers measurement")
+    if baseline is not None:
+        check(
+            baseline["plain_bytes"] == 124_197_035,
+            f"the 16K plain file is {baseline['plain_bytes']} bytes, the published "
+            "baseline is 124197035",
+        )
+        check(
+            baseline["plain_sha256"]
+            == "d029a7ebc1e0347cb3399ab6f9de9653da5853c96b38d95cddc3b8bb45a14dbf",
+            "the 16K plain digest is not the published P5.2 baseline digest",
+        )
+        check(
+            baseline["one_bytes"] == baseline["plain_bytes"] + 60,
+            "the 16K one-layer file is not the plain file plus 60 bytes",
+        )
+        quoted(baseline["plain_bytes"], ",")
+        quoted(baseline["one_bytes"], ",")
+        quoted(baseline["two_bytes"], ",")
+        quoted(baseline["plain_sha256"], "")
+        quoted(baseline["one_sha256"], "")
+        for layer in baseline["two_layers"]:
+            if layer["index"] == 0:
+                quoted(layer["ratio"], ".6f")
+            else:
+                quoted(layer["ratio"], ".6f")
+
+    # ---- the ratio distribution --------------------------------------------------
+    quoted(summary["layer_ratio_distribution"]["median"], ".6f")
+    quoted(summary["layer_ratio_distribution"]["p95"], ".6f")
+    quoted(summary["layer_ratio_distribution"]["mean"], ".6f")
+    quoted(summary["layer_ratio_distribution"]["stdev"], ".6f")
+    quoted(summary["overlay_ratio_distribution"]["median"], ".6f")
+    quoted(summary["overlay_ratio_distribution"]["p95"], ".6f")
+    quoted(summary["overlay_ratio_distribution"]["mean"], ".6f")
+    quoted(summary["overlay_ratio_distribution"]["stdev"], ".6f")
+    check(
+        summary["layer_ratio_distribution"]["count"] == 2 * len(records),
+        "the ratio distribution does not hold every layer",
+    )
+    check(
+        summary["layer_ratio_distribution"]["min"] == 1.0,
+        "the smallest layer ratio is not 1.0",
+    )
+
+    # ---- the memory figures ------------------------------------------------------
+    for name, case in memory["cases"].items():
+        quoted(case["peak_working_set_bytes"], ",")
+        check(
+            case["exit"] == 0,
+            f"the memory case {name} exited with {case['exit']}",
+        )
+    check(
+        memory["image"]["canonical_bytes"] == 398_131_200,
+        f"the memory case's image is {memory['image']['canonical_bytes']} canonical "
+        "bytes, not 398131200",
+    )
+    quoted(memory["image"]["canonical_bytes"], ",")
+    quoted(memory["files"]["one_layer_bytes"], ",")
+    quoted(memory["files"]["two_layer_bytes"], ",")
+    check(
+        "included" in memory["scope"] and "excluded" in memory["scope"],
+        "the memory scope does not say what is included and what is excluded",
+    )
+
+    # ---- the size ceiling --------------------------------------------------------
+    check(
+        overall["one_under_ceiling"] == 748,
+        f"{overall['one_under_ceiling']} one-layer files are under 10 MB, not 748",
+    )
+    check(
+        overall["plain_under_ceiling"] == overall["one_under_ceiling"],
+        "the layer table pushed a file over the 10 MB ceiling",
+    )
+    quoted(overall["one_under_ceiling"], "d")
+
+    # ---- the report says what it does and does not claim -------------------------
+    check(
+        "included" in report.lower() and "excluded" in report.lower(),
+        "the layers report does not state the measurement scope",
+    )
+    check(
+        "PASS" in report and "BLOCKED" in report,
+        "the layers report does not use the gate vocabulary",
+    )
+    check(
+        "lossless" in report.lower() or "exact" in report.lower(),
+        "the layers report does not state the lossless property",
+    )
+    check(
+        "12" in report and "Q12" in report,
+        "the layers report does not answer all twelve questions",
+    )
+    check(
+        "refuses" in report.lower(),
+        "the layers report does not say that the editing engine refuses a layered file",
+    )
+
+
 def main() -> int:
     raw = json.loads((REPO / "benchmarks/p3_5_raw_results.json").read_text(encoding="utf-8"))
     report = (REPO / "docs/P3_5_COMPRESSION_RESEARCH_REPORT.md").read_text(encoding="utf-8")
@@ -1540,6 +1835,9 @@ def main() -> int:
 
     # ---- Phase C: the WebAssembly package -------------------------------------
     check_wasm()
+
+    # ---- Phase C: layers and masks ------------------------------------------------
+    check_layers()
 
     if problems:
         print(f"{len(problems)} problem(s):")

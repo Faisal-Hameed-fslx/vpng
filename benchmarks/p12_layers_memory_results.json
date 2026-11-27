@@ -1,0 +1,86 @@
+{
+ "schema": "vpng.layers.memory.v1",
+ "generated_by": "benchmarks/layers/measure_layer_memory.py",
+ "image": {
+  "id": "user-photo-15360x8640",
+  "width": 15360,
+  "height": 8640,
+  "pixel_format": "rgb8",
+  "canonical_bytes": 398131200
+ },
+ "files": {
+  "one_layer_bytes": 124197095,
+  "two_layer_bytes": 155472590
+ },
+ "scope": {
+  "measured": "the process's peak working set, from the operating system's GetProcessMemoryInfo, taken while the process was alive",
+  "included": "the operating system, the loader, the binary's text and data, the Rust heap, every buffer the command allocated, and the file it read",
+  "excluded": "nothing: the figure is the whole process",
+  "not_a_target": "this is a process figure for a whole-canvas operation; it is not the 64 MB localized-editing target, which is a different operation"
+ },
+ "cases": {
+  "layers_json": {
+   "command": [
+    "layers",
+    "E:\\VPNG\\benchmarks\\work\\layers-memory\\two.vpng",
+    "--json"
+   ],
+   "exit": 0,
+   "peak_working_set_bytes": 159817728,
+   "elapsed_ms": 89
+  },
+  "check": {
+   "command": [
+    "check",
+    "E:\\VPNG\\benchmarks\\work\\layers-memory\\two.vpng"
+   ],
+   "exit": 0,
+   "peak_working_set_bytes": 159768576,
+   "elapsed_ms": 93
+  },
+  "decode_layer_base": {
+   "command": [
+    "decode-layer",
+    "E:\\VPNG\\benchmarks\\work\\layers-memory\\two.vpng",
+    "E:\\VPNG\\benchmarks\\work\\layers-memory\\base.raw",
+    "--layer",
+    "0"
+   ],
+   "exit": 0,
+   "peak_working_set_bytes": 558731264,
+   "elapsed_ms": 14558
+  },
+  "decode_layer_overlay": {
+   "command": [
+    "decode-layer",
+    "E:\\VPNG\\benchmarks\\work\\layers-memory\\two.vpng",
+    "E:\\VPNG\\benchmarks\\work\\layers-memory\\overlay-decoded.raw",
+    "--layer",
+    "1"
+   ],
+   "exit": 0,
+   "peak_working_set_bytes": 260386816,
+   "elapsed_ms": 3876
+  },
+  "composite_one_layer": {
+   "command": [
+    "composite",
+    "E:\\VPNG\\benchmarks\\work\\layers-memory\\one.vpng",
+    "E:\\VPNG\\benchmarks\\work\\layers-memory\\one.raw"
+   ],
+   "exit": 0,
+   "peak_working_set_bytes": 527650816,
+   "elapsed_ms": 14723
+  },
+  "composite_two_layers": {
+   "command": [
+    "composite",
+    "E:\\VPNG\\benchmarks\\work\\layers-memory\\two.vpng",
+    "E:\\VPNG\\benchmarks\\work\\layers-memory\\two.raw"
+   ],
+   "exit": 0,
+   "peak_working_set_bytes": 658427904,
+   "elapsed_ms": 18658
+  }
+ }
+}

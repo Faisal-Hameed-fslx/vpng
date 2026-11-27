@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use vpng_container::{Directory, DirectoryEntry, Header, HEADER_SIZE};
 use vpng_core::{CanonicalImage, Dimensions, Error, Limits, PixelFormat, Rect, Result};
-use vpng_decoder::Level;
+use vpng_decoder::{Layer, Level};
 use vpng_tiling::Partition;
 
 use crate::source::{ByteSource, FileSource};
@@ -20,7 +20,7 @@ use crate::source::{ByteSource, FileSource};
 pub struct ContainerMeta {
     header: Header,
     directory: Directory,
-    levels: Vec<Level>,
+    layers: Vec<Layer>,
     format: PixelFormat,
 }
 
@@ -35,19 +35,36 @@ impl ContainerMeta {
         &self.directory
     }
 
-    /// The file's levels: the original image first, then any derived previews.
-    pub fn levels(&self) -> &[Level] {
-        &self.levels
+    /// The file's layers: the base layer first, then any others.
+    pub fn layers(&self) -> &[Layer] {
+        &self.layers
     }
 
-    /// The number of levels in the file.
+    /// The number of layers in the file.
+    pub fn layer_count(&self) -> usize {
+        self.layers.len()
+    }
+
+    /// One layer of the file, by its index.
+    pub fn layer(&self, index: usize) -> Option<&Layer> {
+        self.layers.get(index)
+    }
+
+    /// The file's levels: the original image first, then any derived previews.
+    ///
+    /// The levels belong to the **base** layer.
+    pub fn levels(&self) -> &[Level] {
+        self.layers[0].levels()
+    }
+
+    /// The number of levels in the base layer.
     pub fn level_count(&self) -> usize {
-        self.levels.len()
+        self.layers[0].levels().len()
     }
 
     /// The original image's level.
     pub fn base_level(&self) -> &Level {
-        &self.levels[0]
+        self.layers[0].base_level()
     }
 
     /// One level of the file, by its index.
@@ -55,7 +72,7 @@ impl ContainerMeta {
     /// Level 0 is the original image; every higher level holds a derived
     /// preview. `None` means the file has no such level.
     pub fn level(&self, index: usize) -> Option<&Level> {
-        self.levels.get(index)
+        self.levels().get(index)
     }
 
     /// The original image's exact partition.
@@ -109,14 +126,24 @@ impl ContainerMeta {
     /// only the header and the directory — a browser that fetched two byte
     /// ranges — passes the header's declared size, so the payload *ranges*
     /// are checked against the size the container claims for itself.
+    ///
+    /// A container with a layer table needs the table as well: it says what
+    /// the container means, so a reader cannot skip it.
     pub fn parse(
         header_bytes: &[u8],
         directory_bytes: &[u8],
+        layer_table_bytes: Option<&[u8]>,
         file_size: u64,
         limits: &Limits,
     ) -> Result<Self> {
         let header = Header::parse(header_bytes)?;
-        Self::from_parts(header, directory_bytes, file_size, limits)
+        Self::from_parts(
+            header,
+            directory_bytes,
+            layer_table_bytes,
+            file_size,
+            limits,
+        )
     }
 
     /// Parse and validate a container's metadata from an already parsed
@@ -128,16 +155,22 @@ impl ContainerMeta {
     pub fn from_parts(
         header: Header,
         directory_bytes: &[u8],
+        layer_table_bytes: Option<&[u8]>,
         file_size: u64,
         limits: &Limits,
     ) -> Result<Self> {
-        let parts =
-            vpng_decoder::parse_container_parts(header, directory_bytes, file_size, limits)?;
+        let parts = vpng_decoder::parse_container_parts(
+            header,
+            directory_bytes,
+            layer_table_bytes,
+            file_size,
+            limits,
+        )?;
 
         Ok(ContainerMeta {
             header: *parts.header(),
             directory: parts.directory().clone(),
-            levels: parts.levels().to_vec(),
+            layers: parts.layers().to_vec(),
             format: parts.format(),
         })
     }
@@ -199,15 +232,33 @@ impl<S: ByteSource> RangeReader<S> {
         vpng_core::checked_range(header.directory_offset, directory_size as u64, file_size)?;
         let directory_bytes = source.read_at(header.directory_offset, directory_size)?;
 
+        // The layer table, when the container has one. It sits between the
+        // directory and the payloads.
+        let layer_table_bytes = if header.has_layers() {
+            let length = header.layer_table_length as usize;
+            vpng_core::checked_range(header.layer_table_offset as u64, length as u64, file_size)?;
+            Some(source.read_at(header.layer_table_offset as u64, length)?)
+        } else {
+            None
+        };
+
         // The validation itself is shared with every other reader, so a
         // container this reader accepts is one every other reader accepts.
-        let meta = ContainerMeta::from_parts(header, &directory_bytes, file_size, limits)?;
+        let meta = ContainerMeta::from_parts(
+            header,
+            &directory_bytes,
+            layer_table_bytes.as_deref(),
+            file_size,
+            limits,
+        )?;
+
+        let table_bytes = header.layer_table_length as u64;
 
         Ok(RangeReader {
             source,
             meta: Arc::new(meta),
             limits: *limits,
-            bytes_read: (HEADER_SIZE as u64) + directory_size as u64,
+            bytes_read: (HEADER_SIZE as u64) + directory_size as u64 + table_bytes,
             payloads_read: 0,
         })
     }
@@ -299,7 +350,7 @@ impl<S: ByteSource> RangeReader<S> {
     /// The assembly is the same code the in-memory decoder uses, so the two
     /// cannot disagree about how a region is put together.
     pub fn decode_region(&mut self, rect: Rect, limits: &Limits) -> Result<CanonicalImage> {
-        let level = self.meta.levels.first().cloned().ok_or_else(|| {
+        let level = self.meta.levels().first().cloned().ok_or_else(|| {
             Error::corrupt("the container has no levels, so it has no pixels to decode")
         })?;
         let format = self.meta.format;

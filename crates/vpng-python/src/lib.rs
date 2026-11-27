@@ -43,7 +43,7 @@ use crate::image::{format_name, parse_format};
 use crate::report::{CheckResult, DecodeResult, EncodeResult};
 
 /// The version of the VPNG container this extension writes.
-const FORMAT_VERSION: &str = "0.3";
+const FORMAT_VERSION: &str = "0.4";
 
 /// The default tile edge.
 const DEFAULT_TILE_SIZE: u32 = vpng_encoder::DEFAULT_TILE_SIZE;
@@ -269,6 +269,203 @@ fn encode_image(
     Ok(EncodeResult::from_stream(&report).with_minor(header.minor))
 }
 
+/// Encode several layers into a `.vpng` file.
+///
+/// The file is a **v0.4** file: it carries a layer table, and its directory
+/// entries name the layer each tile belongs to. The layers are encoded
+/// independently of one another, and each layer's bytes are accounted for on
+/// its own.
+///
+/// Each layer is a mapping with these keys:
+///
+/// * `pixels` — the layer's canonical pixel bytes (**required**);
+/// * `width` and `height` — the shape of those pixels (**required**);
+/// * `name` — the layer's name (default: empty);
+/// * `kind` — `"pixels"` (the default) or `"mask"`;
+/// * `x` and `y` — where the layer sits on the canvas (default: 0, 0);
+/// * `opacity` — 0 to 255 (default: 255);
+/// * `mask` — the index of the layer that masks this one (default: none).
+///
+/// The base layer is layer 0: it must cover the whole canvas.
+#[pyfunction]
+#[pyo3(signature = (
+    output,
+    layers,
+    *,
+    format = "rgba8",
+    tile_size = DEFAULT_TILE_SIZE,
+    workers = 1
+))]
+fn encode_layers(
+    output: PathBuf,
+    layers: Vec<Bound<'_, PyAny>>,
+    format: &str,
+    tile_size: u32,
+    workers: usize,
+) -> PyResult<EncodeResult> {
+    if tile_size == 0 {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "the tile size must be non-zero",
+        ));
+    }
+    if workers == 0 {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "the worker count must be at least one",
+        ));
+    }
+    if layers.is_empty() {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "a file needs at least one layer",
+        ));
+    }
+
+    let limits = Limits::default();
+    let pixel_format: PixelFormat = to_py_result(parse_format(format))?;
+
+    let mut images: Vec<CanonicalImage> = Vec::with_capacity(layers.len());
+    let mut specs: Vec<LayerSpec> = Vec::with_capacity(layers.len());
+
+    for (index, entry) in layers.iter().enumerate() {
+        let dict = entry.cast::<pyo3::types::PyDict>().map_err(|_| {
+            pyo3::exceptions::PyTypeError::new_err(format!("layer {index} must be a mapping"))
+        })?;
+        let pixels = match dict.get_item("pixels")? {
+            Some(value) => value.extract::<Vec<u8>>().map_err(|_| {
+                pyo3::exceptions::PyTypeError::new_err(format!(
+                    "layer {index}'s `pixels` must be a bytes-like object"
+                ))
+            })?,
+            None => {
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "layer {index} needs `pixels`"
+                )))
+            }
+        };
+        let width = required_u32(dict, "width", index)?;
+        let height = required_u32(dict, "height", index)?;
+        let image = to_py_result(CanonicalImage::from_vec_checked(
+            width,
+            height,
+            pixel_format,
+            pixels,
+            &limits,
+        ))?;
+
+        let name = optional_string(dict, "name")?.unwrap_or_default();
+        let kind = optional_string(dict, "kind")?.unwrap_or_else(|| "pixels".to_string());
+        let x = optional_u32(dict, "x")?.unwrap_or(0);
+        let y = optional_u32(dict, "y")?.unwrap_or(0);
+        let opacity = optional_u32(dict, "opacity")?.unwrap_or(255).min(255) as u8;
+        let rect = to_py_result(Rect::new(x, y, width, height))?;
+
+        match kind.as_str() {
+            "pixels" | "image" | "mask" => {}
+            other => {
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "layer {index} has the kind `{other}`; it must be `pixels` or `mask`"
+                )))
+            }
+        }
+
+        images.push(image);
+        specs.push(LayerSpec {
+            name,
+            is_mask: kind == "mask",
+            rect,
+            opacity,
+            mask: optional_u32(dict, "mask")?.map(|mask| mask as usize),
+        });
+    }
+
+    // The layers borrow their images, so they are built after every image is
+    // in place.
+    let mut inputs: Vec<vpng_encoder::LayerInput<'_>> = Vec::with_capacity(specs.len());
+    for (spec, image) in specs.iter().zip(images.iter()) {
+        let mut layer = if spec.is_mask {
+            vpng_encoder::LayerInput::mask(spec.name.clone(), spec.rect, image)
+        } else {
+            vpng_encoder::LayerInput::pixels(spec.name.clone(), spec.rect, image)
+        };
+        layer.opacity = spec.opacity;
+        if let Some(mask) = spec.mask {
+            layer = layer.with_mask(mask);
+        }
+        inputs.push(layer);
+    }
+
+    let options = EncodeOptions::default()
+        .with_tile_size(tile_size, tile_size)
+        .with_limits(limits);
+    let parallel = ParallelOptions::default().with_workers(workers);
+    let report = to_py_result(vpng_encoder::stream::encode_layers_to_file(
+        &inputs, &options, &parallel, &output,
+    ))?;
+
+    let bytes = io_result(std::fs::read(&output))?;
+    let header = to_py_result(vpng_container::Header::parse(&bytes))?;
+    Ok(EncodeResult::from_stream(&report).with_minor(header.minor))
+}
+
+/// What a layer's description says, apart from its pixels.
+struct LayerSpec {
+    /// The layer's name.
+    name: String,
+    /// Whether the layer is a mask rather than picture pixels.
+    is_mask: bool,
+    /// Where the layer sits on the canvas.
+    rect: Rect,
+    /// The layer's opacity, 0 to 255.
+    opacity: u8,
+    /// The index of the layer that masks this one.
+    mask: Option<usize>,
+}
+
+/// A required integer in a layer's description.
+fn required_u32(entry: &Bound<'_, pyo3::types::PyDict>, key: &str, index: usize) -> PyResult<u32> {
+    match entry.get_item(key)? {
+        Some(value) => value.extract::<u32>().map_err(|_| {
+            pyo3::exceptions::PyTypeError::new_err(format!(
+                "layer {index}'s `{key}` must be an integer"
+            ))
+        }),
+        None => Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "layer {index} needs `{key}`"
+        ))),
+    }
+}
+
+/// An optional integer in a layer's description.
+fn optional_u32(entry: &Bound<'_, pyo3::types::PyDict>, key: &str) -> PyResult<Option<u32>> {
+    match entry.get_item(key)? {
+        None => Ok(None),
+        Some(value) => {
+            if value.is_none() {
+                Ok(None)
+            } else {
+                value.extract::<u32>().map(Some).map_err(|_| {
+                    pyo3::exceptions::PyTypeError::new_err(format!("`{key}` must be an integer"))
+                })
+            }
+        }
+    }
+}
+
+/// An optional string in a layer's description.
+fn optional_string(entry: &Bound<'_, pyo3::types::PyDict>, key: &str) -> PyResult<Option<String>> {
+    match entry.get_item(key)? {
+        None => Ok(None),
+        Some(value) => {
+            if value.is_none() {
+                Ok(None)
+            } else {
+                value.extract::<String>().map(Some).map_err(|_| {
+                    pyo3::exceptions::PyTypeError::new_err(format!("`{key}` must be a string"))
+                })
+            }
+        }
+    }
+}
+
 /// Decode a `.vpng` file into a picture.
 ///
 /// `level` picks a preview level; zero (the default) is the original, which
@@ -338,6 +535,117 @@ fn decode_region(
         0,
         written_bytes,
     ))
+}
+
+/// List the layers of a `.vpng` file.
+///
+/// A file written before format v0.4 has exactly one layer: the base layer,
+/// which is the picture itself. A v0.4 file may hold more, each with a name,
+/// a rectangle on the canvas, an opacity and — optionally — a mask.
+///
+/// Every layer is reported with its own byte accounting: the pixels it holds
+/// and the bytes its payloads take.
+#[pyfunction]
+fn layers<'py>(source: PathBuf, py: Python<'py>) -> PyResult<Vec<Bound<'py, pyo3::types::PyDict>>> {
+    let limits = Limits::default();
+    let bytes = io_result(std::fs::read(&source))?;
+    let document = to_py_result(Document::parse(&bytes, &limits))?;
+
+    let mut out = Vec::with_capacity(document.layer_count());
+    for layer in document.layers() {
+        let rect = layer.rect();
+        let info = pyo3::types::PyDict::new(py);
+        info.set_item("index", layer.index())?;
+        info.set_item("name", layer.name())?;
+        info.set_item("kind", if layer.is_mask() { "mask" } else { "pixels" })?;
+        info.set_item("is_mask", layer.is_mask())?;
+        info.set_item("x", rect.x)?;
+        info.set_item("y", rect.y)?;
+        info.set_item("width", rect.width)?;
+        info.set_item("height", rect.height)?;
+        info.set_item("opacity", layer.opacity())?;
+        info.set_item("mask", layer.mask())?;
+        info.set_item("tile_count", layer.base_level().tile_count())?;
+        info.set_item("uncompressed_bytes", layer.uncompressed_bytes())?;
+        info.set_item("compressed_bytes", layer.compressed_bytes())?;
+        info.set_item("ratio", layer.ratio())?;
+        out.push(info);
+    }
+    Ok(out)
+}
+
+/// Decode one layer's own pixels into a picture.
+///
+/// The result is sized to the **layer's own rectangle**, not to the canvas,
+/// and it holds the layer's pixels exactly. A mask layer decodes to its
+/// coverage image: the same pixels, of which only the alpha channel carries
+/// meaning.
+#[pyfunction]
+fn decode_layer(source: PathBuf, output: PathBuf, layer: u32) -> PyResult<DecodeResult> {
+    let limits = Limits::default();
+    let bytes = io_result(std::fs::read(&source))?;
+    let document = to_py_result(Document::parse(&bytes, &limits))?;
+    let image = to_py_result(document.decode_layer(layer as usize, &limits))?;
+    to_py_result(write_picture(&output, &image))?;
+    let written_bytes = io_result(std::fs::metadata(&output).map(|m| m.len()))?;
+    Ok(DecodeResult::new(
+        image.width(),
+        image.height(),
+        format_name(image.format()),
+        bytes.len() as u64,
+        layer,
+        written_bytes,
+    ))
+}
+
+/// Decode one layer's own pixels into canonical pixel bytes.
+///
+/// The bytes are **canonical**: rows are tightly packed with no padding, and
+/// a 16-bit sample is little-endian.
+#[pyfunction]
+fn decode_layer_to_bytes<'py>(
+    source: PathBuf,
+    layer: u32,
+    py: Python<'py>,
+) -> PyResult<Bound<'py, PyBytes>> {
+    let limits = Limits::default();
+    let bytes = io_result(std::fs::read(&source))?;
+    let document = to_py_result(Document::parse(&bytes, &limits))?;
+    let image = to_py_result(document.decode_layer(layer as usize, &limits))?;
+    Ok(PyBytes::new(py, image.data()))
+}
+
+/// Composite every layer into one picture.
+///
+/// The base layer is the canvas, exactly. Each layer above it is blended over
+/// the result with its own opacity and — when it has one — its mask. A file
+/// with one layer composites to exactly that layer's pixels.
+#[pyfunction]
+fn composite(source: PathBuf, output: PathBuf) -> PyResult<DecodeResult> {
+    let limits = Limits::default();
+    let bytes = io_result(std::fs::read(&source))?;
+    let document = to_py_result(Document::parse(&bytes, &limits))?;
+    let image = to_py_result(document.composite(&limits))?;
+    to_py_result(write_picture(&output, &image))?;
+    let written_bytes = io_result(std::fs::metadata(&output).map(|m| m.len()))?;
+    Ok(DecodeResult::new(
+        image.width(),
+        image.height(),
+        format_name(image.format()),
+        bytes.len() as u64,
+        0,
+        written_bytes,
+    ))
+}
+
+/// Composite every layer into canonical pixel bytes.
+#[pyfunction]
+fn composite_to_bytes<'py>(source: PathBuf, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
+    let limits = Limits::default();
+    let bytes = io_result(std::fs::read(&source))?;
+    let document = to_py_result(Document::parse(&bytes, &limits))?;
+    let image = to_py_result(document.composite(&limits))?;
+    Ok(PyBytes::new(py, image.data()))
 }
 
 /// Compare a `.vpng` file with the picture it was made from.
@@ -456,9 +764,15 @@ fn _vpng(module: &Bound<'_, PyModule>) -> PyResult<()> {
 
     module.add_function(wrap_pyfunction!(encode, module)?)?;
     module.add_function(wrap_pyfunction!(encode_pixels, module)?)?;
+    module.add_function(wrap_pyfunction!(encode_layers, module)?)?;
     module.add_function(wrap_pyfunction!(decode, module)?)?;
     module.add_function(wrap_pyfunction!(decode_to_bytes, module)?)?;
     module.add_function(wrap_pyfunction!(decode_region, module)?)?;
+    module.add_function(wrap_pyfunction!(layers, module)?)?;
+    module.add_function(wrap_pyfunction!(decode_layer, module)?)?;
+    module.add_function(wrap_pyfunction!(decode_layer_to_bytes, module)?)?;
+    module.add_function(wrap_pyfunction!(composite, module)?)?;
+    module.add_function(wrap_pyfunction!(composite_to_bytes, module)?)?;
     module.add_function(wrap_pyfunction!(verify, module)?)?;
     module.add_function(wrap_pyfunction!(check, module)?)?;
     module.add_function(wrap_pyfunction!(info, module)?)?;

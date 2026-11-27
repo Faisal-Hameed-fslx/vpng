@@ -54,21 +54,42 @@
 //! allowed: a file that ends up using only the original four codecs stays a
 //! v0.1 file even when the extended set was permitted. The default codec set
 //! is the original four, so the default path's bytes do not move.
+//!
+//! # v0.4: named layers and masks
+//!
+//! Format **v0.4** adds a **layer table**: a list of named grids that sit
+//! beside the base layer on the same canvas. The table lives between the tile
+//! directory and the payloads, and the header's last eight bytes say where.
+//!
+//! * A file that has a layer table is a v0.4 file, and its minor version
+//!   says so.
+//! * A file with layers may **not** also have a preview pyramid: the two are
+//!   mutually exclusive, so each layer's byte accounting is exact.
+//! * Every layer is encoded on its own. Cross-layer prediction is explicitly
+//!   out of scope: no layer's pixels ever influence another's.
+//!
+//! The header layout and the directory entry layout are **unchanged**: v0.4
+//! is a set of rules on top of the same 64-byte header and the same 40-byte
+//! entries, with four more bits in the entry's `flags` field for the layer
+//! index.
 
 #![forbid(unsafe_code)]
 
 pub mod adaptive;
+pub mod layers;
 pub mod parallel;
 pub mod pyramid;
 pub mod source;
 pub mod stream;
 
+pub use layers::{encode_layers, encode_layers_parallel, LayerInput};
+
 use vpng_codecs::{get_codec, CodecSet, EncodeContext, CODEC_AUTO, CODEC_RAW};
 use vpng_container::{
-    crc32c, Directory, DirectoryEntry, Header, FEATURE_PYRAMID, HEADER_SIZE, MINOR_V0_1,
-    MINOR_V0_2, MINOR_V0_3,
+    crc32c, Directory, DirectoryEntry, Header, LayerDescriptor, LayerKind, LayerTable,
+    FEATURE_LAYERS, FEATURE_PYRAMID, HEADER_SIZE, MINOR_V0_1, MINOR_V0_2, MINOR_V0_3, MINOR_V0_4,
 };
-use vpng_core::{CanonicalImage, Dimensions, Error, ErrorKind, Limits, PixelFormat, Result};
+use vpng_core::{CanonicalImage, Dimensions, Error, ErrorKind, Limits, PixelFormat, Rect, Result};
 use vpng_tiling::{Partition, TileGeometry, TileGrid, TileRect};
 
 /// Nominal tile edge for the reference implementation (256 x 256).
@@ -239,8 +260,20 @@ pub struct EncodeReport {
     /// The minor version the file's header carries.
     ///
     /// One for a v0.1 file, two for a file that uses a v0.2 feature, three
-    /// for a file that names a codec promoted in v0.3.
+    /// for a file that names a codec promoted in v0.3, four for a file that
+    /// carries a layer table.
     pub format_minor: u16,
+    /// The number of layers in the file.
+    ///
+    /// One for every file written before v0.4: the base layer is the image
+    /// itself, and it is all there is.
+    pub layer_count: u32,
+    /// The number of tiles in each layer, in layer order.
+    pub layer_tile_counts: Vec<u32>,
+    /// The uncompressed pixel bytes of each layer, in layer order.
+    pub layer_uncompressed_bytes: Vec<u64>,
+    /// The compressed payload bytes of each layer, in layer order.
+    pub layer_compressed_bytes: Vec<u64>,
 }
 
 impl EncodeReport {
@@ -285,8 +318,23 @@ pub(crate) struct TilePayload {
 /// One encoded level: its geometry, its partition and its tiles.
 pub(crate) struct EncodedLevel {
     pub(crate) index: u16,
+    /// The layer this level belongs to. Zero for every file written before
+    /// v0.4.
+    pub(crate) layer: u16,
     pub(crate) partition: Partition,
     pub(crate) payloads: Vec<TilePayload>,
+}
+
+/// One layer's metadata, before its byte accounting is known.
+///
+/// The encoder fills the accounting in once the layer's payloads exist; the
+/// layer table carries the result.
+pub(crate) struct LayerMeta {
+    pub(crate) name: String,
+    pub(crate) kind: LayerKind,
+    pub(crate) rect: Rect,
+    pub(crate) opacity: u8,
+    pub(crate) mask: Option<u16>,
 }
 
 /// One planned preview level: its partition and its pixels.
@@ -306,7 +354,7 @@ pub fn encode(image: &CanonicalImage, options: &EncodeOptions) -> Result<EncodeR
     let dims = image.dimensions();
     let plan = plan_file(image, options)?;
     let levels = encode_plan(image, &plan, options, &parallel::ParallelOptions::default())?;
-    assemble(dims, image.format(), options, &levels)
+    assemble(dims, image.format(), options, &levels, None)
 }
 
 /// Plan the file's levels from an image.
@@ -407,6 +455,7 @@ pub(crate) fn encode_plan(
     let payloads = parallel::encode_all_tiles(level0, &plan.base, options, parallel)?;
     levels.push(EncodedLevel {
         index: 0,
+        layer: 0,
         partition: plan.base.clone(),
         payloads,
     });
@@ -416,6 +465,7 @@ pub(crate) fn encode_plan(
             parallel::encode_all_tiles(&preview.image, &preview.partition, options, parallel)?;
         levels.push(EncodedLevel {
             index: (offset + 1) as u16,
+            layer: 0,
             partition: preview.partition.clone(),
             payloads,
         });
@@ -429,6 +479,8 @@ pub(crate) fn encode_plan(
 /// The minor version states what the file contains, not what the options
 /// allowed:
 ///
+/// * a file that carries a layer table is a v0.4 file, because a v0.1, v0.2
+///   or v0.3 reader has no rule for a layer index or a layer table;
 /// * a file that names a codec promoted in v0.3 (ids 4, 5 or 6) is a v0.3
 ///   file, because a v0.1 or v0.2 reader has no codec to decode it with;
 /// * a file that uses a v0.2 feature (a preview pyramid or an adaptive
@@ -438,8 +490,10 @@ pub(crate) fn encode_plan(
 ///
 /// The batch assembler and the streaming writer both call this, so the two
 /// cannot disagree about a file's version.
-pub(crate) fn content_minor(codec_ids: &[u8], v2_features: bool) -> u16 {
-    if codec_ids.iter().any(|&id| vpng_codecs::is_v0_3_codec(id)) {
+pub(crate) fn content_minor(codec_ids: &[u8], v2_features: bool, has_layers: bool) -> u16 {
+    if has_layers {
+        MINOR_V0_4
+    } else if codec_ids.iter().any(|&id| vpng_codecs::is_v0_3_codec(id)) {
         MINOR_V0_3
     } else if v2_features {
         MINOR_V0_2
@@ -451,7 +505,8 @@ pub(crate) fn content_minor(codec_ids: &[u8], v2_features: bool) -> u16 {
 /// Build the header a file's contents call for.
 ///
 /// The header layout is the same 64 bytes in every version; only the minor
-/// version and the feature flags differ.
+/// version, the feature flags and — from v0.4 — the layer table's location
+/// differ.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn build_header(
     minor: u16,
@@ -461,8 +516,18 @@ pub(crate) fn build_header(
     tile_count: u32,
     declared_file_size: u64,
     feature_flags: u32,
+    layer_table: Option<(u32, u32)>,
 ) -> Result<Header> {
     let header = match minor {
+        MINOR_V0_4 => Header::new_v4(
+            dims.width,
+            dims.height,
+            format,
+            default_codec,
+            tile_count,
+            HEADER_SIZE as u64,
+            declared_file_size,
+        )?,
         MINOR_V0_3 => Header::new_v3(
             dims.width,
             dims.height,
@@ -491,7 +556,11 @@ pub(crate) fn build_header(
             declared_file_size,
         )?,
     };
-    Ok(header.with_feature_flags(feature_flags))
+    let header = header.with_feature_flags(feature_flags);
+    Ok(match layer_table {
+        Some((offset, length)) => header.with_layer_table(offset, length),
+        None => header,
+    })
 }
 
 /// Assemble the container from the encoded levels.
@@ -500,11 +569,18 @@ pub(crate) fn build_header(
 /// computed. The serial encoder, the parallel encoder and the streaming writer
 /// all build the container the same way, which is why they cannot disagree
 /// about the bytes.
+///
+/// `layer_meta` is the container's layer list, or `None` for a file written
+/// before v0.4. When it is present the file is a **v0.4** file: the layer
+/// table sits between the directory and the payloads, the directory entries
+/// carry their layer index, and each layer's byte accounting is recorded in
+/// the table.
 pub(crate) fn assemble(
     dims: Dimensions,
     format: PixelFormat,
     options: &EncodeOptions,
     levels: &[EncodedLevel],
+    layer_meta: Option<&[LayerMeta]>,
 ) -> Result<EncodeReport> {
     let mut tile_count = 0u32;
     for level in levels {
@@ -514,7 +590,29 @@ pub(crate) fn assemble(
     }
 
     let directory_size = Directory::total_size(tile_count)?;
+
+    // The layer table's bytes are known before the payload offsets are: its
+    // length depends only on the layer names and the number of layers, and
+    // its contents — the per-layer byte accounting — depend on the payloads,
+    // which are already encoded.
+    let (layer_table_bytes, layer_table_range) = match layer_meta {
+        None => (None, None),
+        Some(meta) => {
+            let descriptors = build_layer_descriptors(meta, levels)?;
+            let table = LayerTable::new(descriptors);
+            table.validate()?;
+            let bytes = table.encode()?;
+            let offset = vpng_core::checked_add(HEADER_SIZE as u64, directory_size as u64)?;
+            let offset = vpng_core::checked_usize(offset)? as u32;
+            let length = vpng_core::checked_usize(bytes.len() as u64)? as u32;
+            (Some(bytes), Some((offset, length)))
+        }
+    };
+
     let mut cursor = vpng_core::checked_add(HEADER_SIZE as u64, directory_size as u64)?;
+    if let Some(bytes) = layer_table_bytes.as_ref() {
+        cursor = vpng_core::checked_add(cursor, bytes.len() as u64)?;
+    }
 
     let mut entries: Vec<DirectoryEntry> = Vec::with_capacity(tile_count as usize);
     let mut chosen_codecs: Vec<u8> = Vec::with_capacity(tile_count as usize);
@@ -524,7 +622,7 @@ pub(crate) fn assemble(
     let mut level_payload_bytes: Vec<u64> = Vec::with_capacity(levels.len());
 
     for level in levels {
-        let flags = DirectoryEntry::flags_for_level(level.index)?;
+        let flags = DirectoryEntry::flags_for_level_and_layer(level.index, level.layer)?;
         let mut level_bytes = 0u64;
         for (tile, payload) in level.partition.tiles().iter().zip(level.payloads.iter()) {
             let checksum = crc32c(&payload.bytes);
@@ -568,11 +666,21 @@ pub(crate) fn assemble(
     // allowed. A file that names a codec promoted in v0.3 needs a v0.3
     // reader; a file that does not, does not. The default path stays v0.1, so
     // the bytes the golden fixtures pin do not move.
-    let minor = content_minor(&chosen_codecs, options.is_v2());
+    let has_layers = layer_meta.is_some();
+    let minor = content_minor(&chosen_codecs, options.is_v2(), has_layers);
 
     // The pyramid flag and the levels must agree: a file with more than one
-    // level says so, and a file that says so has more than one level.
-    let feature_flags = if levels.len() > 1 { FEATURE_PYRAMID } else { 0 };
+    // level says so, and a file that says so has more than one level. The
+    // layer flag and the layer table must agree too, and the two flags are
+    // mutually exclusive in v0.4 — a layered file has exactly one level per
+    // layer, so it never has a pyramid.
+    let feature_flags = if has_layers {
+        FEATURE_LAYERS
+    } else if levels.len() > 1 {
+        FEATURE_PYRAMID
+    } else {
+        0
+    };
     let header = build_header(
         minor,
         dims,
@@ -581,12 +689,16 @@ pub(crate) fn assemble(
         tile_count,
         cursor,
         feature_flags,
+        layer_table_range,
     )?;
 
     let capacity = vpng_core::checked_usize(cursor)?;
     let mut bytes = Vec::with_capacity(capacity);
     header.write_to(&mut bytes)?;
     bytes.extend_from_slice(&directory_bytes);
+    if let Some(table) = layer_table_bytes.as_ref() {
+        bytes.extend_from_slice(table);
+    }
     for level in levels {
         for payload in &level.payloads {
             bytes.extend_from_slice(&payload.bytes);
@@ -619,6 +731,12 @@ pub(crate) fn assemble(
         })
         .unwrap_or(0);
 
+    // The per-layer accounting. A file written before v0.4 has exactly one
+    // layer: the base level's own bytes. A v0.4 file has one layer per
+    // descriptor, and each layer is one level.
+    let (layer_tile_counts, layer_uncompressed_bytes, layer_compressed_bytes) =
+        layer_accounting(levels, layer_meta.is_some());
+
     Ok(EncodeReport {
         bytes,
         tile_count,
@@ -631,7 +749,96 @@ pub(crate) fn assemble(
         level_payload_bytes,
         base_uncompressed_bytes,
         format_minor: minor,
+        layer_count: layer_tile_counts.len() as u32,
+        layer_tile_counts,
+        layer_uncompressed_bytes,
+        layer_compressed_bytes,
     })
+}
+
+/// Build the layer table's descriptors, with the byte accounting filled in.
+///
+/// Each layer's uncompressed bytes are its tiles' uncompressed bytes and its
+/// compressed bytes are its tiles' payload bytes, which is exactly what the
+/// decoder recomputes from the directory.
+fn build_layer_descriptors(
+    meta: &[LayerMeta],
+    levels: &[EncodedLevel],
+) -> Result<Vec<LayerDescriptor>> {
+    let mut descriptors = Vec::with_capacity(meta.len());
+    for (index, layer) in meta.iter().enumerate() {
+        let mut uncompressed = 0u64;
+        let mut compressed = 0u64;
+        for level in levels.iter().filter(|level| level.layer == index as u16) {
+            for payload in &level.payloads {
+                uncompressed =
+                    vpng_core::checked_add(uncompressed, payload.uncompressed_length as u64)?;
+                compressed = vpng_core::checked_add(compressed, payload.bytes.len() as u64)?;
+            }
+        }
+        descriptors.push(LayerDescriptor {
+            name: layer.name.clone(),
+            kind: layer.kind,
+            rect: layer.rect,
+            opacity: layer.opacity,
+            mask: layer.mask,
+            uncompressed_bytes: uncompressed,
+            compressed_bytes: compressed,
+        });
+    }
+    Ok(descriptors)
+}
+
+/// The per-layer tile counts and byte counts.
+fn layer_accounting(levels: &[EncodedLevel], has_layers: bool) -> (Vec<u32>, Vec<u64>, Vec<u64>) {
+    if !has_layers {
+        // One layer: the base level. A pyramid's preview levels are not
+        // counted, because the layer is the original image.
+        let mut tiles = Vec::new();
+        let mut uncompressed = Vec::new();
+        let mut compressed = Vec::new();
+        if let Some(level) = levels.first() {
+            tiles.push(level.partition.len() as u32);
+            uncompressed.push(
+                level
+                    .payloads
+                    .iter()
+                    .map(|payload| payload.uncompressed_length as u64)
+                    .sum(),
+            );
+            compressed.push(
+                level
+                    .payloads
+                    .iter()
+                    .map(|payload| payload.bytes.len() as u64)
+                    .sum(),
+            );
+        } else {
+            tiles.push(0);
+            uncompressed.push(0);
+            compressed.push(0);
+        }
+        return (tiles, uncompressed, compressed);
+    }
+
+    let count = levels
+        .iter()
+        .map(|level| level.layer)
+        .max()
+        .map(|max| max as usize + 1)
+        .unwrap_or(0);
+    let mut tiles = vec![0u32; count];
+    let mut uncompressed = vec![0u64; count];
+    let mut compressed = vec![0u64; count];
+    for level in levels {
+        let index = level.layer as usize;
+        tiles[index] += level.partition.len() as u32;
+        for payload in &level.payloads {
+            uncompressed[index] += payload.uncompressed_length as u64;
+            compressed[index] += payload.bytes.len() as u64;
+        }
+    }
+    (tiles, uncompressed, compressed)
 }
 
 /// Encode one tile with the smallest payload the permitted codecs offer.

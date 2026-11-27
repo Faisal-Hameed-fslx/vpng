@@ -29,6 +29,7 @@ const REQUIRED = [
   // Opening.
   'vpng_open',
   'vpng_open_parts',
+  'vpng_open_parts_with_layers',
   'vpng_close',
   // Layout.
   'vpng_width',
@@ -43,6 +44,14 @@ const REQUIRED = [
   'vpng_tile_codec',
   'vpng_tile_level',
   'vpng_tile_rect',
+  // Layers.
+  'vpng_layer_count',
+  'vpng_layer_name_length',
+  'vpng_layer_name_copy',
+  'vpng_layer_rect',
+  'vpng_layer_is_mask',
+  'vpng_layer_length',
+  'vpng_decode_layer',
   // Decoding.
   'vpng_region_length',
   'vpng_region_tiles',

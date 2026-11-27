@@ -73,6 +73,36 @@ impl Document {
         }
         decode_tile_payload(index, payload, &entry, self.meta().format(), limits)
     }
+
+    /// Decode one layer's own pixels.
+    ///
+    /// The result is sized to the **layer's own rectangle**, not the canvas,
+    /// and it holds the layer's pixels exactly. A mask layer decodes to its
+    /// coverage image: the same pixels, of which only the alpha channel
+    /// carries meaning.
+    pub fn decode_layer(&mut self, position: usize, limits: &Limits) -> Result<Vec<u8>> {
+        match self {
+            Document::Whole(reader) => {
+                let (rect, level) = {
+                    let meta = reader.meta();
+                    let layer = meta.layer(position).ok_or_else(|| {
+                        Error::invalid(format!("layer {position} is out of range"))
+                    })?;
+                    (layer.rect(), layer.base_level().clone())
+                };
+                let format = reader.meta().format();
+                let image =
+                    vpng_decoder::decode_layer_from(&level, format, rect, limits, |index| {
+                        reader.decode_tile(index, limits)
+                    })?;
+                Ok(image.into_data())
+            }
+            Document::Parts(_) => Err(Error::unsupported(
+                "this document holds only the header and the directory, so the caller must \
+                 supply the tile payloads; decode them one at a time with `decode_payload`",
+            )),
+        }
+    }
 }
 
 /// The open documents, addressed by handle.
@@ -102,8 +132,31 @@ impl Registry {
     ///
     /// `file_size` is the size the container claims for itself, which is
     /// what the payload ranges are checked against.
+    ///
+    /// A container with a layer table needs the table as well, so this
+    /// refuses one: use [`Registry::open_parts_with_layers`].
     pub fn open_parts(&self, header: &[u8], directory: &[u8], file_size: u64) -> Result<i32> {
-        let meta = ContainerMeta::parse(header, directory, file_size, &Limits::default())?;
+        self.open_parts_with_layers(header, directory, None, file_size)
+    }
+
+    /// Open a container from its header, its directory and its layer table.
+    ///
+    /// `layer_table` is the table's bytes, or `None` for a container that has
+    /// none.
+    pub fn open_parts_with_layers(
+        &self,
+        header: &[u8],
+        directory: &[u8],
+        layer_table: Option<&[u8]>,
+        file_size: u64,
+    ) -> Result<i32> {
+        let meta = ContainerMeta::parse(
+            header,
+            directory,
+            layer_table,
+            file_size,
+            &Limits::default(),
+        )?;
         self.insert(Document::Parts(meta))
     }
 
@@ -410,5 +463,91 @@ mod tests {
         )
         .expect("the bytes are canonical");
         assert_eq!(image.width(), 10);
+    }
+
+    /// A layered container: a base, an overlay and a mask.
+    fn layered_container() -> Vec<u8> {
+        use vpng_core::Rect;
+        use vpng_encoder::{encode_layers, EncodeOptions, LayerInput};
+
+        let base = CanonicalImage::from_vec(64, 48, PixelFormat::rgba8(), {
+            let mut bytes = Vec::with_capacity(64 * 48 * 4);
+            for index in 0..64 * 48 {
+                bytes.extend_from_slice(&[
+                    (index % 251) as u8,
+                    (index % 97) as u8,
+                    (index % 31) as u8,
+                    0xFF,
+                ]);
+            }
+            bytes
+        })
+        .expect("the base is canonical");
+        let overlay = CanonicalImage::from_vec(
+            32,
+            16,
+            PixelFormat::rgba8(),
+            [0x20, 0x30, 0x40, 0xFF].repeat(32 * 16),
+        )
+        .expect("the overlay is canonical");
+        let mask = CanonicalImage::from_vec(
+            32,
+            16,
+            PixelFormat::rgba8(),
+            [0x10, 0x20, 0x30, 0x80].repeat(32 * 16),
+        )
+        .expect("the mask is canonical");
+
+        let layers = [
+            LayerInput::pixels("base", Rect::new(0, 0, 64, 48).unwrap(), &base),
+            LayerInput::pixels("ink", Rect::new(8, 8, 32, 16).unwrap(), &overlay).with_mask(2),
+            LayerInput::mask("m", Rect::new(8, 8, 32, 16).unwrap(), &mask),
+        ];
+        encode_layers(&layers, &EncodeOptions::default().with_tile_size(64, 64))
+            .expect("the layers encode")
+            .bytes
+    }
+
+    #[test]
+    fn a_layered_container_reports_its_layers() {
+        let registry = Registry::new();
+        let handle = registry
+            .open_whole(layered_container())
+            .expect("the container opens");
+
+        registry
+            .with(handle, |document| {
+                assert_eq!(document.meta().layer_count(), 3);
+                let base = document.meta().layer(0).expect("the base layer");
+                assert_eq!(base.name(), "base");
+                assert!(!base.is_mask());
+                let mask = document.meta().layer(2).expect("the mask layer");
+                assert_eq!(mask.name(), "m");
+                assert!(mask.is_mask());
+                Ok(())
+            })
+            .expect("the document is readable");
+    }
+
+    #[test]
+    fn a_layer_decodes_to_the_same_pixels_the_native_decoder_produces() {
+        let bytes = layered_container();
+        let registry = Registry::new();
+        let handle = registry
+            .open_whole(bytes.clone())
+            .expect("the container opens");
+
+        let native = Document::parse(&bytes, &Limits::default())
+            .expect("the native decoder opens it")
+            .decode_layer(1, &Limits::default())
+            .expect("the native decoder decodes it");
+
+        let wasm = registry
+            .with_mut(handle, |document| {
+                document.decode_layer(1, &Limits::default())
+            })
+            .expect("the module decodes it");
+
+        assert_eq!(wasm, native.into_data(), "the pixels differ");
     }
 }

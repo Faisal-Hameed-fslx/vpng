@@ -94,6 +94,7 @@ no generated glue and no build-time code generation.
 | `vpng_dealloc(ptr, len)` | — | Return a buffer. |
 | `vpng_open(ptr, len)` | `i32` | Open a whole container; returns a handle. |
 | `vpng_open_parts(hptr, hlen, dptr, dlen, size)` | `i32` | Open from the header and the directory. |
+| `vpng_open_parts_with_layers(hptr, hlen, dptr, dlen, tptr, tlen, size)` | `i32` | Open from the header, the directory and the layer table. |
 | `vpng_close(handle)` | `i32` | Close a document. |
 | `vpng_width(handle)` | `i32` | The image's width. |
 | `vpng_height(handle)` | `i32` | The image's height. |
@@ -118,6 +119,13 @@ no generated glue and no build-time code generation.
 | `vpng_error_copy(ptr, len)` | `i32` | Copy the last error's message. |
 | `vpng_format_version()` | `i32` | The format version: major in the high half. |
 | `vpng_report_error(code, ptr, len)` | `i32` | Record an error the caller found. |
+| `vpng_layer_count(handle)` | `i32` | The number of layers. |
+| `vpng_layer_name_length(handle, layer)` | `i32` | A layer's name length in bytes. |
+| `vpng_layer_name_copy(handle, layer, ptr, len)` | `i32` | Copy a layer's name. |
+| `vpng_layer_rect(handle, layer, out)` | `i32` | A layer's rectangle: four `u32`s. |
+| `vpng_layer_is_mask(handle, layer)` | `i32` | Whether a layer is a mask. |
+| `vpng_layer_length(handle, layer)` | `i64` | The bytes a layer's own pixels take. |
+| `vpng_decode_layer(handle, layer, out)` | `i64` | Decode one layer's own pixels. |
 
 The conventions:
 
@@ -151,11 +159,56 @@ function this README documents is actually exported, that the module exports
 a linear memory at all, and that closing handle zero fails rather than
 succeeds.
 
+## Layers
+
+A container written for format v0.4 may hold **layers**: named grids of
+tiles, each with a rectangle on the canvas, an opacity and — when the format
+has an 8-bit alpha channel — a mask. Layer 0 is the base layer, the picture
+itself.
+
+The module reports the layers and decodes one of them:
+
+```js
+console.log(vpng.layerCount(image));          // 3
+console.log(vpng.layerName(image, 1));         // 'ink'
+console.log(vpng.layerRect(image, 1));         // { x: 8, y: 8, width: 32, height: 16 }
+console.log(vpng.layerIsMask(image, 2));        // true
+const pixels = vpng.decodeLayer(image, 1);    // the overlay's own pixels
+```
+
+A layer's pixels are sized to the layer's **own rectangle**, not to the
+canvas, and they are the layer's pixels exactly.
+
+The **whole-file** path opens a layered container with no help. The **parts**
+path needs the layer table as well, because the directory alone does not say
+which tile belongs to which layer:
+
+```js
+const view = new DataView(containerBytes.buffer);
+const directoryOffset = Number(view.getBigUint64(32, true));
+const tileCount = view.getUint32(28, true);
+const tableOffset = view.getUint32(56, true);
+const tableLength = view.getUint32(60, true);
+
+const image = vpng.openPartsWithLayers(
+  containerBytes.subarray(0, 64),
+  containerBytes.subarray(directoryOffset, directoryOffset + tileCount * 40 + 4),
+  containerBytes.subarray(tableOffset, tableOffset + tableLength),
+  containerBytes.length,
+);
+```
+
+The module **does not composite**: it reports the layers and decodes them,
+and the caller blends them if it wants a flattened picture.
+
 ## What this package does not do
 
 * It does not **encode**. The module is a decoder. Encoding in a browser is
   a separate piece of work, and it is not needed to *read* a picture.
 * It does not **edit**. The editing engine is in `vpng-editing` and is
   native; a browser editor over it is a later piece of work.
+* It does not **composite**. It reports the layers and decodes them; the
+  caller blends them.
 * It does not change the **format**. Not one byte of the header or the
-  directory entry moved.
+  directory entry moved: the v0.4 layer table uses header bytes that were
+  reserved, and the layer index uses directory flag bits that were reserved.

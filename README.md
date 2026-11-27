@@ -4,12 +4,13 @@ A lossless, adaptive, tiled, random-access image format and editing engine.
 
 **Primary requirement:** exact pixel reconstruction.
 **Secondary target:** fit eligible images within 10 MB — measured, never promised.
-**Status:** v0.3 container implemented, compiled, and tested; the editing engine
+**Status:** v0.4 container implemented, compiled, and tested; the editing engine
 (P4), the compression research (P3.5), the interactive engine (P5) and the
 parallel/streaming encoder (P5.1) have landed, and so have the preview pyramid
 (P6), the adaptive partition (P7), the promoted stable codecs 4–6, in two
-format revisions, the Python bindings (P9), the HTTP Range reader (P10) and
-the WebAssembly package (P11). `cargo build --workspace` and
+format revisions, the Python bindings (P9), the HTTP Range reader (P10), the
+WebAssembly package (P11) and the layer model (P14), in three format
+revisions. `cargo build --workspace` and
 `cargo test --workspace --all-targets`
 both pass on `stable-x86_64-pc-windows-gnu` rustc
 1.100.0. Large-image stress runs, a 16K memory matrix, an editing benchmark, a
@@ -22,8 +23,11 @@ are recorded in `docs/BENCHMARKS.md`, `docs/P5_REPORT.md` and
 * A precise, ADR-backed binary format: `docs/VPNG_SPEC_0_1.md`, revised as
   `docs/VPNG_SPEC_0_2.md` (the same layout, with the level index carried in
   the directory entry's `flags` and a level's tiles allowed to differ in
-  size) and `docs/VPNG_SPEC_0_3.md` (the same layout again, with the rule
-  that lets the promoted codecs 4–6 reach a file).
+  size), `docs/VPNG_SPEC_0_3.md` (the same layout again, with the rule
+  that lets the promoted codecs 4–6 reach a file) and
+  `docs/VPNG_SPEC_0_4.md` (the same layout once more, with the layer table's
+  offset and length in the header's reserved last eight bytes and the layer
+  index in the directory entry's reserved flag bits).
 * All eight v0.1 pixel formats (Gray/GrayAlpha/RGB/RGBA at 8 and 16 bits).
 * A validated container: 64-byte header, 40-byte directory entries, CRC32C
   checksums, whole-image canonical SHA-256 digest.
@@ -109,6 +113,23 @@ are recorded in `docs/BENCHMARKS.md`, `docs/P5_REPORT.md` and
   module was **slower** than the native reader — by about 10% at the median —
   and that is reported rather than hidden. No format change was needed or
   made. See `docs/P11_WASM_REPORT.md`.
+* **Layers and masks** (format v0.4): a container may hold several **named
+  tile grids** — layers — each with its own rectangle on the canvas, its own
+  opacity and, when the format has an 8-bit alpha channel, its own **mask**.
+  A mask is a layer whose alpha channel is its coverage; the blend is
+  straight alpha with **integer, deterministic** arithmetic, so a one-layer
+  file composites to **exactly** its own pixels. The layers are encoded
+  **independently**, so adding an overlay does not change the base layer's
+  bytes. Measured over the whole 750-image corpus: **750 of 750** one-layer
+  composites are byte-identical to the canonical pixels, **750 of 750**
+  two-layer base layers are byte-identical to the original, the two-layer
+  composite provably differs on **750 of 750**, the 114 alpha-format images
+  all take a mask that changes the result, and **0** files failed `vpng
+  check`. The layer table costs a fixed **60 bytes** per file — **0.009917%**
+  of the corpus's bytes, but **1.643426%** of a pixel-art file and
+  **54.054054%** of the corpus's smallest file (111 bytes), and both numbers
+  are reported. The **editing engine refuses a layered file** rather
+  than dropping its layers. See `docs/P12_LAYERS_REPORT.md`.
 * A **measurement foundation** (`crates/vpng-validation`): every benchmark
   case is repeated ten times and reported with a **median** and a **p95**,
   not a single figure, against a sequential baseline measured in the same
@@ -118,7 +139,7 @@ are recorded in `docs/BENCHMARKS.md`, `docs/P5_REPORT.md` and
 * Conformance tests: exhaustive round-trip, region-vs-crop, malformed-input
   sweeps, a bounded mutation sweep, golden files, the `default_codec`
   clarification, and a deterministic fuzzing harness over seven targets.
-  468 Rust tests, 45 Python tests and 13 WebAssembly tests, all passing.
+  536 Rust tests, 53 Python tests and 15 WebAssembly tests, all passing.
 * Layered integrity: `info` (structure only), `check` (every payload CRC32C),
   `verify` (exact pixels against a reference).
 * Measured evidence: large-image stress (up to a 15360×8640 photo and
@@ -139,10 +160,14 @@ are recorded in `docs/BENCHMARKS.md`, `docs/P5_REPORT.md` and
 
 ## What is explicitly not here yet
 
-Layers and masks, GPU-ready
+GPU-ready
 payloads, and a frozen v1.0 format. (HTTP Range streaming **is** here — see
 `docs/P10_HTTP_REPORT.md` — and so is the **WebAssembly decoder**, see
-`docs/P11_WASM_REPORT.md`; the module does not encode and does not edit yet.)
+`docs/P11_WASM_REPORT.md`; the module does not encode and does not edit yet.
+**Layers and masks are here too**, see `docs/P12_LAYERS_REPORT.md`, but the
+**editing engine refuses a layered file** rather than dropping its layers,
+and the HTTP and WebAssembly readers read the **base layer** without
+compositing.)
 The research-only
 pipelines that were **not** promoted — the other CARC models and the other
 hybrids — keep their ids in `0x80..=0xFF`: they cannot reach a file, and the
@@ -266,6 +291,10 @@ vpng encode input.png out.vpng --codec-set extended  # stable (default) | extend
 vpng encode input.png out.vpng --codec context-entropy  # lz77 | predictor+dictionary | context-entropy
 vpng http-info https://example.com/picture.vpng          # header + directory over HTTP Range
 vpng http-decode-region https://example.com/picture.vpng crop.png --x 0 --y 0 --width 1024 --height 1024
+vpng layers picture.vpng --json                    # the layers, with their byte accounting
+vpng decode-layer picture.vpng layer1.png --layer 1 # one layer's own pixels
+vpng composite picture.vpng flattened.png           # blend the layers into one picture
+vpng encode-layers picture.vpng --manifest layers.json  # write a layered container
 ```
 
 `info` reads only the header and directory, so it is O(1) in the tile count and
@@ -335,11 +364,44 @@ it. `wasm/vpng.js` is the optional JavaScript wrapper. The module is a
 **decoder**: it reads containers, it does not write them. See
 `wasm/README.md` and `docs/P11_WASM_REPORT.md`.
 
+### Layers and masks
+
+```bash
+vpng encode-layers picture.vpng --manifest layers.json
+vpng layers picture.vpng --json
+vpng decode-layer picture.vpng overlay.png --layer 1
+vpng composite picture.vpng flattened.png
+```
+
+A **manifest** is a small JSON document naming each layer's pixels, its
+rectangle on the canvas, its opacity and, for a layer with a mask, the mask
+layer's index:
+
+```json
+{
+  "layers": [
+    { "name": "base", "path": "base.png", "width": 15360, "height": 8640,
+      "format": "rgb8" },
+    { "name": "ink",  "path": "ink.png",  "x": 0, "y": 0,
+      "width": 7680, "height": 4320, "format": "rgb8", "opacity": 255 },
+    { "name": "ink mask", "path": "mask.png", "kind": "mask",
+      "width": 7680, "height": 4320, "format": "rgba8" }
+  ]
+}
+```
+
+A **mask** is a layer whose alpha channel is its coverage, so the format
+must have an 8-bit alpha channel when a mask is present. The blend is
+straight alpha with integer arithmetic, and a one-layer file composites to
+**exactly** its own pixels. The editing engine **refuses** a layered file
+rather than dropping its layers. See `docs/VPNG_SPEC_0_4.md` and
+`docs/P12_LAYERS_REPORT.md`.
+
 ## Layout
 
 ```text
 crates/vpng-core        formats, geometry, checked arithmetic, errors, limits
-crates/vpng-container   header, directory, checksums, canonical digest
+crates/vpng-container   header, directory, layer table, checksums, canonical digest
 crates/vpng-codecs      TileCodec trait + Raw, Palette, Run-length, Predictor (ids 0-3)
                          + the promoted LZ77, predictor+dictionary and context-entropy codecs (ids 4-6)
                          + the remaining research-only CARC / hybrid pipelines under src/experimental/

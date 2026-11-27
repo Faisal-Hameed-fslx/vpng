@@ -19,11 +19,17 @@
 //!     40     8  declared file size
 //!     48     4  feature flags
 //!     52     4  header checksum (CRC32C)
-//!     56     8  reserved (must be zero in v0.1)
+//!     56     4  layer table offset (zero in v0.1 through v0.3)
+//!     60     4  layer table length (zero in v0.1 through v0.3)
 //! ```
 //!
 //! The checksum covers bytes `0..52` and `56..64`; the checksum field itself is
 //! excluded. This is ADR-0001.
+//!
+//! The last eight bytes were reserved in v0.1. v0.4 gives them to the layer
+//! table's location: the table sits between the directory and the payloads,
+//! and the header says exactly where. A v0.1, v0.2 or v0.3 file leaves both
+//! fields zero, which is why the bytes did not have to move.
 
 use vpng_core::{BitsPerChannel, ColorModel, Dimensions, Error, PixelFormat, Result};
 
@@ -59,12 +65,33 @@ pub const MINOR_V0_2: u16 = 2;
 /// malformed.
 pub const MINOR_V0_3: u16 = 3;
 
+/// The minor version that adds named layers and masks.
+///
+/// v0.4 keeps the 64-byte header and the 40-byte directory entry exactly as
+/// v0.1 defines them. It changes two *rules* and gives the header's last
+/// eight bytes a job:
+///
+/// * the directory entry's `flags` field carries the **layer index** in bits
+///   8..12, next to the pyramid level in bits 0..8;
+/// * the header's last eight bytes point at the **layer table**, a list of
+///   named grids that sits between the directory and the payloads.
+///
+/// A file that has no layer table is not a v0.4 file: the minor version
+/// states what the file *contains*.
+pub const MINOR_V0_4: u16 = 4;
+
 /// Highest minor format version this build accepts.
-pub const FORMAT_MINOR: u16 = MINOR_V0_3;
+pub const FORMAT_MINOR: u16 = MINOR_V0_4;
 
 pub const HEADER_CHECKSUM_OFFSET: usize = 52;
 pub const HEADER_CHECKSUM_LEN: usize = 4;
 pub const RESERVED_OFFSET: usize = 56;
+
+/// The header's layer-table offset field (bytes 56..60).
+pub const LAYER_TABLE_OFFSET_OFFSET: usize = 56;
+
+/// The header's layer-table length field (bytes 60..64).
+pub const LAYER_TABLE_LENGTH_OFFSET: usize = 60;
 
 /// The file contains derived preview levels above the original image.
 ///
@@ -73,11 +100,18 @@ pub const RESERVED_OFFSET: usize = 56;
 /// version and the unknown flag.
 pub const FEATURE_PYRAMID: u32 = 1 << 0;
 
+/// The file contains more than one named layer.
+///
+/// This is a v0.4 feature flag. A v0.1, v0.2 or v0.3 file must have no
+/// feature flags beyond [`FEATURE_PYRAMID`], so an older reader rejects a
+/// layered file on two counts: the minor version and the unknown flag.
+pub const FEATURE_LAYERS: u32 = 1 << 1;
+
 /// Feature-flag bits understood by this build.
 ///
 /// v0.1 defines none, so a v0.1 file with any bit set is rejected. v0.2
-/// defines [`FEATURE_PYRAMID`].
-pub const KNOWN_FEATURE_FLAGS: u32 = FEATURE_PYRAMID;
+/// defines [`FEATURE_PYRAMID`]; v0.4 defines [`FEATURE_LAYERS`].
+pub const KNOWN_FEATURE_FLAGS: u32 = FEATURE_PYRAMID | FEATURE_LAYERS;
 
 /// Parsed main header. Field widths mirror the on-disk layout exactly.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -93,6 +127,10 @@ pub struct Header {
     pub directory_offset: u64,
     pub declared_file_size: u64,
     pub feature_flags: u32,
+    /// Where the layer table starts, or zero when the file has none.
+    pub layer_table_offset: u32,
+    /// The layer table's length in bytes, or zero when the file has none.
+    pub layer_table_length: u32,
 }
 
 impl Header {
@@ -103,8 +141,9 @@ impl Header {
     /// project has written so far uses, and the golden fixtures pin its exact
     /// bytes, so the default writer does not move the version on its own.
     /// Use [`Header::new_v2`] for a file that carries a preview pyramid or an
-    /// adaptive (variable-size) partition, and [`Header::new_v3`] for a file
-    /// whose directory names codec id 4, 5 or 6.
+    /// adaptive (variable-size) partition, [`Header::new_v3`] for a file
+    /// whose directory names codec id 4, 5 or 6, and [`Header::new_v4`] for a
+    /// file that carries a layer table.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         width: u32,
@@ -128,6 +167,8 @@ impl Header {
             directory_offset,
             declared_file_size,
             feature_flags: 0,
+            layer_table_offset: 0,
+            layer_table_length: 0,
         })
     }
 
@@ -206,6 +247,51 @@ impl Header {
         self.minor >= MINOR_V0_2
     }
 
+    /// Build a **v0.4** header for a new file.
+    ///
+    /// The layout is identical to v0.1 — the same 64 bytes, the same field
+    /// offsets — and only the minor version differs. v0.4 is the version that
+    /// permits a layer table and a layer index in the directory entry's
+    /// `flags` field.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_v4(
+        width: u32,
+        height: u32,
+        format: PixelFormat,
+        default_codec: u8,
+        tile_count: u32,
+        directory_offset: u64,
+        declared_file_size: u64,
+    ) -> Result<Self> {
+        let mut header = Header::new(
+            width,
+            height,
+            format,
+            default_codec,
+            tile_count,
+            directory_offset,
+            declared_file_size,
+        )?;
+        header.minor = MINOR_V0_4;
+        Ok(header)
+    }
+
+    /// Record where the layer table is.
+    ///
+    /// The table sits between the directory and the payloads. The length may
+    /// be zero, which means "this file has no layer table"; the offset is
+    /// then ignored.
+    pub fn with_layer_table(mut self, offset: u32, length: u32) -> Self {
+        self.layer_table_offset = offset;
+        self.layer_table_length = length;
+        self
+    }
+
+    /// Whether the file declares a layer table.
+    pub fn has_layers(&self) -> bool {
+        self.layer_table_length != 0
+    }
+
     /// The pixel format described by this header (rejects unimplemented models).
     pub fn format(&self) -> Result<PixelFormat> {
         PixelFormat::new(self.color_model, self.bits)
@@ -237,6 +323,10 @@ impl Header {
         buf[32..40].copy_from_slice(&self.directory_offset.to_le_bytes());
         buf[40..48].copy_from_slice(&self.declared_file_size.to_le_bytes());
         buf[48..52].copy_from_slice(&self.feature_flags.to_le_bytes());
+        buf[LAYER_TABLE_OFFSET_OFFSET..LAYER_TABLE_OFFSET_OFFSET + 4]
+            .copy_from_slice(&self.layer_table_offset.to_le_bytes());
+        buf[LAYER_TABLE_LENGTH_OFFSET..LAYER_TABLE_LENGTH_OFFSET + 4]
+            .copy_from_slice(&self.layer_table_length.to_le_bytes());
         // buf[52..56] stays zero until the checksum is written below.
         let sum = checksum::crc32c_parts(&[
             &buf[0..HEADER_CHECKSUM_OFFSET],
@@ -295,6 +385,8 @@ impl Header {
         let directory_offset = leb::read_u64(buf, 32);
         let declared_file_size = leb::read_u64(buf, 40);
         let feature_flags = leb::read_u32(buf, 48);
+        let layer_table_offset = leb::read_u32(buf, LAYER_TABLE_OFFSET_OFFSET);
+        let layer_table_length = leb::read_u32(buf, LAYER_TABLE_LENGTH_OFFSET);
 
         if channels != color_model.channel_count() {
             return Err(Error::corrupt(format!(
@@ -315,8 +407,10 @@ impl Header {
             )));
         }
 
-        if buf[RESERVED_OFFSET..HEADER_SIZE].iter().any(|&b| b != 0) {
-            return Err(Error::corrupt("reserved header bytes must be zero"));
+        if buf[RESERVED_OFFSET..HEADER_SIZE].iter().any(|&b| b != 0) && minor < MINOR_V0_4 {
+            return Err(Error::corrupt(
+                "reserved header bytes must be zero before v0.4",
+            ));
         }
 
         if feature_flags & !KNOWN_FEATURE_FLAGS != 0 {
@@ -334,6 +428,35 @@ impl Header {
             return Err(Error::unsupported(format!(
                 "feature flags {feature_flags:#010x} are not defined in v0.1"
             )));
+        }
+
+        // The layer table arrived in v0.4. An older file must not point at
+        // one, and a file that points at one must say so with the flag.
+        if minor < MINOR_V0_4 && (layer_table_offset != 0 || layer_table_length != 0) {
+            return Err(Error::corrupt(format!(
+                "a v0.{minor} file must not carry a layer table"
+            )));
+        }
+        if minor < MINOR_V0_4 && feature_flags & FEATURE_LAYERS != 0 {
+            return Err(Error::unsupported(format!(
+                "the layer feature flag is not defined in v0.{minor}"
+            )));
+        }
+        let has_layer_table = layer_table_length != 0;
+        if has_layer_table && layer_table_offset < HEADER_SIZE as u32 {
+            return Err(Error::corrupt(
+                "layer table offset points inside the fixed header",
+            ));
+        }
+        if has_layer_table != (feature_flags & FEATURE_LAYERS != 0) {
+            return Err(Error::corrupt(
+                "the header's layer flag disagrees with the layer table it points at",
+            ));
+        }
+        if feature_flags & FEATURE_LAYERS != 0 && feature_flags & FEATURE_PYRAMID != 0 {
+            return Err(Error::corrupt(
+                "a file with layers may not also have a preview pyramid in v0.4",
+            ));
         }
 
         // The dimensions must be non-zero, exactly as `Header::new` and
@@ -357,6 +480,8 @@ impl Header {
             directory_offset,
             declared_file_size,
             feature_flags,
+            layer_table_offset,
+            layer_table_length,
         })
     }
 }

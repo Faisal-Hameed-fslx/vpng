@@ -68,9 +68,15 @@ __all__ = [
     "Transaction",
     "encode",
     "encode_pixels",
+    "encode_layers",
     "decode",
     "decode_to_bytes",
     "decode_region",
+    "layers",
+    "decode_layer",
+    "decode_layer_to_bytes",
+    "composite",
+    "composite_to_bytes",
     "verify",
     "check",
     "info",
@@ -243,6 +249,53 @@ def encode_pixels(
     )
 
 
+def encode_layers(
+    output: str | os.PathLike[str],
+    layers: list[dict[str, Any]],
+    *,
+    format: str = "rgba8",
+    tile_size: int = DEFAULT_TILE_SIZE,
+    workers: int = 1,
+) -> EncodeResult:
+    """Encode several layers into a ``.vpng`` file.
+
+    The file is a **v0.4** file: it carries a layer table, and its directory
+    entries name the layer each tile belongs to. The layers are encoded
+    independently of one another, and each layer's bytes are accounted for on
+    its own.
+
+    Each layer is a mapping with these keys:
+
+    * ``pixels`` — the layer's canonical pixel bytes (**required**);
+    * ``width`` and ``height`` — the shape of those pixels (**required**);
+    * ``name`` — the layer's name (default: empty);
+    * ``kind`` — ``"pixels"`` (the default) or ``"mask"``;
+    * ``x`` and ``y`` — where the layer sits on the canvas (default: 0, 0);
+    * ``opacity`` — 0 to 255 (default: 255);
+    * ``mask`` — the index of the layer that masks this one (default: none).
+
+    The base layer is layer 0: it must cover the whole canvas::
+
+        vpng.encode_layers(
+            "layered.vpng",
+            [
+                {"name": "base", "pixels": base_pixels, "width": 64, "height": 48},
+                {"name": "ink", "pixels": ink_pixels, "width": 32, "height": 16,
+                 "x": 8, "y": 8, "mask": 2},
+                {"name": "m", "kind": "mask", "pixels": mask_pixels,
+                 "width": 32, "height": 16, "x": 8, "y": 8},
+            ],
+        )
+    """
+    return _vpng.encode_layers(
+        os.fspath(output),
+        layers,
+        format=format,
+        tile_size=tile_size,
+        workers=workers,
+    )
+
+
 def decode(
     source: str | os.PathLike[str],
     output: str | os.PathLike[str],
@@ -278,6 +331,58 @@ def decode_region(
 ) -> DecodeResult:
     """Decode a region of a ``.vpng`` file into a picture."""
     return _vpng.decode_region(os.fspath(source), os.fspath(output), x, y, width, height)
+
+
+def layers(source: str | os.PathLike[str]) -> list[dict[str, Any]]:
+    """List the layers of a ``.vpng`` file.
+
+    A file written before format v0.4 has exactly one layer: the base layer,
+    which is the picture itself. A v0.4 file may hold more, each with a name,
+    a rectangle on the canvas, an opacity and — optionally — a mask.
+
+    Every layer is reported with its own byte accounting: the pixels it holds
+    and the bytes its payloads take.
+    """
+    return _vpng.layers(os.fspath(source))
+
+
+def decode_layer(
+    source: str | os.PathLike[str],
+    output: str | os.PathLike[str],
+    layer: int,
+) -> DecodeResult:
+    """Decode one layer's own pixels into a picture.
+
+    The result is sized to the **layer's own rectangle**, not to the canvas,
+    and it holds the layer's pixels exactly. A mask layer decodes to its
+    coverage image: the same pixels, of which only the alpha channel carries
+    meaning.
+    """
+    return _vpng.decode_layer(os.fspath(source), os.fspath(output), layer)
+
+
+def decode_layer_to_bytes(source: str | os.PathLike[str], layer: int) -> bytes:
+    """Decode one layer's own pixels into canonical pixel bytes.
+
+    The bytes are **canonical**: rows are tightly packed with no padding, and
+    a 16-bit sample is little-endian.
+    """
+    return _vpng.decode_layer_to_bytes(os.fspath(source), layer)
+
+
+def composite(source: str | os.PathLike[str], output: str | os.PathLike[str]) -> DecodeResult:
+    """Composite every layer into one picture.
+
+    The base layer is the canvas, exactly. Each layer above it is blended over
+    the result with its own opacity and — when it has one — its mask. A file
+    with one layer composites to exactly that layer's pixels.
+    """
+    return _vpng.composite(os.fspath(source), os.fspath(output))
+
+
+def composite_to_bytes(source: str | os.PathLike[str]) -> bytes:
+    """Composite every layer into canonical pixel bytes."""
+    return _vpng.composite_to_bytes(os.fspath(source))
 
 
 def verify(input: str | os.PathLike[str], source: str | os.PathLike[str]) -> bool:

@@ -23,6 +23,7 @@ with a status, the question, the decision, the rationale, and the consequences.
 | [0015](ADR-0015-promoting-codecs-4-to-6.md) | promoting the dictionary and context-adaptive codecs to ids 4–6, and the v0.3 version rule | accepted |
 | [0016](ADR-0016-http-range-source.md) | the byte-source abstraction, the HTTP Range client, and what a non-conforming server gets | accepted |
 | [0017](ADR-0017-wasm-abi.md) | the WebAssembly package's shape and its raw `extern "C"` ABI | accepted |
+| [0018](ADR-0018-layers-and-masks.md) | layers, masks, the layer table's place, and the v0.4 version rule | accepted |
 
 ### Still open
 

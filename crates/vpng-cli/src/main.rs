@@ -8,6 +8,8 @@
 #![forbid(unsafe_code)]
 
 mod args;
+mod json;
+mod layers;
 mod size;
 
 use std::process::ExitCode;
@@ -53,7 +55,11 @@ fn run(argv: &[String]) -> Result<()> {
 
     match args.command.as_str() {
         "encode" => cmd_encode(&args),
+        "encode-layers" => layers::cmd_encode_layers(&args),
         "decode" => cmd_decode(&args),
+        "decode-layer" => layers::cmd_decode_layer(&args),
+        "composite" => layers::cmd_composite(&args),
+        "layers" => layers::cmd_layers(&args),
         "info" => cmd_info(&args),
         "check" => cmd_check(&args),
         "verify" => cmd_verify(&args),
@@ -331,7 +337,7 @@ fn cmd_info(args: &Args) -> Result<()> {
 
     if args.has("json") {
         println!(
-            "{{\"file\":\"{}\",\"file_size\":{},\"major\":{},\"minor\":{},\"width\":{},\"height\":{},\"color_model\":\"{}\",\"bits_per_channel\":{},\"channels\":{},\"default_codec\":{},\"tile_count\":{},\"tile_width\":{},\"tile_height\":{},\"level_count\":{},\"directory_offset\":{},\"declared_file_size\":{},\"feature_flags\":{},\"payloads_verified\":false}}",
+            "{{\"file\":\"{}\",\"file_size\":{},\"major\":{},\"minor\":{},\"width\":{},\"height\":{},\"color_model\":\"{}\",\"bits_per_channel\":{},\"channels\":{},\"default_codec\":{},\"tile_count\":{},\"tile_width\":{},\"tile_height\":{},\"level_count\":{},\"layer_count\":{},\"layer_table_offset\":{},\"layer_table_length\":{},\"directory_offset\":{},\"declared_file_size\":{},\"feature_flags\":{},\"payloads_verified\":false}}",
             escape(&input),
             bytes.len(),
             header.major,
@@ -346,6 +352,9 @@ fn cmd_info(args: &Args) -> Result<()> {
             document.partition().nominal_tile_size().0,
             document.partition().nominal_tile_size().1,
             document.level_count(),
+            document.layer_count(),
+            header.layer_table_offset,
+            header.layer_table_length,
             header.directory_offset,
             header.declared_file_size,
             header.feature_flags
@@ -390,6 +399,30 @@ fn cmd_info(args: &Args) -> Result<()> {
     println!("directory offset  {}", header.directory_offset);
     println!("declared size     {}", header.declared_file_size);
     println!("feature flags     {:#010x}", header.feature_flags);
+    if header.has_layers() {
+        println!(
+            "layer table       {} bytes at offset {}",
+            header.layer_table_length, header.layer_table_offset
+        );
+        println!("layer count       {}", document.layer_count());
+        for layer in document.layers() {
+            let rect = layer.rect();
+            println!(
+                "  layer {:<2} {:<12} {:<6} {}+{} {}x{}  opacity {:<3} {} tiles  {} B -> {} B",
+                layer.index(),
+                layer.name(),
+                if layer.is_mask() { "mask" } else { "pixels" },
+                rect.x,
+                rect.y,
+                rect.width,
+                rect.height,
+                layer.opacity(),
+                layer.base_level().tile_count(),
+                layer.uncompressed_bytes(),
+                layer.compressed_bytes(),
+            );
+        }
+    }
     // `info` reads only the header and the directory, which is what keeps it
     // O(1) in the tile count. It therefore cannot detect a corrupted payload.
     println!();
@@ -585,7 +618,7 @@ fn cmd_http_info(args: &Args) -> Result<()> {
 
     if args.has("json") {
         println!(
-            "{{\"url\":\"{}\",\"object_size\":{},\"bytes_read\":{},\"source_bytes_received\":{},\"requests\":{},\"major\":{},\"minor\":{},\"width\":{},\"height\":{},\"color_model\":\"{}\",\"bits_per_channel\":{},\"channels\":{},\"default_codec\":{},\"tile_count\":{},\"level_count\":{}}}",
+            "{{\"url\":\"{}\",\"object_size\":{},\"bytes_read\":{},\"source_bytes_received\":{},\"requests\":{},\"major\":{},\"minor\":{},\"width\":{},\"height\":{},\"color_model\":\"{}\",\"bits_per_channel\":{},\"channels\":{},\"default_codec\":{},\"tile_count\":{},\"level_count\":{},\"layer_count\":{}}}",
             escape(&url),
             object_size,
             reader.bytes_read(),
@@ -601,6 +634,7 @@ fn cmd_http_info(args: &Args) -> Result<()> {
             header.default_codec,
             tile_count,
             reader.meta().levels().len(),
+            reader.meta().layer_count(),
         );
     } else {
         println!("url              {url}");
@@ -623,6 +657,7 @@ fn cmd_http_info(args: &Args) -> Result<()> {
         println!("default codec    {}", header.default_codec);
         println!("tiles            {tile_count}");
         println!("levels           {}", reader.meta().levels().len());
+        println!("layers           {}", reader.meta().layer_count());
         println!();
         println!("note: the header and the directory were fetched; tile payloads were NOT.");
         println!("      run `vpng http-check {url}` to fetch and verify every payload.");
@@ -645,13 +680,14 @@ fn cmd_http_decode_region(args: &Args) -> Result<()> {
     let source = vpng_http::HttpSource::open(&url, vpng_http::HttpSourceOptions::default())?;
     let object_size = source.length();
     let mut reader = vpng_source::RangeReader::open_source(source, &limits)?;
+    let layer_count = reader.meta().layer_count();
     let region = reader.decode_region(rect, &limits)?;
     write_output_image(args, &output, &region)?;
 
     let digest = to_hex(&canonical_digest(&region));
     if args.has("json") {
         println!(
-            "{{\"url\":\"{}\",\"output\":\"{}\",\"x\":{},\"y\":{},\"width\":{},\"height\":{},\"sha256\":\"{}\",\"object_size\":{},\"bytes_read\":{},\"source_bytes_received\":{},\"requests\":{}}}",
+            "{{\"url\":\"{}\",\"output\":\"{}\",\"x\":{},\"y\":{},\"width\":{},\"height\":{},\"sha256\":\"{}\",\"object_size\":{},\"bytes_read\":{},\"source_bytes_received\":{},\"requests\":{},\"layer_count\":{}}}",
             escape(&url),
             escape(&output),
             rect.x,
@@ -663,6 +699,7 @@ fn cmd_http_decode_region(args: &Args) -> Result<()> {
             reader.bytes_read(),
             reader.source().info().bytes_received,
             reader.source().info().requests,
+            layer_count,
         );
     } else {
         println!(
@@ -675,6 +712,12 @@ fn cmd_http_decode_region(args: &Args) -> Result<()> {
             object_size,
             reader.source().info().requests
         );
+        if layer_count > 1 {
+            println!(
+                "  note: the region is the BASE layer's; the file has {layer_count} layers, \
+                 and the range reader does not composite them"
+            );
+        }
     }
     Ok(())
 }
@@ -689,7 +732,11 @@ USAGE:
 
 COMMANDS:
     encode <input> <output>            Encode an image into a .vpng file
+    encode-layers <output>             Build a layered .vpng file (--manifest)
     decode <input.vpng> <output>       Decode a .vpng file back to an image
+    decode-layer <input.vpng> <out>    Decode one layer's own pixels (--layer)
+    composite <input.vpng> <output>    Blend every layer into one image
+    layers <input.vpng>                List the layers of a file
     info <input.vpng>                  Print header and directory summary
     check <input.vpng>                 Verify container integrity (every payload CRC32C)
     verify <original> <candidate.vpng> Fail unless pixels round-trip exactly
@@ -721,6 +768,8 @@ OPTIONS:
     --adaptive-threshold <n>  The busyness threshold of the adaptive planner
                            (default 8: a mean neighbour difference of 8/255)
     --level <n>            Which level to decode (default 0, the original)
+    --layer <n>            Which layer to decode (default 0, the base layer)
+    --manifest <path>      The layer manifest `encode-layers` reads (JSON)
     --workers <n>          Encoder worker threads (default: the logical CPU count).
                            The worker count changes the speed and not the bytes:
                            one worker and N workers write the same file.

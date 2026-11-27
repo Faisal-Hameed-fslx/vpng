@@ -26,6 +26,20 @@
 //!   checked against the range that was asked for.
 //! * A short body is an error, never a short buffer.
 //!
+//! # Layers
+//!
+//! A container written for format **v0.4** may hold **layers**: named grids
+//! of tiles, each with a rectangle on the canvas, an opacity and — when the
+//! format has an 8-bit alpha channel — a mask.
+//!
+//! The reader **fetches** the layer table, so a caller can see how many
+//! layers there are and what they are. But the region this crate reads is
+//! the **base layer's** region: the reader does not composite, and it does
+//! not decode a non-base layer. A caller that wants a flattened picture
+//! must fetch and blend the layers itself. The command line says so too:
+//! `vpng http-decode-region` prints a note when the file has more than one
+//! layer.
+//!
 //! # Using it
 //!
 //! ```no_run

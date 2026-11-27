@@ -631,6 +631,139 @@ one shared `vpng_decoder::parse_container_parts`. There is no second
 decoder to drift. The evidence for that is the table above: 750 of 750
 digests match, on both paths.
 
+## Measured: the layer model (2026-11-27)
+
+Driver: `benchmarks/corpus/run_layers_corpus.py`; raw data:
+`benchmarks/p12_layers_results.json`. Report:
+`docs/P12_LAYERS_REPORT.md`.
+
+Host: 12 logical CPUs, `x86_64-pc-windows-gnu`, `rustc 1.100.0`, `--release`
+build, tile size 256, **4 encoder workers**, one image at a time. The same
+**750-image corpus** the other reports use, on the same cached canonical
+pixels.
+
+### The corpus measurement
+
+For each image three files are built with the real `vpng` binary: the plain
+`vpng encode` (a v0.1 file), a **one-layer** v0.4 file, and a **two-layer**
+v0.4 file whose overlay covers the top-left quadrant with its colour channels
+**inverted** and its alpha 255 — so the composite is *provably* different
+from the base rather than probably different. For the **114** images whose
+format has an alpha channel, a third file adds a **mask** whose coverage
+ramps from 0 at the left edge to 255 at the right.
+
+Every file is checked with `vpng check`, composited with `vpng composite`, and
+the result compared byte for byte with the canonical pixels. The two-layer
+file's **base layer** is decoded on its own with `vpng decode-layer 0` and
+compared the same way.
+
+| | |
+|---|---|
+| Images measured | **750** of 750 |
+| One-layer composites **exactly** the base's pixels | **750** of 750 |
+| Two-layer base layers **exactly** the original's pixels | **750** of 750 |
+| Two-layer composites that **differ** from the base | **750** of 750 |
+| Files that failed `vpng check` | **0** |
+| Images given a mask | **114** |
+| Masked files that failed `vpng check` | **0** |
+| Masked composites that differ from the unmasked ones | **114** of 114 |
+| Plain (v0.1) total | **453,767,460** bytes — the published stable baseline's |
+| One-layer (v0.4) total | **453,812,460** bytes |
+| The layer table's cost, over 750 files | **45,000** bytes — **0.009917%** |
+| Canonical pixel bytes | **1,450,363,330** bytes |
+
+### What a layer table costs
+
+The overhead is **exactly 60 bytes per file**, on every one of the 750
+images, with no exceptions: a 16-byte table header, one 40-byte descriptor,
+and the 4-byte name `base`. The **layer index in the directory entry's
+`flags` costs nothing** — it is a field that was already there and was zero.
+
+| Category | Images | Plain (v0.1) | One layer (v0.4) | Table overhead | Overhead share |
+|---|---:|---:|---:|---:|---:|
+| photos | 300 | 234,827,986 | 234,845,986 | 18,000 | 0.007665% |
+| pixel_art | 100 | 365,091 | 371,091 | 6,000 | **1.643426%** |
+| scans | 100 | 67,871,353 | 67,877,353 | 6,000 | 0.008840% |
+| textures | 150 | 133,872,854 | 133,881,854 | 9,000 | 0.006723% |
+| ui | 100 | 16,830,176 | 16,836,176 | 6,000 | 0.035650% |
+| **all** | **750** | **453,767,460** | **453,812,460** | **45,000** | **0.009917%** |
+
+The **pixel-art row is the unfavourable one** and it is kept as it is: the
+table's cost is **fixed**, not proportional, so on a tiny file it is a large
+share — **1.643426%** of a pixel-art file, and **54.054054%** of the
+corpus's smallest file, which is 111 bytes. A user who does not need layers
+pays nothing — the default path writes no table.
+
+### The two-layer file
+
+The two-layer file adds the overlay's own payloads, its directory entries and
+one more descriptor: **568,637,618** bytes over the corpus, **114,825,158**
+bytes more than the one-layer total. The **base layer's compressed and
+uncompressed byte counts are identical** in the one-layer and the two-layer
+file for **all 750 images**: adding an overlay did not change the base by one
+byte. That is the structural claim of the layer model, and it is checked for
+every image.
+
+Over all **1,500** layers, the per-layer ratio — uncompressed pixel bytes over
+compressed payload bytes, as the file itself reports it — has a median of
+**2.548115**, a p95 of **23.609023**, a mean of **5.996338**, a sample
+standard deviation of **9.884095**, and a **minimum of 1.0**: at least one
+layer did not get smaller at all, and the ratio is reported as it is rather
+than clamped.
+
+### The 16K photograph
+
+| | bytes | tiles | layer ratio |
+|---|---:|---:|---:|
+| The plain v0.1 file | 124,197,035 | 2,040 | 3.207751 |
+| The one-layer v0.4 file | **124,197,095** | 2,040 | 3.207751 |
+| The two-layer v0.4 file | **155,472,590** | 2,550 | 3.184535 (the overlay) |
+
+The one-layer file is the plain file plus **60 bytes**. Its digest is
+`018cb6491f9dc944401ea63d5c938c9ad3fe0992dde167708ee0b018604cf6bb`; the
+plain file's is the published
+`d029a7ebc1e0347cb3399ab6f9de9653da5853c96b38d95cddc3b8bb45a14dbf`. The
+overlay — 7,680 × 4,320 pixels of the inverted picture — adds **31,275,495**
+bytes, which is its own payload and nothing else.
+
+### The memory figures, on the 16K photograph
+
+Driver: `benchmarks/layers/measure_layer_memory.py`; raw data:
+`benchmarks/p12_layers_memory_results.json`. Each command runs in its own
+process and the **peak working set** is taken from the operating system's own
+`GetProcessMemoryInfo` while the process is alive.
+
+| Command | Peak working set |
+|---|---:|
+| `vpng layers --json` | **159,817,728** bytes |
+| `vpng check` | **159,768,576** bytes |
+| `vpng decode-layer 0` (the base) | **558,731,264** bytes |
+| `vpng decode-layer 1` (the overlay) | **260,386,816** bytes |
+| `vpng composite` (one layer) | **527,650,816** bytes |
+| `vpng composite` (two layers) | **658,427,904** bytes |
+
+**Included**: the operating system, the loader, the binary's text and data,
+the Rust heap, every buffer the command allocated, and the file it read.
+**Excluded**: nothing — the figure is the whole process.
+
+**This is not the 64 MB localized-editing target**, and it is not compared
+with it: a composite blends the whole canvas, so it holds the whole canvas.
+The editing engine's own target is unchanged and still met.
+
+### The byte-count and timing scope
+
+**Included** in the byte figures: the complete size of every file that was
+written — header, directory, layer table and payloads alike.
+**Excluded**: the decoded pixels, the raw files the composites were written
+to, the driver's own allocations, and every process working set. The layer
+table's overhead is therefore the **whole** difference between the plain file
+and the one-layer file.
+
+**There are no timing figures in this measurement.** The corpus pass took
+**664.418 s** wall-clock for 750 images and three files each, and that figure
+is a driver total — it includes the Python driver's own work and the writes
+of the raw files — not a benchmark.
+
 ## Measured: large-image stress (2026-11-15, with Predictor)
 
 Host: 12 logical CPUs, 7,916 MB physical RAM, Windows `x86_64-pc-windows-gnu`,

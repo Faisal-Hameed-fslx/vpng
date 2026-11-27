@@ -24,25 +24,33 @@
 
 #![forbid(unsafe_code)]
 
+pub mod composite;
+pub mod layer;
 pub mod levels;
 
+pub use composite::{alpha_offset, sample_max};
+pub use layer::{derive_layers, Layer};
 pub use levels::{derive_levels, Level};
 
 use vpng_codecs::{get_codec, DecodeContext};
-use vpng_container::{crc32c, Directory, DirectoryEntry, Header, HEADER_SIZE, MINOR_V0_3};
+use vpng_container::{
+    crc32c, Directory, DirectoryEntry, Header, LayerTable, HEADER_SIZE, MINOR_V0_3,
+};
 use vpng_core::{CanonicalImage, Dimensions, Error, Limits, PixelFormat, Rect, Result};
 use vpng_tiling::{Partition, TileGeometry, TileGrid, TileRect};
+
+use crate::composite::blit_at;
 
 /// The pieces a validated container declares.
 ///
 /// This is the metadata every reader needs and no reader may disagree about:
-/// the header, the tile directory, the levels derived from the directory, and
+/// the header, the tile directory, the layers derived from the directory, and
 /// the pixel format.
 #[derive(Debug, Clone)]
 pub struct ContainerParts {
     header: Header,
     directory: Directory,
-    levels: Vec<Level>,
+    layers: Vec<Layer>,
     format: PixelFormat,
 }
 
@@ -57,10 +65,19 @@ impl ContainerParts {
         &self.directory
     }
 
+    /// The container's layers: the base layer first, then any others.
+    pub fn layers(&self) -> &[Layer] {
+        &self.layers
+    }
+
     /// The container's levels: the original image first, then any derived
     /// previews.
+    ///
+    /// The levels belong to the **base** layer. A v0.4 container has one
+    /// level per layer and no pyramid, so this is a single level; a
+    /// container written before v0.4 has one layer and may have a pyramid.
     pub fn levels(&self) -> &[Level] {
-        &self.levels
+        self.layers[0].levels()
     }
 
     /// The container's pixel format.
@@ -69,7 +86,8 @@ impl ContainerParts {
     }
 }
 
-/// Validate a container's header and directory and derive its levels.
+/// Validate a container's header, directory and layer table, and derive its
+/// layers.
 ///
 /// **This is the one implementation of the rules that decide which containers
 /// are acceptable.** The in-memory decoder, the streaming reader over any byte
@@ -81,22 +99,29 @@ impl ContainerParts {
 ///   actually present;
 /// * the directory's length against the header's tile count, and its flags
 ///   against the minor version;
-/// * every payload's offset against the end of the directory, and its
-///   length against the decompression limits;
+/// * the layer table's length against the header, when the header declares
+///   one, and its own checksum;
+/// * every payload's offset against the end of the directory **and** the end
+///   of the layer table, and its length against the decompression limits;
 /// * the three codecs promoted in v0.3 against the minor version, and every
 ///   codec id against the set this build implements;
 /// * the payload ranges against the file's length, and the tile sizes
 ///   against the pixel format;
-/// * the levels, derived from the directory by [`derive_levels`].
+/// * the layers, derived from the directory by [`derive_layers`].
 ///
 /// `file_size` is the number of bytes the object has. A source that knows the
-/// object's length passes that length; a caller that holds only the header
-/// and the directory — a browser that fetched two byte ranges — passes the
-/// header's declared size, so the payload *ranges* are checked against the
-/// size the container claims for itself.
+/// object's length passes that length; a caller that holds only the header,
+/// the directory and the layer table — a browser that fetched three byte
+/// ranges — passes the header's declared size, so the payload *ranges* are
+/// checked against the size the container claims for itself.
+///
+/// `layer_table_bytes` is the layer table, or `None` for a container that has
+/// none. A container that *declares* a layer table and is given none is
+/// refused: a reader cannot know what the container means without it.
 pub fn parse_container_parts(
     header: Header,
     directory_bytes: &[u8],
+    layer_table_bytes: Option<&[u8]>,
     file_size: u64,
     limits: &Limits,
 ) -> Result<ContainerParts> {
@@ -138,10 +163,53 @@ pub fn parse_container_parts(
 
     let directory_end = vpng_core::checked_add(header.directory_offset, directory_size as u64)?;
 
+    // The layer table, when the container has one.
+    let layer_table = match (header.has_layers(), layer_table_bytes) {
+        (true, Some(bytes)) => {
+            if bytes.len() != header.layer_table_length as usize {
+                return Err(Error::corrupt(format!(
+                    "the layer table is {} bytes, the header says {}",
+                    bytes.len(),
+                    header.layer_table_length
+                )));
+            }
+            let table = LayerTable::decode(bytes)?;
+            let table_end = vpng_core::checked_add(
+                header.layer_table_offset as u64,
+                header.layer_table_length as u64,
+            )?;
+            if (header.layer_table_offset as u64) < directory_end || table_end > file_size {
+                return Err(Error::corrupt(
+                    "the layer table does not fit between the directory and the end of the file",
+                ));
+            }
+            Some(table)
+        }
+        (true, None) => {
+            return Err(Error::corrupt(
+                "the container declares a layer table, and the reader did not supply it",
+            ))
+        }
+        (false, Some(bytes)) if !bytes.is_empty() => {
+            return Err(Error::corrupt(
+                "the container has no layer table, but one was supplied",
+            ))
+        }
+        _ => None,
+    };
+
+    // The payloads come after the directory and, when there is one, after the
+    // layer table.
+    let mut payloads_start = directory_end;
+    if let Some(table) = layer_table.as_ref() {
+        payloads_start = vpng_core::checked_add(payloads_start, header.layer_table_length as u64)?;
+        let _ = table;
+    }
+
     for (index, entry) in directory.entries.iter().enumerate() {
-        if entry.payload_offset < directory_end {
+        if entry.payload_offset < payloads_start {
             return Err(Error::corrupt(format!(
-                "tile {index} payload begins before the end of the tile directory"
+                "tile {index} payload begins before the end of the container's tables"
             )));
         }
         limits.validate_tile_payload(entry.compressed_length, entry.uncompressed_length as u64)?;
@@ -167,12 +235,12 @@ pub fn parse_container_parts(
     directory.validate_payload_ranges(file_size)?;
     directory.validate_tile_sizes(format.bytes_per_pixel())?;
 
-    let levels = derive_levels(&header, &directory, dims)?;
+    let layers = derive_layers(&header, &directory, layer_table.as_ref(), dims)?;
 
     Ok(ContainerParts {
         header,
         directory,
-        levels,
+        layers,
         format,
     })
 }
@@ -183,7 +251,7 @@ pub struct Document<'a> {
     bytes: &'a [u8],
     header: Header,
     directory: Directory,
-    levels: Vec<Level>,
+    layers: Vec<Layer>,
     format: PixelFormat,
 }
 
@@ -206,13 +274,35 @@ impl<'a> Document<'a> {
         let directory_start = header.directory_offset as usize;
         let directory_slice = &bytes[directory_start..directory_start + directory_size];
 
-        let parts = parse_container_parts(header, directory_slice, bytes.len() as u64, limits)?;
+        // The layer table, when the file has one, sits between the directory
+        // and the payloads.
+        let layer_table_bytes = if header.has_layers() {
+            let start = header.layer_table_offset as usize;
+            let length = header.layer_table_length as usize;
+            let end = vpng_core::checked_add(start as u64, length as u64)? as usize;
+            if end > bytes.len() {
+                return Err(Error::corrupt(
+                    "the layer table extends past the end of the file",
+                ));
+            }
+            Some(&bytes[start..end])
+        } else {
+            None
+        };
+
+        let parts = parse_container_parts(
+            header,
+            directory_slice,
+            layer_table_bytes,
+            bytes.len() as u64,
+            limits,
+        )?;
 
         Ok(Document {
             bytes,
             header: parts.header,
             directory: parts.directory,
-            levels: parts.levels,
+            layers: parts.layers,
             format: parts.format,
         })
     }
@@ -229,29 +319,54 @@ impl<'a> Document<'a> {
         self.directory.entries.get(index)
     }
 
+    /// The file's layers: the base layer first, then any others.
+    ///
+    /// A file written before v0.4 has exactly one layer.
+    pub fn layers(&self) -> &[Layer] {
+        &self.layers
+    }
+
+    /// The number of layers in the file.
+    pub fn layer_count(&self) -> usize {
+        self.layers.len()
+    }
+
+    /// One layer by position. Position 0 is the base layer.
+    pub fn layer(&self, position: usize) -> Option<&Layer> {
+        self.layers.get(position)
+    }
+
+    /// The base layer: the image itself.
+    pub fn base_layer(&self) -> &Layer {
+        &self.layers[0]
+    }
+
     /// The file's levels: the original image first, then any derived previews.
+    ///
+    /// The levels belong to the **base** layer.
     pub fn levels(&self) -> &[Level] {
-        &self.levels
+        self.layers[0].levels()
     }
 
-    /// The number of levels in the file.
+    /// The number of levels in the base layer.
     pub fn level_count(&self) -> usize {
-        self.levels.len()
+        self.layers[0].levels().len()
     }
 
-    /// One level by position. Position 0 is the original image.
+    /// One level of the base layer by position. Position 0 is the original
+    /// image.
     pub fn level(&self, position: usize) -> Option<&Level> {
-        self.levels.get(position)
+        self.layers[0].levels().get(position)
     }
 
     /// The original image's level.
     pub fn base_level(&self) -> &Level {
-        &self.levels[0]
+        self.layers[0].base_level()
     }
 
     /// The original image's exact partition.
     pub fn partition(&self) -> &Partition {
-        self.base_level().partition()
+        self.base_layer().partition()
     }
 
     pub fn format(&self) -> PixelFormat {
@@ -320,7 +435,7 @@ impl<'a> Document<'a> {
     /// substitute for the original.
     pub fn decode_level(&self, position: usize, limits: &Limits) -> Result<CanonicalImage> {
         let level = self
-            .levels
+            .levels()
             .get(position)
             .ok_or_else(|| Error::invalid(format!("level {position} is out of range")))?;
 
@@ -346,6 +461,119 @@ impl<'a> Document<'a> {
         decode_region_from(self.base_level(), self.format, rect, limits, |index| {
             self.decode_tile(index, limits)
         })
+    }
+
+    /// Decode one layer into a fresh buffer.
+    ///
+    /// The result is sized to the **layer's own rectangle**, not the canvas,
+    /// and it holds the layer's pixels exactly. A mask layer decodes to its
+    /// coverage image: the same pixels, of which only the alpha channel
+    /// carries meaning.
+    pub fn decode_layer(&self, position: usize, limits: &Limits) -> Result<CanonicalImage> {
+        let layer = self
+            .layers
+            .get(position)
+            .ok_or_else(|| Error::invalid(format!("layer {position} is out of range")))?;
+
+        let rect = layer.rect();
+        let level = layer.base_level();
+        decode_layer_from(level, self.format, rect, limits, |index| {
+            self.decode_tile(index, limits)
+        })
+    }
+
+    /// Composite every layer into one image on the canvas.
+    ///
+    /// The base layer is the canvas, exactly. Each layer above it is blended
+    /// over the result in the order the layer table lists them, with its own
+    /// opacity and — when it has one — its mask.
+    ///
+    /// A container with one layer composites to **exactly** that layer's
+    /// pixels: the blend of a single layer is the identity, not an
+    /// approximation.
+    ///
+    /// The composite is a *derived* image. Each layer's own pixels are exact
+    /// and are recovered by [`Document::decode_layer`]; the composite is
+    /// where opacity and masks are applied.
+    pub fn composite(&self, limits: &Limits) -> Result<CanonicalImage> {
+        let base = self.base_layer();
+        let canvas = base.rect();
+        let mut out = self.decode_layer(0, limits)?;
+
+        for position in 1..self.layers.len() {
+            let layer = &self.layers[position];
+            if layer.is_mask() {
+                // A mask is never drawn on its own; it modulates another
+                // layer.
+                continue;
+            }
+            let source = self.decode_layer(position, limits)?;
+            let coverage = match layer.mask() {
+                Some(mask_index) => {
+                    let mask = self.layers.get(mask_index as usize).ok_or_else(|| {
+                        Error::corrupt(format!(
+                            "layer {position} names mask layer {mask_index}, which does not exist"
+                        ))
+                    })?;
+                    Some(self.mask_coverage(mask, layer, limits)?)
+                }
+                None => None,
+            };
+            composite::blend(
+                &mut out,
+                canvas,
+                &source,
+                layer.rect(),
+                coverage.as_deref(),
+                layer.opacity(),
+                self.format,
+            )?;
+        }
+
+        Ok(out)
+    }
+
+    /// The coverage of a mask over a layer's rectangle.
+    ///
+    /// The result is one byte per pixel of the layer's rectangle: 0 means
+    /// hidden and 255 means fully visible.
+    fn mask_coverage(&self, mask: &Layer, layer: &Layer, limits: &Limits) -> Result<Vec<u8>> {
+        let mask_image = self.decode_layer(mask.index() as usize, limits)?;
+        let layer_rect = layer.rect();
+        let mask_rect = mask.rect();
+        let format = self.format;
+
+        let offset = composite::alpha_offset(format).ok_or_else(|| {
+            Error::unsupported("a mask needs a pixel format with an alpha channel")
+        })?;
+        let sample_bytes = format.bytes_per_channel() as usize;
+
+        let mut coverage = vec![0u8; layer_rect.width as usize * layer_rect.height as usize];
+        let mask_row = mask_image.row_bytes()? as usize;
+        let bpp = format.bytes_per_pixel() as usize;
+
+        for row in 0..layer_rect.height as usize {
+            for column in 0..layer_rect.width as usize {
+                let mx = layer_rect.x - mask_rect.x + column as u32;
+                let my = layer_rect.y - mask_rect.y + row as u32;
+                let start = my as usize * mask_row + mx as usize * bpp + offset;
+                let value = if sample_bytes == 1 {
+                    mask_image.data()[start] as u64
+                } else {
+                    u16::from_le_bytes([mask_image.data()[start], mask_image.data()[start + 1]])
+                        as u64
+                };
+                // A 16-bit alpha is scaled down to a byte.
+                let scaled = if sample_bytes == 1 {
+                    value
+                } else {
+                    value / 257
+                };
+                coverage[row * layer_rect.width as usize + column] = scaled.min(255) as u8;
+            }
+        }
+
+        Ok(coverage)
     }
 
     /// Verify every tile payload's CRC32C without decoding a single pixel.
@@ -477,6 +705,45 @@ where
             let dst = (y - rect.y) as usize * out_row + (ix0 - rect.x) as usize * bpp;
             out.data_mut()[dst..dst + n].copy_from_slice(&pixels[src..src + n]);
         }
+    }
+
+    Ok(out)
+}
+
+/// Assemble one layer's pixels, fetching each tile's pixels with `fetch`.
+///
+/// The result is sized to the **layer's own rectangle**, not the canvas: a
+/// layer's tiles carry canvas coordinates, so the origin is subtracted on the
+/// way in. The helper is shared by the in-memory decoder and the streaming
+/// reader so that the two cannot disagree about how a layer is put together.
+///
+/// `fetch` is called with a **directory entry index** and must return that
+/// tile's decoded pixels.
+pub fn decode_layer_from<F>(
+    level: &Level,
+    format: PixelFormat,
+    rect: Rect,
+    limits: &Limits,
+    mut fetch: F,
+) -> Result<CanonicalImage>
+where
+    F: FnMut(usize) -> Result<Vec<u8>>,
+{
+    let dims = Dimensions::new(rect.width, rect.height)?;
+    limits.validate_dimensions(dims, "layer")?;
+
+    let mut out = CanonicalImage::new_zeroed(rect.width, rect.height, format, limits)?;
+
+    for position in 0..level.partition().len() {
+        let index = level
+            .entry_index(position)
+            .expect("a partition tile is always inside its level");
+        let pixels = fetch(index)?;
+        let geom = level
+            .partition()
+            .tile(position)
+            .expect("a partition tile is always inside its level");
+        blit_at(&mut out, geom, rect.x, rect.y, &pixels)?;
     }
 
     Ok(out)

@@ -103,7 +103,7 @@ pub fn encode_parallel(
         None => source,
     };
     let levels = crate::encode_plan(level0, &plan, options, parallel)?;
-    crate::assemble(dims, source.format(), options, &levels)
+    crate::assemble(dims, source.format(), options, &levels, None)
 }
 
 /// Encode every tile into one vector, in tile order.

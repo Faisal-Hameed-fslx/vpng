@@ -228,12 +228,41 @@ pub extern "C" fn vpng_open(data_ptr: u32, len: u32) -> i32 {
 /// The caller supplies the two byte ranges it fetched; the module then
 /// knows the container's layout and can be asked for the payloads it wants.
 /// `file_size` is the size the container claims for itself.
+///
+/// A container with a layer table needs the table as well, so this refuses
+/// one: use `vpng_open_parts_with_layers`.
 #[no_mangle]
 pub extern "C" fn vpng_open_parts(
     header_ptr: u32,
     header_len: u32,
     directory_ptr: u32,
     directory_len: u32,
+    file_size: u32,
+) -> i32 {
+    vpng_open_parts_with_layers(
+        header_ptr,
+        header_len,
+        directory_ptr,
+        directory_len,
+        0,
+        0,
+        file_size,
+    )
+}
+
+/// Open a container from its header, its directory and its layer table.
+///
+/// The layer table's pointer and length may both be zero, which means the
+/// container has none. A container that *declares* a table and is given none
+/// is refused: the table says what the container means.
+#[no_mangle]
+pub extern "C" fn vpng_open_parts_with_layers(
+    header_ptr: u32,
+    header_len: u32,
+    directory_ptr: u32,
+    directory_len: u32,
+    layer_table_ptr: u32,
+    layer_table_len: u32,
     file_size: u32,
 ) -> i32 {
     let header = match read_slice(header_ptr, header_len) {
@@ -244,8 +273,21 @@ pub extern "C" fn vpng_open_parts(
         Ok(bytes) => bytes.to_vec(),
         Err(error) => return fail(error),
     };
+    let layer_table = if layer_table_len == 0 {
+        None
+    } else {
+        match read_slice(layer_table_ptr, layer_table_len) {
+            Ok(bytes) => Some(bytes.to_vec()),
+            Err(error) => return fail(error),
+        }
+    };
     let registry = registry();
-    match registry.open_parts(&header, &directory, file_size as u64) {
+    match registry.open_parts_with_layers(
+        &header,
+        &directory,
+        layer_table.as_deref(),
+        file_size as u64,
+    ) {
         Ok(handle) => handle,
         Err(error) => fail(error),
     }
@@ -306,6 +348,135 @@ pub extern "C" fn vpng_tile_count(handle: i32) -> i32 {
 pub extern "C" fn vpng_level_count(handle: i32) -> i32 {
     let registry = registry();
     guard(|| registry.with(handle, |document| Ok(document.meta().level_count() as i32)))
+}
+
+/// The number of layers in the container.
+///
+/// A container written before v0.4 has exactly one layer: the base layer.
+#[no_mangle]
+pub extern "C" fn vpng_layer_count(handle: i32) -> i32 {
+    let registry = registry();
+    guard(|| registry.with(handle, |document| Ok(document.meta().layer_count() as i32)))
+}
+
+/// The length of a layer's name, in bytes.
+///
+/// A layer's name may be empty. The name itself is fetched with
+/// [`vpng_layer_name_copy`].
+#[no_mangle]
+pub extern "C" fn vpng_layer_name_length(handle: i32, layer: u32) -> i32 {
+    let registry = registry();
+    guard(|| {
+        registry.with(handle, |document| {
+            let name = document
+                .meta()
+                .layer(layer as usize)
+                .ok_or_else(|| Error::invalid(format!("layer {layer} is out of range")))?;
+            Ok(name.name().len() as i32)
+        })
+    })
+}
+
+/// Copy a layer's name into the caller's buffer.
+///
+/// Returns the number of bytes written. The name is truncated if the buffer
+/// is too small.
+#[no_mangle]
+pub extern "C" fn vpng_layer_name_copy(handle: i32, layer: u32, out_ptr: u32, out_len: u32) -> i32 {
+    let registry = registry();
+    guard(|| {
+        registry.with(handle, |document| {
+            let name = document
+                .meta()
+                .layer(layer as usize)
+                .ok_or_else(|| Error::invalid(format!("layer {layer} is out of range")))?;
+            let bytes = name.name().as_bytes();
+            let take = bytes.len().min(out_len as usize);
+            let out = write_slice(out_ptr, take as u32)?;
+            out.copy_from_slice(&bytes[..take]);
+            Ok(take as i32)
+        })
+    })
+}
+
+/// The rectangle a layer covers on the canvas.
+///
+/// The four values — `x`, `y`, `width`, `height` — are written into the
+/// caller's buffer as little-endian `u32`s. Returns 0, or a negative error
+/// code.
+#[no_mangle]
+pub extern "C" fn vpng_layer_rect(handle: i32, layer: u32, out_ptr: u32) -> i32 {
+    let registry = registry();
+    guard(|| {
+        registry.with(handle, |document| {
+            let layer = document
+                .meta()
+                .layer(layer as usize)
+                .ok_or_else(|| Error::invalid(format!("layer {layer} is out of range")))?;
+            let rect = layer.rect();
+            let out = write_slice(out_ptr, 16)?;
+            out[0..4].copy_from_slice(&rect.x.to_le_bytes());
+            out[4..8].copy_from_slice(&rect.y.to_le_bytes());
+            out[8..12].copy_from_slice(&rect.width.to_le_bytes());
+            out[12..16].copy_from_slice(&rect.height.to_le_bytes());
+            Ok(0)
+        })
+    })
+}
+
+/// Whether a layer is a mask rather than picture pixels.
+///
+/// Returns 1 for a mask, 0 for picture pixels, or a negative error code.
+#[no_mangle]
+pub extern "C" fn vpng_layer_is_mask(handle: i32, layer: u32) -> i32 {
+    let registry = registry();
+    guard(|| {
+        registry.with(handle, |document| {
+            let layer = document
+                .meta()
+                .layer(layer as usize)
+                .ok_or_else(|| Error::invalid(format!("layer {layer} is out of range")))?;
+            Ok(i32::from(layer.is_mask()))
+        })
+    })
+}
+
+/// The number of canonical bytes one layer's pixels take, or a negative error
+/// code.
+///
+/// The layer's pixels are sized to the layer's own rectangle, not to the
+/// canvas.
+#[no_mangle]
+pub extern "C" fn vpng_layer_length(handle: i32, layer: u32) -> i64 {
+    let registry = registry();
+    guard(|| {
+        registry.with(handle, |document| {
+            let layer = document
+                .meta()
+                .layer(layer as usize)
+                .ok_or_else(|| Error::invalid(format!("layer {layer} is out of range")))?;
+            let rect = layer.rect();
+            let bytes = document.meta().format().bytes_per_pixel();
+            Ok(rect.width as i64 * rect.height as i64 * bytes as i64)
+        })
+    })
+}
+
+/// Decode one layer's own pixels into the caller's buffer.
+///
+/// Returns the number of bytes written, or a negative error code. The buffer
+/// must be at least [`vpng_layer_length`] bytes long.
+#[no_mangle]
+pub extern "C" fn vpng_decode_layer(handle: i32, layer: u32, out_ptr: u32) -> i64 {
+    let registry = registry();
+    guard(|| {
+        registry.with_mut(handle, |document| {
+            let pixels = document.decode_layer(layer as usize, &Limits::default())?;
+            let out = write_slice(out_ptr, pixels.len() as u32)?;
+            out.copy_from_slice(&pixels);
+            Ok(pixels.len() as i64)
+        })
+    })
 }
 
 /// The byte offset of a tile's payload, or a negative error code.

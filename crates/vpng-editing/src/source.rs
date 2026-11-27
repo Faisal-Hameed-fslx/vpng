@@ -26,10 +26,26 @@
 use std::path::Path;
 
 use vpng_container::{Directory, DirectoryEntry, Header};
-use vpng_core::{Dimensions, Limits, PixelFormat, Result};
+use vpng_core::{Dimensions, Error, Limits, PixelFormat, Result};
 use vpng_decoder::{Document, Level};
 use vpng_source::TileReader;
 use vpng_tiling::Partition;
+
+/// Refuse a file that carries a layer table.
+///
+/// The editing engine edits **one** grid of tiles: the base layer. A v0.4
+/// file holds several grids, and a commit would have to decide what to do
+/// with the layers it does not know about — rewriting the file as a flat
+/// image would silently drop them. The engine refuses the file instead, so
+/// the data is never lost to a quiet surprise.
+fn refuse_layers(header: &Header) -> Result<()> {
+    if header.has_layers() {
+        return Err(Error::unsupported(
+            "the editing engine edits one layer; this file carries a layer table, which it does not support yet",
+        ));
+    }
+    Ok(())
+}
 
 /// Everything an editing session needs to know about a file's tiles.
 pub trait TileSource {
@@ -101,10 +117,14 @@ pub struct DocumentSource<'a> {
 
 impl<'a> DocumentSource<'a> {
     /// Parse a complete file and wrap it.
+    ///
+    /// A file that carries a layer table is refused: the editing engine
+    /// edits one layer, and a commit to a layered file would have to drop
+    /// the other layers.
     pub fn parse(bytes: &'a [u8], limits: &Limits) -> Result<Self> {
-        Ok(DocumentSource {
-            document: Document::parse(bytes, limits)?,
-        })
+        let document = Document::parse(bytes, limits)?;
+        refuse_layers(document.header())?;
+        Ok(DocumentSource { document })
     }
 
     /// The underlying decoder document.
@@ -180,10 +200,14 @@ impl FileSource {
     /// The validation is the same set of checks
     /// [`vpng_decoder::Document::parse`] performs, so a file this source
     /// accepts is a file the decoder accepts.
+    ///
+    /// A file that carries a layer table is refused: the editing engine
+    /// edits one layer, and a commit to a layered file would have to drop
+    /// the other layers.
     pub fn open(path: &Path, limits: &Limits) -> Result<Self> {
-        Ok(FileSource {
-            reader: TileReader::open(path, limits)?,
-        })
+        let reader = TileReader::open(path, limits)?;
+        refuse_layers(reader.meta().header())?;
+        Ok(FileSource { reader })
     }
 
     /// The file's path.

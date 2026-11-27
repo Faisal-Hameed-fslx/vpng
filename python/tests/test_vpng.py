@@ -29,15 +29,15 @@ import png_helper  # noqa: E402
 import vpng  # noqa: E402
 
 
-def gradient(width: int, height: int, channels: int = 4) -> bytes:
+def gradient(width: int, height: int, channels: int = 4, seed: int = 0) -> bytes:
     """A deterministic test picture with structure the codecs can exploit."""
     data = bytearray(width * height * channels)
     index = 0
     for y in range(height):
         for x in range(width):
-            data[index] = (x * 7 + y * 3) & 0xFF
-            data[index + 1] = (x * 5) & 0xFF
-            data[index + 2] = (y * 11) & 0xFF
+            data[index] = (x * 7 + y * 3 + seed) & 0xFF
+            data[index + 1] = (x * 5 + seed) & 0xFF
+            data[index + 2] = (y * 11 + seed) & 0xFF
             if channels == 4:
                 data[index + 3] = 255
             index += channels
@@ -416,11 +416,107 @@ class TestPyramid(VpngTestCase):
         self.assertTrue(vpng.verify(self.png, self.vpng))
 
 
+class TestLayers(VpngTestCase):
+    """Named layers and masks."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.base_pixels = gradient(64, 48, 4)
+        self.ink_pixels = gradient(32, 16, 4, 3)
+        self.mask_pixels = bytes([0x80] * (32 * 16 * 4))
+        self.layered = self.dir / "layered.vpng"
+
+    def layers(self) -> list[dict[str, object]]:
+        return [
+            {
+                "name": "base",
+                "pixels": self.base_pixels,
+                "width": 64,
+                "height": 48,
+            },
+            {
+                "name": "ink",
+                "pixels": self.ink_pixels,
+                "width": 32,
+                "height": 16,
+                "x": 8,
+                "y": 8,
+                "mask": 2,
+            },
+            {
+                "name": "m",
+                "kind": "mask",
+                "pixels": self.mask_pixels,
+                "width": 32,
+                "height": 16,
+                "x": 8,
+                "y": 8,
+            },
+        ]
+
+    def test_a_layered_file_is_a_v0_4_file(self) -> None:
+        result = vpng.encode_layers(self.layered, self.layers())
+        self.assertEqual(result.format_minor, 4)
+        self.assertEqual(result.layer_count, 3)
+        self.assertEqual(vpng.info(self.layered)["minor"], 4)
+
+    def test_the_layers_are_listed(self) -> None:
+        vpng.encode_layers(self.layered, self.layers())
+        layers = vpng.layers(self.layered)
+        self.assertEqual(len(layers), 3)
+        self.assertEqual([layer["name"] for layer in layers], ["base", "ink", "m"])
+        self.assertEqual(layers[2]["is_mask"], True)
+        self.assertEqual(layers[1]["mask"], 2)
+        self.assertEqual(layers[1]["width"], 32)
+        # The byte accounting is reported per layer.
+        self.assertGreater(layers[0]["uncompressed_bytes"], 0)
+        self.assertGreater(layers[0]["compressed_bytes"], 0)
+
+    def test_every_layer_decodes_to_its_own_pixels(self) -> None:
+        vpng.encode_layers(self.layered, self.layers())
+        self.assertEqual(vpng.decode_layer_to_bytes(self.layered, 0), self.base_pixels)
+        self.assertEqual(vpng.decode_layer_to_bytes(self.layered, 1), self.ink_pixels)
+        self.assertEqual(vpng.decode_layer_to_bytes(self.layered, 2), self.mask_pixels)
+
+    def test_the_composite_is_the_base_layer_when_there_is_one_layer(self) -> None:
+        vpng.encode_layers(
+            self.layered,
+            [
+                {
+                    "name": "only",
+                    "pixels": self.base_pixels,
+                    "width": 64,
+                    "height": 48,
+                }
+            ],
+        )
+        self.assertEqual(vpng.composite_to_bytes(self.layered), self.base_pixels)
+
+    def test_the_composite_applies_the_mask(self) -> None:
+        vpng.encode_layers(self.layered, self.layers())
+        composite = vpng.composite_to_bytes(self.layered)
+        self.assertEqual(len(composite), len(self.base_pixels))
+        self.assertNotEqual(composite, self.base_pixels)
+
+    def test_the_editing_engine_refuses_a_layered_file(self) -> None:
+        vpng.encode_layers(self.layered, self.layers())
+        with self.assertRaises(vpng.UnsupportedFeatureError):
+            vpng.open_document(self.layered)
+
+    def test_a_layer_without_pixels_is_refused(self) -> None:
+        with self.assertRaises(ValueError):
+            vpng.encode_layers(self.layered, [{"name": "empty", "width": 4, "height": 4}])
+
+    def test_a_layer_with_no_layers_is_refused(self) -> None:
+        with self.assertRaises(ValueError):
+            vpng.encode_layers(self.layered, [])
+
+
 class TestModuleSurface(VpngTestCase):
     """The names the package promises."""
 
     def test_the_constants_are_present(self) -> None:
-        self.assertEqual(vpng.FORMAT_VERSION, "0.3")
+        self.assertEqual(vpng.FORMAT_VERSION, "0.4")
         self.assertEqual(vpng.DEFAULT_TILE_SIZE, 256)
         self.assertIn("rgba8", vpng.FORMATS)
         self.assertIn(6, vpng.CODECS)

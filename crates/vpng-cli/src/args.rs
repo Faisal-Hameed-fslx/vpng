@@ -31,6 +31,8 @@ const VALUE_OPTIONS: &[&str] = &[
     "pyramid-levels",
     "adaptive-threshold",
     "level",
+    "layer",
+    "manifest",
 ];
 
 /// Long options that are simple flags.

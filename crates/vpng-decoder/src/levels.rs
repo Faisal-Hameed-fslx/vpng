@@ -38,6 +38,28 @@ pub struct Level {
 }
 
 impl Level {
+    /// Build a level.
+    ///
+    /// The crate's own derivation code is the only caller: a level's geometry
+    /// is never made up by hand.
+    pub(crate) fn new(
+        index: u16,
+        derived: bool,
+        dimensions: Dimensions,
+        start: usize,
+        count: usize,
+        partition: Partition,
+    ) -> Self {
+        Level {
+            index,
+            derived,
+            dimensions,
+            start,
+            count,
+            partition,
+        }
+    }
+
     /// The level's index. Level 0 is the original image.
     pub fn index(&self) -> u16 {
         self.index

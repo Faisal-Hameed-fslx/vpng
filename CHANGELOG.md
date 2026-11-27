@@ -8,6 +8,95 @@ separately as major.minor in the header.
 
 ### Added
 
+* **Layers and masks, measured over the whole 750-image corpus (Phase C,
+  P14).** A container may now hold several **named tile grids** — layers —
+  in one file, each with its own rectangle on the canvas, its own opacity
+  and, when the format has an 8-bit alpha channel, its own **mask**. The
+  format revision is **v0.3 → v0.4**, and it **moves no byte**.
+  * **The reserved bytes did the work.** The 64-byte header's **last eight
+    bytes** — reserved in v0.1–v0.3 and required to be zero there — become
+    the **layer table's offset and length** (u32 each). The directory
+    entry's `flags` — whose low byte carried the level index since v0.2 —
+    now also carries the **layer index in bits 8..11**, with bits 12..15
+    reserved. The 64-byte header and the 40-byte directory entry keep their
+    **exact layouts**, so every existing file is unaffected: an old file's
+    reserved bytes are still exactly zero.
+  * **The table sits between the directory and the payloads.** Its header is
+    16 bytes (count, descriptor-array length, a CRC32C over the descriptor
+    array, one reserved word); each descriptor is 40 bytes plus its UTF-8
+    name.
+  * **The rules are enforced by the reader, not by convention.** A file may
+    hold **at most 16 layers**; a layered file may not also carry a
+    **preview pyramid** (the two feature flags are mutually exclusive, so the
+    per-layer byte accounting is unambiguous); the canonical directory order
+    becomes `(layer, level, y, x)` and is checked; a reader **recomputes**
+    every layer's uncompressed and compressed byte counts from the directory
+    and refuses a mismatch, so the ratio a file reports is a measurement and
+    not a claim.
+  * **A mask is a layer whose alpha channel is its coverage.** A file with a
+    mask must use an **8-bit-alpha** format (`graya8` or `rgba8`); a mask
+    layer is **never composited on its own**; a layer references at most one
+    mask; and the mask's rectangle must cover the rectangle of the layer it
+    masks.
+  * **The compositing is straight alpha and integer.** The weight of a pixel
+    is carried as a **fraction**, not as a floating-point number, so the
+    result does not depend on the host's floating-point behaviour. Every
+    operation is integer, so the same file composites to the same bytes
+    everywhere. **A one-layer file composites to exactly its own pixels** —
+    the blend of one layer is the identity, not an approximation.
+  * **The layers are encoded independently.** No layer predicts from another
+    and no state crosses a layer boundary, so **adding an overlay does not
+    change the base layer's bytes**. Cross-layer prediction was left out
+    deliberately: it would make the layers inter-dependent, and "a layer can
+    be decoded on its own" is the property the model exists to provide.
+  * **The measurements are exact.** Over the **whole 750-image corpus**: a
+    one-layer file composites to **byte-for-byte** its own pixels on **750 of
+    750** images; a two-layer file's base layer is byte-for-byte the original
+    on **750 of 750**; the two-layer composite provably **differs** from the
+    base on **750 of 750** (the overlay's colour channels are inverted, and
+    no 8-bit sample equals its own inverse); the **114** images with an
+    alpha format all take a mask that changes the result; and **0** files
+    failed `vpng check`.
+  * **The layer table costs a fixed 60 bytes per file** — **45,000 bytes**
+    over the corpus, **0.009917%** of its bytes. The cost is **not**
+    proportional, so it is **1.643426%** of a pixel-art file and
+    **54.054054%** of the corpus's smallest file, which is 111 bytes; that
+    unfavourable row is reported rather than averaged away. A user who does
+    not need layers pays nothing: the default path writes no table.
+  * **The default path's bytes and version did not move.** The plain total
+    is the published stable baseline's **453,767,460** bytes, to the byte,
+    and the 16K photograph's plain digest is the published
+    `d029a7ebc1e0347cb3399ab6f9de9653da5853c96b38d95cddc3b8bb45a14dbf`.
+  * **New surfaces.** The command line gained `vpng layers`,
+    `vpng decode-layer --layer N`, `vpng composite` and
+    `vpng encode-layers --manifest <json>` (with a hand-written strict JSON
+    reader, so the manifest has no new dependency); the Python package gained
+    `encode_layers`, `layers`, `decode_layer`, `decode_layer_to_bytes`,
+    `composite` and `composite_to_bytes`; and the WebAssembly module gained
+    seven exports (`vpng_layer_count`, `vpng_layer_name_length`,
+    `vpng_layer_name_copy`, `vpng_layer_rect`, `vpng_layer_is_mask`,
+    `vpng_layer_length`, `vpng_decode_layer`) plus
+    `vpng_open_parts_with_layers`.
+  * **The editing engine refuses a layered file, and says so.** It cannot
+    yet carry the layer table and the per-layer accounting through a commit,
+    so it returns `UnsupportedFeature` with a message that says "layer
+    table" rather than silently dropping the layers.
+  * **New documentation and evidence.** `docs/VPNG_SPEC_0_4.md` (the
+    normative specification), `docs/P12_LAYERS_REPORT.md` (the report, with
+    the twelve questions and the acceptance gates),
+    `docs/decisions/ADR-0018-layers-and-masks.md` (the decision record),
+    `benchmarks/p12_layers_results.json` and
+    `benchmarks/p12_layers_memory_results.json` (the raw data), the
+    measurement drivers `benchmarks/corpus/run_layers_corpus.py` and
+    `benchmarks/layers/measure_layer_memory.py`, and `check_layers()` in
+    `benchmarks/verify_reports.py`, which binds every quoted figure to the
+    raw data. Sixteen tests in `crates/vpng-testkit/tests/v4_formats.rs`,
+    six in `crates/vpng-encoder/tests/layer_identity.rs`, nine unit tests in
+    `crates/vpng-decoder/src/composite.rs`, three in
+    `crates/vpng-editing/tests/v4_layers.rs` and nine in
+    `crates/vpng-cli/tests/v4_features.rs` pin the format's rules, the
+    encoder's, the blend's, the refusal's and the command line's.
+
 * **The WebAssembly package, measured over the whole 750-image corpus (Phase
   C, P12).** The browser's copy of the engine. **No format change was needed
   or made**, and **the workspace gains no dependency** for it.
@@ -62,10 +151,11 @@ separately as major.minor in the header.
     `wasm/run_wasm_bench.mjs`, the native counterpart
     `vpng-region-bench`, and `check_wasm()` in
     `benchmarks/verify_reports.py`, which binds every quoted figure to the
-    raw data. Thirteen tests in `wasm/test/` compare the module against the
-    real `vpng` binary, `wasm/check_exports.mjs` asserts that all **28**
-    documented exports are really exported, and eight Rust unit tests cover
-    the registry on the host.
+    raw data. Fifteen tests in `wasm/test/` compare the module against the
+    real `vpng` binary, `wasm/check_exports.mjs` asserts that all **36**
+    documented exports are really exported — the eight layer exports and
+    `vpng_open_parts_with_layers` came with the v0.4 layer model below — and
+    ten Rust unit tests cover the registry on the host.
 
 * **The HTTP Range reader, measured over the whole 750-image corpus (Phase C,
   P13).** A container can now be read over the network without downloading
@@ -170,7 +260,8 @@ separately as major.minor in the header.
     `benchmarks/python/run_python_memory.py`, and `check_python()` in
     `benchmarks/verify_reports.py`, which binds every quoted figure to the
     raw data. A dedicated CI job builds the extension with `maturin` and
-    runs the 45 Python tests.
+    runs the Python test suite — 45 tests when this milestone shipped, **53**
+    today, the extra eight covering the layer model above.
 * **The stable codecs 4, 5 and 6, promoted and measured over the whole
   corpus (Step 5).** The three research pipelines that ADR-0004 reserved are
   now stable codec ids, and the container's minor version moves **0.2 → 0.3**

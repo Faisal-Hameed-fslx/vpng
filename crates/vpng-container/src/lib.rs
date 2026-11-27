@@ -11,13 +11,17 @@ mod leb;
 pub mod checksum;
 pub mod directory;
 pub mod header;
+pub mod layers;
 
 pub use checksum::{canonical_digest, crc32c, sha256, to_hex};
 pub use directory::{
     Directory, DirectoryEntry, DIRECTORY_TRAILER_SIZE, ENTRY_SIZE as DIRECTORY_ENTRY_SIZE,
-    TILE_FLAG_LEVEL_MASK, TILE_FLAG_RESERVED_MASK,
+    MAX_LAYERS, TILE_FLAG_LAYER_MASK, TILE_FLAG_LEVEL_MASK, TILE_FLAG_RESERVED_MASK,
 };
 pub use header::{
-    Header, FEATURE_PYRAMID, FORMAT_MAJOR, FORMAT_MINOR, HEADER_SIZE, MAGIC, MINOR_V0_1,
-    MINOR_V0_2, MINOR_V0_3,
+    Header, FEATURE_LAYERS, FEATURE_PYRAMID, FORMAT_MAJOR, FORMAT_MINOR, HEADER_SIZE, MAGIC,
+    MINOR_V0_1, MINOR_V0_2, MINOR_V0_3, MINOR_V0_4,
+};
+pub use layers::{
+    LayerDescriptor, LayerKind, LayerTable, LAYER_DESCRIPTOR_SIZE, LAYER_TABLE_HEADER_SIZE, NO_MASK,
 };

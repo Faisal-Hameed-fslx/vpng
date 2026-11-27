@@ -246,6 +246,41 @@ export class Vpng {
     }
   }
 
+  /**
+   * Open a container from its header, its directory and its layer table.
+   *
+   * A v0.4 container carries a layer table between the directory and the
+   * payloads. The table may be omitted for a container that has none; a
+   * container that *declares* a table and is given none is refused.
+   *
+   * @param {Uint8Array} header the 64-byte header
+   * @param {Uint8Array} directory the directory, including its checksum
+   * @param {Uint8Array|null} layerTable the layer table, or null
+   * @param {number} fileSize the size the container claims for itself
+   * @returns {number} the document handle
+   */
+  openPartsWithLayers(header, directory, layerTable, fileSize) {
+    const head = this.put(header);
+    const tail = this.put(directory);
+    const table = layerTable ? this.put(layerTable) : { pointer: 0, length: 0 };
+    try {
+      return this.i32(
+        'vpng_open_parts_with_layers',
+        head.pointer,
+        head.length,
+        tail.pointer,
+        tail.length,
+        table.pointer,
+        table.length,
+        fileSize,
+      );
+    } finally {
+      this.exports.vpng_dealloc(head.pointer, head.length);
+      this.exports.vpng_dealloc(tail.pointer, tail.length);
+      if (layerTable) this.exports.vpng_dealloc(table.pointer, table.length);
+    }
+  }
+
   /** Close a document. */
   close(handle) {
     this.i32('vpng_close', handle);
@@ -274,6 +309,109 @@ export class Vpng {
   /** The number of levels in the container. */
   levelCount(handle) {
     return this.i32('vpng_level_count', handle);
+  }
+
+  /** The number of layers in the container. */
+  layerCount(handle) {
+    return this.i32('vpng_layer_count', handle);
+  }
+
+  /**
+   * A layer's name.
+   *
+   * @param {number} handle the document
+   * @param {number} layer the layer's index
+   * @returns {string} the name, which may be empty
+   */
+  layerName(handle, layer) {
+    const length = this.i32('vpng_layer_name_length', handle, layer);
+    if (length <= 0) return '';
+    const pointer = this.exports.vpng_alloc(length);
+    if (pointer === 0) {
+      throw new VpngError(5, `the module could not allocate ${length} bytes`);
+    }
+    try {
+      const written = this.i32(
+        'vpng_layer_name_copy',
+        handle,
+        layer,
+        pointer,
+        length,
+      );
+      const view = new Uint8Array(this.memory.buffer, pointer, written);
+      return new TextDecoder('utf-8').decode(view);
+    } finally {
+      this.exports.vpng_dealloc(pointer, length);
+    }
+  }
+
+  /**
+   * The rectangle a layer covers on the canvas.
+   *
+   * @param {number} handle the document
+   * @param {number} layer the layer's index
+   * @returns {{x: number, y: number, width: number, height: number}} the
+   *   layer's rectangle
+   */
+  layerRect(handle, layer) {
+    const pointer = this.exports.vpng_alloc(16);
+    if (pointer === 0) {
+      throw new VpngError(5, 'the module could not allocate 16 bytes');
+    }
+    try {
+      this.i32('vpng_layer_rect', handle, layer, pointer);
+      const view = new Uint8Array(this.memory.buffer, pointer, 16);
+      const at = (offset) =>
+        (view[offset] |
+          (view[offset + 1] << 8) |
+          (view[offset + 2] << 16) |
+          (view[offset + 3] << 24)) >>>
+        0;
+      return { x: at(0), y: at(4), width: at(8), height: at(12) };
+    } finally {
+      this.exports.vpng_dealloc(pointer, 16);
+    }
+  }
+
+  /**
+   * Whether a layer is a mask rather than picture pixels.
+   *
+   * @param {number} handle the document
+   * @param {number} layer the layer's index
+   * @returns {boolean} true for a mask
+   */
+  layerIsMask(handle, layer) {
+    return this.i32('vpng_layer_is_mask', handle, layer) === 1;
+  }
+
+  /** The number of canonical bytes one layer's pixels take. */
+  layerLength(handle, layer) {
+    return this.i64('vpng_layer_length', handle, layer);
+  }
+
+  /**
+   * Decode one layer's own pixels.
+   *
+   * The result is sized to the **layer's own rectangle**, not to the canvas,
+   * and it holds the layer's pixels exactly.
+   *
+   * @param {number} handle the document
+   * @param {number} layer the layer's index
+   * @returns {Uint8Array} the canonical pixels
+   */
+  decodeLayer(handle, layer) {
+    const length = this.layerLength(handle, layer);
+    const pointer = this.exports.vpng_alloc(length);
+    if (pointer === 0) {
+      throw new VpngError(5, `the module could not allocate ${length} bytes`);
+    }
+    try {
+      const written = this.i64('vpng_decode_layer', handle, layer, pointer);
+      const view = new Uint8Array(this.memory.buffer, pointer, written);
+      return view.slice();
+    } finally {
+      this.exports.vpng_dealloc(pointer, length);
+    }
   }
 
   /** The byte offset of a tile's payload. */

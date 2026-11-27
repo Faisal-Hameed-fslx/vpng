@@ -29,6 +29,18 @@
 //! through the same codecs. A tile decoded here is byte-for-byte the tile
 //! the ordinary decoder produces — the parallel engine changes *when* a
 //! tile is decoded, never *what* it decodes.
+//!
+//! # Layers
+//!
+//! A container written for format **v0.4** may hold **layers**: named grids
+//! of tiles, each with a rectangle on the canvas, an opacity and — when the
+//! format has an 8-bit alpha channel — a mask.
+//!
+//! The viewer schedules and decodes the **base layer**. It does not
+//! composite: the layers are drawn by the caller. The viewer's own geometry
+//! is the base layer's partition, so a viewport rectangle is a rectangle on
+//! the canvas, and a layer that is smaller than the canvas simply does not
+//! cover it.
 
 #![forbid(unsafe_code)]
 

@@ -17,6 +17,9 @@ pub struct EncodeResult {
     level_count: u32,
     /// The minor version the file's header carries.
     format_minor: u16,
+    /// The number of layers in the file: one for every file written before
+    /// format v0.4.
+    layer_count: u32,
     /// The codec of every tile, in tile order.
     codec_ids: Vec<u8>,
     /// The uncompressed pixel bytes over the file bytes.
@@ -49,10 +52,19 @@ impl EncodeResult {
         self.level_count
     }
 
-    /// The minor version the file's header carries: 1, 2, or 3.
+    /// The minor version the file's header carries: 1, 2, 3 or 4.
     #[getter]
     fn format_minor(&self) -> u16 {
         self.format_minor
+    }
+
+    /// The number of layers in the file.
+    ///
+    /// A file written before format v0.4 has exactly one layer: the base
+    /// layer, which is the picture itself.
+    #[getter]
+    fn layer_count(&self) -> u32 {
+        self.layer_count
     }
 
     /// The codec of every tile, in tile order.
@@ -105,6 +117,7 @@ impl EncodeResult {
             tile_count: report.tile_count,
             level_count: report.level_count,
             format_minor: 0,
+            layer_count: report.layer_count,
             codec_ids: report.codec_ids.clone(),
             compression_ratio: report.compression_ratio(),
             payload_bytes: report.payload_bytes,

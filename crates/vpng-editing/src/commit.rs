@@ -287,6 +287,10 @@ pub(crate) fn write_document<S: TileSource>(
         directory_offset: HEADER_SIZE as u64,
         declared_file_size: cursor,
         feature_flags: template.feature_flags & !FEATURE_PYRAMID,
+        // The editing engine works on one grid, so it never writes a layer
+        // table. A file that has layers is refused before it gets here.
+        layer_table_offset: 0,
+        layer_table_length: 0,
     };
     let header_bytes = header.to_bytes()?;
 

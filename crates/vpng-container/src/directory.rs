@@ -41,8 +41,25 @@ pub const DIRECTORY_TRAILER_SIZE: usize = 4;
 /// preview pixels. The upper byte is reserved and must be zero.
 pub const TILE_FLAG_LEVEL_MASK: u16 = 0x00FF;
 
-/// The bits of the `flags` field that v0.2 reserves and requires to be zero.
+/// The bits of the `flags` field that v0.2 and v0.3 reserve and require to
+/// be zero.
 pub const TILE_FLAG_RESERVED_MASK: u16 = 0xFF00;
+
+/// The bits of the `flags` field that v0.4 gives to the **layer index**.
+///
+/// The layer index sits immediately above the pyramid level: bits 8..12.
+/// Four bits give sixteen layers, which is the most a container may hold.
+pub const TILE_FLAG_LAYER_MASK: u16 = 0x0F00;
+
+/// Where the layer index starts inside the `flags` field.
+pub const TILE_FLAG_LAYER_SHIFT: u32 = 8;
+
+/// The bits of the `flags` field that v0.4 still reserves and requires to be
+/// zero.
+pub const TILE_FLAG_RESERVED_V0_4_MASK: u16 = 0xF000;
+
+/// The largest number of layers a container may hold.
+pub const MAX_LAYERS: u16 = 16;
 
 /// One independently decodable tile.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -69,6 +86,18 @@ impl DirectoryEntry {
         self.flags & TILE_FLAG_LEVEL_MASK
     }
 
+    /// The layer this tile belongs to.
+    ///
+    /// Layer 0 is the base layer: the image itself. Every other layer is one
+    /// of the named grids a v0.4 container holds beside it.
+    ///
+    /// A v0.1, v0.2 or v0.3 file has no layer index, and its entries all
+    /// belong to layer 0 — which is exactly what the reserved bits being zero
+    /// says.
+    pub fn layer(&self) -> u16 {
+        (self.flags & TILE_FLAG_LAYER_MASK) >> TILE_FLAG_LAYER_SHIFT
+    }
+
     /// Whether the tile holds derived preview pixels rather than original ones.
     pub fn is_derived(&self) -> bool {
         self.level() != 0
@@ -82,6 +111,22 @@ impl DirectoryEntry {
             )));
         }
         Ok(level & TILE_FLAG_LEVEL_MASK)
+    }
+
+    /// Build the `flags` field for a level and a layer index.
+    pub fn flags_for_level_and_layer(level: u16, layer: u16) -> Result<u16> {
+        if level > TILE_FLAG_LEVEL_MASK {
+            return Err(Error::invalid(format!(
+                "pyramid level {level} does not fit the directory entry's flag field"
+            )));
+        }
+        if layer >= MAX_LAYERS {
+            return Err(Error::invalid(format!(
+                "layer {layer} does not fit the directory entry's flag field"
+            )));
+        }
+        Ok((level & TILE_FLAG_LEVEL_MASK)
+            | ((layer << TILE_FLAG_LAYER_SHIFT) & TILE_FLAG_LAYER_MASK))
     }
 
     /// Exclusive right edge of the tile in pixels.
@@ -195,12 +240,15 @@ impl Directory {
         Ok(Directory { entries })
     }
 
-    /// Sort into the canonical `(level, y, x)` order used before encoding.
+    /// Sort into the canonical `(layer, level, y, x)` order used before
+    /// encoding.
     ///
-    /// v0.1 files have one level, so this is the `(y, x)` order v0.1 defines.
-    /// v0.2 groups the levels, each in `(y, x)` order.
+    /// v0.1 files have one layer and one level, so this is the `(y, x)` order
+    /// v0.1 defines. v0.2 groups the levels, each in `(y, x)` order. v0.4
+    /// groups the layers first, and each layer's levels inside it.
     pub fn sort_canonical(&mut self) {
-        self.entries.sort_by_key(|e| (e.level(), e.y, e.x));
+        self.entries
+            .sort_by_key(|e| (e.layer(), e.level(), e.y, e.x));
     }
 
     /// Sort a second copy into canonical order and return it, leaving `self` alone.
@@ -213,7 +261,8 @@ impl Directory {
     /// Check every entry's `flags` field against the format version.
     ///
     /// v0.1 requires the field to be zero. v0.2 gives the low byte to the
-    /// pyramid level and requires the rest to be zero.
+    /// pyramid level and requires the rest to be zero. v0.4 gives four more
+    /// bits to the layer index and reserves the top four.
     pub fn validate_flags(&self, minor: u16) -> Result<()> {
         for (index, entry) in self.entries.iter().enumerate() {
             if minor < crate::header::MINOR_V0_2 {
@@ -223,10 +272,17 @@ impl Directory {
                         entry.flags
                     )));
                 }
-            } else if entry.flags & TILE_FLAG_RESERVED_MASK != 0 {
+            } else if minor < crate::header::MINOR_V0_4 {
+                if entry.flags & TILE_FLAG_RESERVED_MASK != 0 {
+                    return Err(Error::corrupt(format!(
+                        "tile {index} sets reserved flag bits {:#06x}",
+                        entry.flags & TILE_FLAG_RESERVED_MASK
+                    )));
+                }
+            } else if entry.flags & TILE_FLAG_RESERVED_V0_4_MASK != 0 {
                 return Err(Error::corrupt(format!(
                     "tile {index} sets reserved flag bits {:#06x}",
-                    entry.flags & TILE_FLAG_RESERVED_MASK
+                    entry.flags & TILE_FLAG_RESERVED_V0_4_MASK
                 )));
             }
         }

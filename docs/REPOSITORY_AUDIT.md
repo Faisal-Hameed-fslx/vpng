@@ -82,18 +82,19 @@ vpng/ (root = E:\VPNG)
 ├── README.md  LICENSE  CHANGELOG.md
 ├── crates/
 │   ├── vpng-core/                 formats, geometry, checked math, errors, limits
-│   ├── vpng-container/            header, directory, checksums, canonical digest
+│   ├── vpng-container/            header, directory, layer table, checksums, canonical digest
 │   ├── vpng-codecs/               TileCodec trait + Raw/Palette/RLE/Predictor codecs; ids 4-6 reserved
 │   ├── vpng-tiling/               TileGrid, region-to-tile mapping
 │   ├── vpng-image/                PNG and raw conversion: the one place that knows what a PNG means
-│   ├── vpng-encoder/              canonical pixels -> .vpng bytes
-│   ├── vpng-decoder/              .vpng bytes -> full/tile/region pixels
+│   ├── vpng-encoder/              canonical pixels -> .vpng bytes (flat or layered)
+│   ├── vpng-decoder/              .vpng bytes -> full/tile/region/layer pixels + compositing
 │   ├── vpng-testkit/              deterministic fixtures + conformance tests
 │   ├── vpng-python/               the PyO3 extension behind the Python package
 │   ├── vpng-http/                 the HTTP Range source: a container fetched over the network
 │   ├── vpng-wasm/                 the WebAssembly decoder: a raw `extern "C"` ABI, no wasm-bindgen
 │   └── vpng-cli/                  encode/decode/info/check/verify/decode-region/extract-tile
 │                                    + http-info/http-decode-region
+│                                    + layers/decode-layer/composite/encode-layers
 ├── docs/                          spec, audit, status, threat model, ADRs
 ├── benchmarks/
 │   ├── corpus_manifest.json       provenance, license, dimensions, SHA-256
@@ -102,6 +103,7 @@ vpng/ (root = E:\VPNG)
 │   ├── python/                    the Python-binding measurement drivers
 │   ├── http/                      the HTTP Range measurement driver
 │   ├── wasm/                      the WebAssembly measurement driver
+│   ├── layers/                    the layer-model memory driver
 │   └── results/                   git-ignored JSON/Markdown run output
 ├── corpus-data/                   git-ignored image bytes (provenance in the manifest)
 ├── python/                        the `vpng` package, its tests, and the experiment tooling

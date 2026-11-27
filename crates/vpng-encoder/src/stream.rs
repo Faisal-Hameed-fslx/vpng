@@ -30,6 +30,17 @@
 //! `(level, y, x)` order, so the file is exactly what the batch encoder would
 //! have produced.
 //!
+//! # v0.4 files
+//!
+//! A file with layers holds several grids on one canvas, and the writer writes
+//! them one after the other: the base layer first, then the layers above it.
+//! The layer table sits between the directory and the payloads. Its **length**
+//! is known before the payloads are written — it depends only on the layer
+//! names — so the table's space is reserved with the header and the
+//! directory. Its **contents**, which carry each layer's byte accounting, are
+//! known only once every payload exists, so the table is written back after
+//! the payloads, exactly like the directory.
+//!
 //! The adaptive planner and the pyramid builder need the picture's content,
 //! so a source that cannot be asked for "some pixels" is read into a whole
 //! image first. The default path — a uniform grid and no previews — never
@@ -40,13 +51,17 @@ use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 use vpng_codecs::{CODEC_AUTO, CODEC_RAW};
-use vpng_container::{crc32c, Directory, DirectoryEntry, FEATURE_PYRAMID, HEADER_SIZE};
+use vpng_container::{
+    crc32c, Directory, DirectoryEntry, LayerDescriptor, LayerTable, FEATURE_LAYERS,
+    FEATURE_PYRAMID, HEADER_SIZE, LAYER_DESCRIPTOR_SIZE, LAYER_TABLE_HEADER_SIZE,
+};
 use vpng_core::{Dimensions, Error, Result};
 use vpng_tiling::Partition;
 
+use crate::layers::LayerInput;
 use crate::parallel::{encode_tiles_in_order, ParallelOptions};
 use crate::source::PixelSource;
-use crate::EncodeOptions;
+use crate::{EncodeOptions, LayerMeta};
 
 /// What the streaming encoder did.
 #[derive(Debug, Clone)]
@@ -73,6 +88,15 @@ pub struct StreamEncodeReport {
     pub level_payload_bytes: Vec<u64>,
     /// The original image's pixel bytes: level 0's uncompressed bytes.
     pub base_uncompressed_bytes: u64,
+    /// The number of layers in the file. One for every file written before
+    /// v0.4.
+    pub layer_count: u32,
+    /// The number of tiles in each layer, in layer order.
+    pub layer_tile_counts: Vec<u32>,
+    /// The uncompressed pixel bytes of each layer, in layer order.
+    pub layer_uncompressed_bytes: Vec<u64>,
+    /// The compressed payload bytes of each layer, in layer order.
+    pub layer_compressed_bytes: Vec<u64>,
     /// How long the encode took, including the final write and rename.
     pub encode_ms: u64,
     /// How many workers were asked for.
@@ -110,7 +134,6 @@ pub fn encode_to_file(
     parallel: &ParallelOptions,
     path: &Path,
 ) -> Result<StreamEncodeReport> {
-    let started = std::time::Instant::now();
     let dims = Dimensions {
         width: source.width(),
         height: source.height(),
@@ -134,31 +157,115 @@ pub fn encode_to_file(
 
     // The levels, in the order they are written: the original first, then the
     // derived previews.
-    let mut levels: Vec<(&Partition, &dyn PixelSource, u16)> = vec![(&plan.base, base_source, 0)];
+    let mut levels: Vec<StreamLevel<'_>> = vec![StreamLevel {
+        partition: &plan.base,
+        source: base_source,
+        index: 0,
+        layer: 0,
+    }];
     for (offset, preview) in plan.previews.iter().enumerate() {
-        levels.push((
-            &preview.partition,
-            &preview.image as &dyn PixelSource,
-            (offset + 1) as u16,
-        ));
+        levels.push(StreamLevel {
+            partition: &preview.partition,
+            source: &preview.image as &dyn PixelSource,
+            index: (offset + 1) as u16,
+            layer: 0,
+        });
     }
 
+    write_layers_to_file(levels, None, options, parallel, path)
+}
+
+/// One level of a file being streamed out: its partition, its pixels, its
+/// level index and its layer index.
+struct StreamLevel<'a> {
+    partition: &'a Partition,
+    source: &'a dyn PixelSource,
+    index: u16,
+    layer: u16,
+}
+
+/// Encode several layers straight into a `.vpng` file.
+///
+/// The file is a **v0.4** file: it carries a layer table, and its directory
+/// entries name the layer each tile belongs to. The layers are encoded
+/// independently of one another, and the result is byte-identical to
+/// [`crate::encode_layers`].
+pub fn encode_layers_to_file(
+    layers: &[LayerInput<'_>],
+    options: &EncodeOptions,
+    parallel: &ParallelOptions,
+    path: &Path,
+) -> Result<StreamEncodeReport> {
+    let (planned, _dims, _format) = crate::layers::plan_layers(layers, options)?;
+
+    // Each layer's tiles carry canvas coordinates; the pixels live in the
+    // layer's own rectangle, so the coordinates are translated on the way in.
+    let sources: Vec<crate::layers::LayerSource<'_>> = planned
+        .iter()
+        .map(|layer| crate::layers::LayerSource::new(layer.source, layer.rect))
+        .collect();
+
+    let levels: Vec<StreamLevel<'_>> = planned
+        .iter()
+        .enumerate()
+        .map(|(index, layer)| StreamLevel {
+            partition: &layer.partition,
+            source: &sources[index] as &dyn PixelSource,
+            index: 0,
+            layer: index as u16,
+        })
+        .collect();
+
+    let meta: Vec<LayerMeta> = planned.iter().map(|layer| layer.meta()).collect();
+
+    write_layers_to_file(levels, Some(&meta), options, parallel, path)
+}
+
+/// Write a file out of its levels, with or without a layer table.
+fn write_layers_to_file(
+    levels: Vec<StreamLevel<'_>>,
+    layer_meta: Option<&[LayerMeta]>,
+    options: &EncodeOptions,
+    parallel: &ParallelOptions,
+    path: &Path,
+) -> Result<StreamEncodeReport> {
+    let started = std::time::Instant::now();
+    let dims = Dimensions {
+        width: levels[0].source.width(),
+        height: levels[0].source.height(),
+    };
+
     let mut tile_count = 0u32;
-    for (partition, _, _) in levels.iter() {
+    for level in levels.iter() {
         tile_count = tile_count
-            .checked_add(partition.len() as u32)
+            .checked_add(level.partition.len() as u32)
             .ok_or_else(|| Error::resource_limit("the file's tile count exceeds u32"))?;
     }
     let directory_size = Directory::total_size(tile_count)?;
 
+    // The layer table's length is known before the payloads are written: it
+    // depends only on the number of layers and their names.
+    let layer_table_size = match layer_meta {
+        None => 0usize,
+        Some(meta) => {
+            let mut size = LAYER_TABLE_HEADER_SIZE;
+            for layer in meta {
+                size += LAYER_DESCRIPTOR_SIZE + layer.name.len();
+            }
+            size
+        }
+    };
+
     let temp = temporary_path(path);
     let report = match write_stream(
-        source.format(),
+        source_format(&levels),
         options,
         parallel,
         &levels,
         tile_count,
         directory_size,
+        layer_table_size,
+        layer_meta,
         dims,
         &temp,
     ) {
@@ -190,21 +297,29 @@ pub fn encode_to_file(
     })
 }
 
+/// The pixel format the levels share.
+fn source_format(levels: &[StreamLevel<'_>]) -> vpng_core::PixelFormat {
+    levels[0].source.format()
+}
+
 /// Write the temporary file: placeholders, then the payloads, then the real
-/// header and directory.
+/// header, directory and layer table.
 #[allow(clippy::too_many_arguments)]
 fn write_stream(
     format: vpng_core::PixelFormat,
     options: &EncodeOptions,
     parallel: &ParallelOptions,
-    levels: &[(&Partition, &dyn PixelSource, u16)],
+    levels: &[StreamLevel<'_>],
     tile_count: u32,
     directory_size: usize,
+    layer_table_size: usize,
+    layer_meta: Option<&[LayerMeta]>,
     dims: Dimensions,
     path: &Path,
 ) -> Result<StreamEncodeReport> {
     let mut file = File::create(path)?;
-    file.write_all(&vec![0u8; HEADER_SIZE + directory_size])?;
+    let reserved = HEADER_SIZE + directory_size + layer_table_size;
+    file.write_all(&vec![0u8; reserved])?;
 
     let mut entries: Vec<DirectoryEntry> = Vec::with_capacity(tile_count as usize);
     let mut codec_ids: Vec<u8> = Vec::with_capacity(tile_count as usize);
@@ -212,20 +327,20 @@ fn write_stream(
     let mut uncompressed_lengths: Vec<u32> = Vec::with_capacity(tile_count as usize);
     let mut level_tile_counts: Vec<u32> = Vec::with_capacity(levels.len());
     let mut level_payload_bytes: Vec<u64> = Vec::with_capacity(levels.len());
-    let mut cursor = (HEADER_SIZE + directory_size) as u64;
+    let mut cursor = reserved as u64;
 
-    for (partition, source, index) in levels {
-        let flags = DirectoryEntry::flags_for_level(*index)?;
+    for level in levels {
+        let flags = DirectoryEntry::flags_for_level_and_layer(level.index, level.layer)?;
         let mut level_bytes = 0u64;
         {
             let file = &mut file;
             encode_tiles_in_order(
-                *source,
-                partition,
+                level.source,
+                level.partition,
                 options,
                 parallel,
                 &mut |position, payload| {
-                    let geom = partition.tile(position).ok_or_else(|| {
+                    let geom = level.partition.tile(position).ok_or_else(|| {
                         Error::internal(format!("tile {position} is out of range"))
                     })?;
                     let checksum = crc32c(&payload.bytes);
@@ -253,7 +368,7 @@ fn write_stream(
                 },
             )?;
         }
-        level_tile_counts.push(partition.len() as u32);
+        level_tile_counts.push(level.partition.len() as u32);
         level_payload_bytes.push(level_bytes);
     }
 
@@ -272,10 +387,43 @@ fn write_stream(
     //
     // The rule is shared with the batch assembler, so the streaming writer
     // and `encode` cannot disagree about a file's version.
-    let minor = crate::content_minor(&codec_ids, options.is_v2());
+    let has_layers = layer_meta.is_some();
+    let minor = crate::content_minor(&codec_ids, options.is_v2(), has_layers);
 
-    // The pyramid flag and the levels must agree.
-    let feature_flags = if levels.len() > 1 { FEATURE_PYRAMID } else { 0 };
+    // The pyramid flag and the levels must agree. A layered file has exactly
+    // one level per layer, so it never has a pyramid, and the two flags are
+    // mutually exclusive in v0.4.
+    let feature_flags = if has_layers {
+        FEATURE_LAYERS
+    } else if levels.len() > 1 {
+        FEATURE_PYRAMID
+    } else {
+        0
+    };
+
+    // The layer table, whose contents are the per-layer byte accounting. The
+    // accounting is known only now, because the payloads are.
+    let layer_table_range = match layer_meta {
+        None => None,
+        Some(meta) => {
+            let descriptors =
+                layer_descriptors(meta, levels, &uncompressed_lengths, &compressed_lengths)?;
+            let table = LayerTable::new(descriptors);
+            table.validate()?;
+            let bytes = table.encode()?;
+            if bytes.len() != layer_table_size {
+                return Err(Error::internal(format!(
+                    "the layer table is {} bytes, the reservation was {layer_table_size}",
+                    bytes.len()
+                )));
+            }
+            let offset = (HEADER_SIZE + directory_size) as u64;
+            file.seek(SeekFrom::Start(offset))?;
+            file.write_all(&bytes)?;
+            Some((offset as u32, bytes.len() as u32))
+        }
+    };
+
     let header = crate::build_header(
         minor,
         dims,
@@ -284,6 +432,7 @@ fn write_stream(
         tile_count,
         cursor,
         feature_flags,
+        layer_table_range,
     )?;
     let header_bytes = header.to_bytes()?;
     let directory_bytes = Directory::new(entries).encode()?;
@@ -297,20 +446,27 @@ fn write_stream(
 
     let base_uncompressed_bytes = levels
         .first()
-        .map(|(_, _, _)| {
+        .map(|_| {
             uncompressed_lengths
                 .iter()
-                .take(levels[0].0.len())
+                .take(levels[0].partition.len())
                 .map(|&length| length as u64)
                 .sum()
         })
         .unwrap_or(0);
 
+    let (layer_tile_counts, layer_uncompressed_bytes, layer_compressed_bytes) = layer_accounting(
+        levels,
+        has_layers,
+        &uncompressed_lengths,
+        &compressed_lengths,
+    );
+
     Ok(StreamEncodeReport {
         file_size: cursor,
         tile_count,
         payload_bytes: compressed_lengths.iter().sum(),
-        framing_bytes: (HEADER_SIZE + directory_size) as u64,
+        framing_bytes: (HEADER_SIZE + directory_size + layer_table_size) as u64,
         codec_ids,
         compressed_lengths,
         uncompressed_lengths,
@@ -318,9 +474,103 @@ fn write_stream(
         level_tile_counts,
         level_payload_bytes,
         base_uncompressed_bytes,
+        layer_count: layer_tile_counts.len() as u32,
+        layer_tile_counts,
+        layer_uncompressed_bytes,
+        layer_compressed_bytes,
         encode_ms: 0,
         workers: parallel.workers,
     })
+}
+
+/// Build the layer table's descriptors, with the byte accounting filled in.
+fn layer_descriptors(
+    meta: &[LayerMeta],
+    levels: &[StreamLevel<'_>],
+    uncompressed_lengths: &[u32],
+    compressed_lengths: &[u64],
+) -> Result<Vec<LayerDescriptor>> {
+    let mut descriptors = Vec::with_capacity(meta.len());
+    let mut cursor = 0usize;
+    for (index, layer) in meta.iter().enumerate() {
+        let tiles: usize = levels
+            .iter()
+            .filter(|level| level.layer == index as u16)
+            .map(|level| level.partition.len())
+            .sum();
+
+        let mut uncompressed = 0u64;
+        let mut compressed = 0u64;
+        for offset in cursor..cursor + tiles {
+            uncompressed += uncompressed_lengths[offset] as u64;
+            compressed += compressed_lengths[offset];
+        }
+        cursor += tiles;
+
+        descriptors.push(LayerDescriptor {
+            name: layer.name.clone(),
+            kind: layer.kind,
+            rect: layer.rect,
+            opacity: layer.opacity,
+            mask: layer.mask,
+            uncompressed_bytes: uncompressed,
+            compressed_bytes: compressed,
+        });
+    }
+    Ok(descriptors)
+}
+
+/// The per-layer tile counts and byte counts.
+fn layer_accounting(
+    levels: &[StreamLevel<'_>],
+    has_layers: bool,
+    uncompressed_lengths: &[u32],
+    compressed_lengths: &[u64],
+) -> (Vec<u32>, Vec<u64>, Vec<u64>) {
+    if !has_layers {
+        let mut tiles = Vec::new();
+        let mut uncompressed = Vec::new();
+        let mut compressed = Vec::new();
+        if let Some(level) = levels.first() {
+            let count = level.partition.len();
+            tiles.push(count as u32);
+            uncompressed.push(
+                uncompressed_lengths
+                    .iter()
+                    .take(count)
+                    .map(|&length| length as u64)
+                    .sum(),
+            );
+            compressed.push(compressed_lengths.iter().take(count).sum());
+        } else {
+            tiles.push(0);
+            uncompressed.push(0);
+            compressed.push(0);
+        }
+        return (tiles, uncompressed, compressed);
+    }
+
+    let count = levels
+        .iter()
+        .map(|level| level.layer)
+        .max()
+        .map(|max| max as usize + 1)
+        .unwrap_or(0);
+    let mut tiles = vec![0u32; count];
+    let mut uncompressed = vec![0u64; count];
+    let mut compressed = vec![0u64; count];
+    let mut cursor = 0usize;
+    for level in levels {
+        let index = level.layer as usize;
+        let count = level.partition.len();
+        tiles[index] += count as u32;
+        for offset in cursor..cursor + count {
+            uncompressed[index] += uncompressed_lengths[offset] as u64;
+            compressed[index] += compressed_lengths[offset];
+        }
+        cursor += count;
+    }
+    (tiles, uncompressed, compressed)
 }
 
 /// The temporary file's name, in the target's own directory so the rename

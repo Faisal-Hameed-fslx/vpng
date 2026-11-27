@@ -95,6 +95,69 @@ function encode(name, width, height, extra = []) {
   return { container, report, bytes: readFileSync(container) };
 }
 
+/** A deterministic raw RGBA8 image. */
+function rawPixelsRgba(width, height, seed = 0) {
+  const bytes = Buffer.alloc(width * height * 4);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const at = (y * width + x) * 4;
+      bytes[at] = (x % 251) + seed;
+      bytes[at + 1] = (y % 241) + seed;
+      bytes[at + 2] = ((Math.floor(x / 16) + Math.floor(y / 16)) % 2) * 255;
+      bytes[at + 3] = 255;
+    }
+  }
+  return bytes;
+}
+
+/**
+ * Build a layered container with the command line.
+ *
+ * The manifest names three layers: a base, an overlay and a mask.
+ */
+function layered(name) {
+  const base = join(work, `${name}-base.raw`);
+  const ink = join(work, `${name}-ink.raw`);
+  const mask = join(work, `${name}-mask.raw`);
+  const manifest = join(work, `${name}.json`);
+  const container = join(work, `${name}.vpng`);
+
+  writeFileSync(base, rawPixelsRgba(64, 48, 0));
+  writeFileSync(ink, rawPixelsRgba(32, 16, 7));
+  writeFileSync(mask, rawPixelsRgba(32, 16, 0));
+  writeFileSync(
+    manifest,
+    JSON.stringify({
+      layers: [
+        { name: 'base', path: base, width: 64, height: 48, format: 'rgba8' },
+        {
+          name: 'ink',
+          path: ink,
+          x: 8,
+          y: 8,
+          width: 32,
+          height: 16,
+          format: 'rgba8',
+          mask: 2,
+        },
+        {
+          name: 'm',
+          kind: 'mask',
+          path: mask,
+          x: 8,
+          y: 8,
+          width: 32,
+          height: 16,
+          format: 'rgba8',
+        },
+      ],
+    }),
+  );
+
+  run(['encode-layers', container, '--manifest', manifest]);
+  return { container, bytes: readFileSync(container) };
+}
+
 test.before(async () => {
   work = mkdtempSync(join(tmpdir(), 'vpng-wasm-'));
   vpng = await Vpng.instantiate(readFileSync(WASM_PATH));
@@ -107,7 +170,7 @@ test.after(() => {
 test('the module reports the container format it understands', () => {
   const version = vpng.formatVersion();
   assert.equal(version >>> 16, 0, 'the major version is zero');
-  assert.equal(version & 0xffff, 3, 'the minor version is three');
+  assert.equal(version & 0xffff, 4, 'the minor version is four');
 });
 
 test('the pixels are the command line pixels, byte for byte', () => {
@@ -319,4 +382,57 @@ test('the SHA-256 the module computes is the known SHA-256', () => {
     vpng.sha256(new Uint8Array(0)),
     'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
   );
+});
+
+test('the layers are visible to the module, and their pixels are exact', () => {
+  const { container, bytes } = layered('layers');
+  const handle = vpng.open(new Uint8Array(bytes));
+
+  assert.equal(vpng.layerCount(handle), 3, 'the container has three layers');
+  assert.equal(vpng.layerName(handle, 0), 'base');
+  assert.equal(vpng.layerName(handle, 1), 'ink');
+  assert.equal(vpng.layerName(handle, 2), 'm');
+  assert.equal(vpng.layerIsMask(handle, 0), false);
+  assert.equal(vpng.layerIsMask(handle, 2), true);
+
+  const rect = vpng.layerRect(handle, 1);
+  assert.deepEqual(rect, { x: 8, y: 8, width: 32, height: 16 });
+
+  // The overlay's own pixels are the command line's pixels.
+  const native = runJson([
+    'decode-layer',
+    container,
+    join(work, 'layers-ink.png'),
+    '--layer',
+    '1',
+  ]);
+  const pixels = vpng.decodeLayer(handle, 1);
+  assert.equal(pixels.length, 32 * 16 * 4, 'the layer is the wrong size');
+  const digest = vpng.canonicalDigest(pixels, 32, 16, vpng.format(handle));
+  assert.equal(digest, native.canonical_sha256, 'the canonical digests differ');
+
+  vpng.close(handle);
+});
+
+test('the parts path opens a layered container with its layer table', () => {
+  const { bytes } = layered('parts-layers');
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const directoryOffset = Number(view.getBigUint64(32, true));
+  const tileCount = view.getUint32(28, true);
+  const directorySize = tileCount * 40 + 4;
+  // The layer table's offset and length are at bytes 56 and 60.
+  const tableOffset = view.getUint32(56, true);
+  const tableLength = view.getUint32(60, true);
+  assert.ok(tableLength > 0, 'the container declares a layer table');
+
+  const handle = vpng.openPartsWithLayers(
+    new Uint8Array(bytes.subarray(0, 64)),
+    new Uint8Array(bytes.subarray(directoryOffset, directoryOffset + directorySize)),
+    new Uint8Array(bytes.subarray(tableOffset, tableOffset + tableLength)),
+    bytes.length,
+  );
+
+  assert.equal(vpng.layerCount(handle), 3, 'the container has three layers');
+  assert.equal(vpng.layerName(handle, 1), 'ink');
+  vpng.close(handle);
 });
