@@ -20,9 +20,10 @@ use vpng_decoder::Document;
 use vpng_encoder::parallel::ParallelOptions;
 use vpng_encoder::stream::encode_layers_to_file;
 use vpng_encoder::{EncodeOptions, LayerInput};
+use vpng_json as json;
+use vpng_json::Json;
 
 use crate::args::Args;
-use crate::json::{self, Json};
 use crate::{escape, limits, write_output_image};
 
 /// List the layers of a file.

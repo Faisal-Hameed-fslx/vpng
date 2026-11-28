@@ -1,0 +1,29 @@
+[package]
+name = "vpng-ui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "VPNG's graphical editor: a local window over the viewing and editing engines."
+repository.workspace = true
+
+[lib]
+name = "vpng_ui"
+path = "src/lib.rs"
+
+[[bin]]
+name = "vpng-ui"
+path = "src/main.rs"
+
+[dependencies]
+vpng-core.workspace = true
+vpng-container.workspace = true
+vpng-editing.workspace = true
+vpng-json.workspace = true
+vpng-view.workspace = true
+
+[dev-dependencies]
+vpng-decoder.workspace = true
+vpng-encoder.workspace = true
+ureq = { version = "=3.2.1", default-features = false, features = ["rustls"] }

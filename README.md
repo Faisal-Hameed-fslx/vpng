@@ -156,7 +156,17 @@ are recorded in `docs/BENCHMARKS.md`, `docs/P5_REPORT.md` and
 * Conformance tests: exhaustive round-trip, region-vs-crop, malformed-input
   sweeps, a bounded mutation sweep, golden files, the `default_codec`
   clarification, and a deterministic fuzzing harness over seven targets.
-  610 Rust tests, 62 Python tests and 18 WebAssembly tests, all passing.
+  664 Rust tests, 62 Python tests, 18 WebAssembly tests and 23 editor tests,
+  all passing.
+* A **graphical editor**: `vpng ui <file.vpng>` opens the file in a browser
+  over a local program. It shows the picture, picks a pixel, fills a
+  rectangle, sets alpha, undoes, redoes and saves — and a save rewrites
+  only the tiles the edit dirtied. Measured over the whole 750-image
+  corpus: **750 of 750** viewports are byte-for-byte the canonical pixels,
+  **0** saved files failed `vpng check`, and every untouched tile kept its
+  payload byte for byte. On the 16K photograph the editor's peak working
+  set is **30,752,768 bytes** against the 64 MiB target. See
+  `docs/P14_UI_REPORT.md`.
 * Layered integrity: `info` (structure only), `check` (every payload CRC32C),
   `verify` (exact pixels against a reference).
 * Measured evidence: large-image stress (up to a 15360×8640 photo and
@@ -185,7 +195,10 @@ A frozen v1.0 format. (HTTP Range streaming **is** here — see
 and the HTTP and WebAssembly readers read the **base layer** without
 compositing. **GPU payloads are here too**, see `docs/P13_GPU_REPORT.md`, but
 the payload is **lossy**, it is never used by an exact operation, and the
-**editing engine refuses a file that carries one**.)
+**editing engine refuses a file that carries one**. The **graphical editor
+is here too**, see `docs/P14_UI_REPORT.md`, but it does **not** use the
+preview pyramid — it shows the picture's original level — and it refuses a
+file that carries a layer table or a GPU payload table.)
 The research-only
 pipelines that were **not** promoted — the other CARC models and the other
 hybrids — keep their ids in `0x80..=0xFF`: they cannot reach a file, and the
@@ -438,6 +451,35 @@ The editing engine **refuses** a file that carries a GPU table rather than
 copying a stale payload or dropping the feature. See
 `docs/VPNG_SPEC_0_5.md` and `docs/P13_GPU_REPORT.md`.
 
+### The graphical editor
+
+```console
+$ vpng ui picture.vpng
+vpng: editing picture.vpng
+vpng: the editor is at http://127.0.0.1:53219/?token=9f3c...
+```
+
+The editor is a **local program** with a **browser** front end. It serves a
+small web application on the loopback interface and opens it: pan, zoom,
+pick a pixel, fill a rectangle, set alpha, undo, redo, save.
+
+It is a **client of the format** — it changes no byte of the format, it
+reads and writes through the editing engine, and `vpng-view` decides which
+tiles are on screen while the editing engine does the reading, so there is
+still **one decoder** in the process.
+
+Everything it does is exact: a viewport comes back byte-for-byte as the
+file's own pixels, a fill changes exactly the rectangle you asked for, an
+undo puts the pixels back, and **a save rewrites only the tiles the edit
+dirtied** — every other tile keeps its payload byte for byte.
+
+The editor listens on the loopback interface only, checks that the `Host`
+header names a loopback address, and requires a session token on every
+API call. It refuses a file that carries a layer table or a GPU payload
+table, and it does **not** use the preview pyramid: it shows the picture's
+original level. See `docs/P14_UI_REPORT.md` and
+`docs/decisions/ADR-0020-graphical-editor.md`.
+
 ## Layout
 
 ```text
@@ -465,9 +507,12 @@ crates/vpng-cli         the `vpng` binary
 crates/vpng-http        the HTTP Range source: a container fetched over the network
 crates/vpng-wasm        the WebAssembly decoder: the browser's copy of the engine
 crates/vpng-python      the PyO3 extension behind the `vpng` Python package
+crates/vpng-json        the strict JSON reader and writer the CLI and the editor share
+crates/vpng-ui          the graphical editor: the session, the protocol, the local server
 python/vpng/            the Python package: the exception hierarchy and the wrappers
 python/tests/           the extension's test suite (standard library only)
 wasm/                   the JavaScript wrapper, the module's test suite and its README
+ui/                     the editor's window: the page, the script, the geometry and its tests
 fuzz/                    cargo-fuzz wrappers over the vpng-fuzzing targets
 docs/                   spec, audit, status, threat model, ADRs, milestone reports
 ```

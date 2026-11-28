@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>VPNG editor</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <header class="toolbar">
+      <div class="group">
+        <button id="tool-pan" class="tool" data-tool="pan" title="Pan (V)">
+          Pan
+        </button>
+        <button id="tool-pick" class="tool" data-tool="pick" title="Pick a pixel (I)">
+          Pick
+        </button>
+        <button id="tool-fill" class="tool" data-tool="fill" title="Fill a rectangle (F)">
+          Fill
+        </button>
+        <button id="tool-alpha" class="tool" data-tool="alpha" title="Set alpha (A)">
+          Alpha
+        </button>
+      </div>
+
+      <div class="group">
+        <label class="colour-label" for="colour">Colour</label>
+        <input id="colour" type="color" value="#000000" />
+        <label class="colour-label" for="alpha">Alpha</label>
+        <input id="alpha" type="range" min="0" max="255" value="255" />
+        <span id="alpha-value" class="mono">255</span>
+      </div>
+
+      <div class="group">
+        <button id="undo" title="Undo (Ctrl+Z)">Undo</button>
+        <button id="redo" title="Redo (Ctrl+Y)">Redo</button>
+        <button id="save" title="Save (Ctrl+S)">Save</button>
+      </div>
+
+      <div class="group">
+        <button id="fit" title="Fit the picture in the window">Fit</button>
+        <button id="actual" title="One image pixel per screen pixel">1:1</button>
+        <span id="zoom" class="mono">100%</span>
+      </div>
+
+      <div class="group grow">
+        <span id="file" class="file mono"></span>
+      </div>
+    </header>
+
+    <div id="banner" class="banner" hidden></div>
+
+    <main class="stage">
+      <canvas id="canvas"></canvas>
+      <div id="overlay" class="overlay" hidden></div>
+    </main>
+
+    <footer class="status">
+      <span id="status-size" class="mono"></span>
+      <span id="status-format" class="mono"></span>
+      <span id="status-cursor" class="mono"></span>
+      <span id="status-pixel" class="mono"></span>
+      <span id="status-tiles" class="mono"></span>
+      <span id="status-memory" class="mono"></span>
+      <span id="status-dirty" class="mono"></span>
+    </footer>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

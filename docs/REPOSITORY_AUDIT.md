@@ -70,8 +70,9 @@ set is pinned by `Cargo.lock`, so builds remain reproducible either way.
 
 ## 3. Workspace produced in this phase
 
-A Rust workspace with thirteen crates, plus docs, tests, benchmark harnesses,
-the corpus manifest, a Python package and a WebAssembly package. See
+A Rust workspace with fifteen crates, plus docs, tests, benchmark harnesses,
+the corpus manifest, a Python package, a WebAssembly package and the
+graphical editor's front end. See
 `docs/ROADMAP_STATUS.md` for the phase mapping and `docs/VPNG_SPEC_0_1.md`
 for the format, revised through `docs/VPNG_SPEC_0_5.md`.
 
@@ -94,10 +95,13 @@ vpng/ (root = E:\VPNG)
 │   ├── vpng-python/               the PyO3 extension behind the Python package
 │   ├── vpng-http/                 the HTTP Range source: a container fetched over the network
 │   ├── vpng-wasm/                 the WebAssembly decoder: a raw `extern "C"` ABI, no wasm-bindgen
+│   ├── vpng-json/                 the strict JSON reader and writer the CLI and the editor share
+│   ├── vpng-ui/                   the graphical editor: the session, the protocol, the local server
 │   └── vpng-cli/                  encode/decode/info/check/verify/decode-region/extract-tile
 │                                    + http-info/http-decode-region
 │                                    + layers/decode-layer/composite/encode-layers
 │                                    + gpu-info/gpu-decode
+│                                    + ui
 ├── docs/                          spec, audit, status, threat model, ADRs
 ├── benchmarks/
 │   ├── corpus_manifest.json       provenance, license, dimensions, SHA-256
@@ -108,10 +112,12 @@ vpng/ (root = E:\VPNG)
 │   ├── wasm/                      the WebAssembly measurement driver
 │   ├── layers/                    the layer-model memory driver
 │   ├── gpu/                       the GPU-payload memory driver
+│   ├── ui/                        the editor's corpus and memory drivers
 │   └── results/                   git-ignored JSON/Markdown run output
 ├── corpus-data/                   git-ignored image bytes (provenance in the manifest)
 ├── python/                        the `vpng` package, its tests, and the experiment tooling
 ├── wasm/                          the JavaScript wrapper, the module's tests, its README
+├── ui/                            the editor's window: the page, the script, the geometry, its tests
 ├── pyproject.toml                 the maturin build definition for the extension
 ```
 
@@ -147,12 +153,15 @@ profiles, `x86_64-pc-windows-gnu`.
 
 | | Tests | Result |
 |---|---:|---|
-| Rust workspace | **610** | **610 passed, 0 failed** |
+| Rust workspace | **664** | **664 passed, 0 failed** |
 | Python package (`python -m unittest discover -s python/tests`) | **62** | **OK** |
 | WebAssembly package (`node --test wasm/test/vpng.test.mjs`) | **18** | **18 pass, 0 fail** |
 | WebAssembly export check (`node wasm/check_exports.mjs`) | **47** exports | every documented export is really exported |
+| The editor's window (`node --test ui/test/geometry.test.mjs`) | **23** | **23 pass, 0 fail** |
 
-The per-suite breakdown is in `docs/ROADMAP_STATUS.md` §5.
+The per-suite breakdown is in `docs/ROADMAP_STATUS.md` §5. The editor's own
+Rust suites — the session, the protocol and the HTTP server — are part of
+the Rust workspace's count.
 
 ## 5. Risks and unknowns carried into the next phase
 

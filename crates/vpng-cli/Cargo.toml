@@ -19,10 +19,15 @@ vpng-encoder.workspace = true
 vpng-decoder.workspace = true
 vpng-tiling.workspace = true
 vpng-image.workspace = true
+vpng-json.workspace = true
 vpng-http.workspace = true
 vpng-source.workspace = true
+vpng-ui.workspace = true
 
 [dev-dependencies]
 # The hand-written HTTP/1.1 server, so the CLI's own tests can run against a
 # server the reader does not control.
 vpng-http = { workspace = true, features = ["test-support"] }
+
+# The HTTP client the editor's own tests use.
+ureq = { version = "=3.2.1", default-features = false, features = ["rustls"] }

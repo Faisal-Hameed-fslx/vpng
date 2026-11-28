@@ -1843,6 +1843,208 @@ def check_gpu() -> None:
     )
 
 
+def check_ui() -> None:
+    """Check the graphical-editor report against the raw data."""
+    report = (REPO / "docs/P14_UI_REPORT.md").read_text(encoding="utf-8")
+    report = report.replace("−", "-")
+    raw = json.loads((REPO / "benchmarks/p14_ui_results.json").read_text(encoding="utf-8"))
+    memory = json.loads(
+        (REPO / "benchmarks/p14_ui_memory_results.json").read_text(encoding="utf-8")
+    )
+    manifest = json.loads((REPO / "benchmarks/corpus_manifest.json").read_text(encoding="utf-8"))
+
+    overall = raw["overall"]
+    images = raw["images"]
+
+    def quoted(value, fmt) -> None:
+        text = format(value, fmt)
+        check(text in report, f"the editor report does not contain the figure {text!r}")
+
+    # ---- the corpus is the corpus ---------------------------------------------
+    manifest_ids = {entry["id"] for entry in manifest["images"]}
+    result_ids = {row["id"] for row in images}
+    check(
+        manifest_ids == result_ids,
+        "the manifest and the editor measurement file do not hold the same images",
+    )
+    check(
+        len(images) == manifest["total_images"],
+        f"the editor measurement file holds {len(images)} images, the manifest says "
+        f"{manifest['total_images']}",
+    )
+    quoted(len(images), ",")
+    quoted(len(images), "d")
+
+    # ---- every picture passed --------------------------------------------------
+    check(
+        overall["failed"] == 0,
+        f"{overall['failed']} images failed the editor's checks",
+    )
+    for field, label in (
+        ("region_exact", "the viewport is not the canonical pixels"),
+        ("pick_exact", "the pick is not the pixel the file holds"),
+        ("fill_exact", "the fill is not the colour that was chosen"),
+        ("undo_exact", "the undo did not put the pixels back"),
+        ("saved_fill_exact", "the saved file does not hold the fill"),
+        ("saved_outside_exact", "the saved file changed a row it should not"),
+        ("untouched_payloads_identical", "a tile payload changed that should not have"),
+    ):
+        check(
+            overall[field] == len(images),
+            f"{overall[field]} of {len(images)} images: {label}",
+        )
+        quoted(overall[field], "d")
+    check(
+        overall["check_failures"] == 0,
+        f"{overall['check_failures']} saved files failed `vpng check`",
+    )
+    quoted(overall["check_failures"], "d")
+
+    # ---- a save rewrites only what changed -------------------------------------
+    for row in images:
+        check(
+            row["payloads_changed"] == row["tiles_rewritten"],
+            f"{row['id']}: {row['payloads_changed']} payloads changed but "
+            f"{row['tiles_rewritten']} tiles were rewritten",
+        )
+        check(
+            row["payloads_untouched"] == row["tiles_copied"],
+            f"{row['id']}: {row['payloads_untouched']} payloads were untouched but "
+            f"{row['tiles_copied']} tiles were copied",
+        )
+        check(
+            row["tiles_rewritten"] + row["tiles_copied"] == row["tile_count"],
+            f"{row['id']}: the rewritten and copied tiles do not add up to the "
+            "tile count",
+        )
+        check(
+            row["state_width"] == row["width"] and row["state_height"] == row["height"],
+            f"{row['id']}: the editor reports the wrong geometry",
+        )
+        check(
+            row["state_format"] == row["pixel_format"],
+            f"{row['id']}: the editor reports the wrong format",
+        )
+
+    # ---- the viewer engine's planner ran -----------------------------------------
+    check(
+        overall["prefetched_tiles_total"] > 0,
+        "the editor never prefetched a tile, so the planner did not run",
+    )
+    check(
+        overall["visible_tiles_total"] > 0,
+        "the editor never reported a visible tile, so the planner did not run",
+    )
+    for field in ("visible_tiles_total", "prefetch_tiles_total", "prefetched_tiles_total"):
+        check(
+            sum(summary[field] for summary in raw["by_category"].values())
+            == overall[field],
+            f"the per-category {field} does not add up to the overall total",
+        )
+
+    # ---- the per-category table -------------------------------------------------
+    for name, summary in raw["by_category"].items():
+        check(
+            summary["images"] == summary["ok"],
+            f"the {name} category holds {summary['images']} images but only "
+            f"{summary['ok']} passed",
+        )
+    check(
+        sum(summary["images"] for summary in raw["by_category"].values()) == len(images),
+        "the per-category counts do not add up to the number of images",
+    )
+
+    # ---- the corpus pass's wall clock --------------------------------------------
+    quoted(raw["corpus"]["elapsed_seconds"], ".3f")
+
+    # ---- the corpus-wide payload accounting ---------------------------------------
+    for field in (
+        "tiles_rewritten_total",
+        "tiles_copied_total",
+        "copied_payload_bytes_total",
+        "rewritten_payload_bytes_total",
+        "visible_tiles_total",
+        "prefetch_tiles_total",
+        "prefetched_tiles_total",
+    ):
+        quoted(overall[field], ",")
+    check(
+        overall["tiles_rewritten_total"] + overall["tiles_copied_total"]
+        == sum(row["tile_count"] for row in images),
+        "the rewritten and copied tiles do not add up to the corpus's tile count",
+    )
+    check(
+        overall["prefetch_tiles_total"] == overall["prefetched_tiles_total"],
+        "the editor fetched a different number of prefetch tiles than the planner "
+        "asked for",
+    )
+
+    # ---- the memory figures ------------------------------------------------------
+    peak = memory["peak_working_set_bytes"]
+    target = memory["scope"]["target_bytes"]
+    check(
+        target == 64 * 1024 * 1024,
+        f"the memory target is {target}, not the 64 MiB the roadmap sets",
+    )
+    check(
+        peak["max"] <= target,
+        f"the editor's peak working set is {peak['max']}, over the {target}-byte target",
+    )
+    quoted(peak["max"], ",")
+    quoted(peak["median"], ",")
+    quoted(target, ",")
+    for value in peak["per_run"]:
+        quoted(value, ",")
+    share = peak["max"] * 100.0 / target
+    quoted(share, ".1f")
+    check(
+        memory["runs"] >= 5,
+        f"the memory case ran {memory['runs']} times, not the five the report claims",
+    )
+    check(
+        "included" in memory["scope"] and "excluded" in memory["scope"],
+        "the memory scope does not say what is included and what is excluded",
+    )
+    check(
+        memory["image"]["id"] == "user-photo-15360x8640",
+        "the memory measurement did not use the 16K photograph",
+    )
+
+    # ---- the timings the report quotes --------------------------------------------
+    for name in ("first_viewport", "pan", "pick", "save"):
+        median = memory["timings_ms"][name]["median"]
+        forms = {format(median, ".3f"), format(median, ".1f"), repr(median)}
+        check(
+            any(form in report for form in forms),
+            f"the editor report does not quote the {name} median {median!r}",
+        )
+    quoted(memory["tile_count"], ",")
+    quoted(memory["visible_tiles"], "d")
+    quoted(memory["prefetch_tiles"], "d")
+
+    # ---- the report says what it does and does not claim -------------------------
+    check(
+        "included" in report.lower() and "excluded" in report.lower(),
+        "the editor report does not state the measurement scope",
+    )
+    check(
+        "PASS" in report and "BLOCKED" in report,
+        "the editor report does not use the gate vocabulary",
+    )
+    check(
+        "12" in report and "Q12" in report,
+        "the editor report does not answer all twelve questions",
+    )
+    check(
+        "pyramid" in report.lower(),
+        "the editor report does not say that the preview pyramid is not used",
+    )
+    check(
+        "loopback" in report.lower(),
+        "the editor report does not say that the editor is local-only",
+    )
+
+
 def main() -> int:
     raw = json.loads((REPO / "benchmarks/p3_5_raw_results.json").read_text(encoding="utf-8"))
     report = (REPO / "docs/P3_5_COMPRESSION_RESEARCH_REPORT.md").read_text(encoding="utf-8")
@@ -2103,6 +2305,9 @@ def main() -> int:
 
     # ---- Phase C: the GPU payload ---------------------------------------------------
     check_gpu()
+
+    # ---- Phase C: the graphical editor ------------------------------------------------
+    check_ui()
 
     if problems:
         print(f"{len(problems)} problem(s):")

@@ -24,7 +24,7 @@ figure below is read out of the raw JSON, and `check_layers()` in
 
 ## 1. What this is
 
-Phase C step 3 of the agreed plan: **the format's layer model.**
+Phase C step 4 of the agreed plan: **the format's layer model.**
 
 A v0.4 container holds one or more **layers**. Layer 0 is the **base layer**
 — the picture itself. Every other layer is a named grid of tiles that sits on

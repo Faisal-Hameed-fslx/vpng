@@ -898,6 +898,74 @@ The lossy reader costs most: `vpng gpu-decode` peaks at 726,097,920 bytes
 because it writes the picture as **RGBA8** — 530,841,600 bytes — whatever the
 file's own format is.
 
+## Measured: the graphical editor (2026-11-28)
+
+Phase C step 6. The question this measurement answers is the one that
+matters for an editor: **does it show exactly what the file holds, does an
+edit change exactly what it was asked to change, and does a save rewrite
+only what changed?**
+
+Driver: `benchmarks/ui/run_ui_corpus.py` and
+`benchmarks/ui/measure_ui_memory.py`; raw data:
+`benchmarks/p14_ui_results.json` and `benchmarks/p14_ui_memory_results.json`.
+The editor is the **real `vpng ui` program**, driven over HTTP by the
+standard library's `urllib` — no third-party package — and checked against a
+container reader written from the **specification** rather than from the
+project's own decoder, so a bug in the editor cannot hide behind a matching
+bug in the checker.
+
+### The corpus
+
+Every one of the 750 corpus images was opened in the editor, read, picked,
+filled, undone, filled again and saved.
+
+| Check | Result |
+|---|---:|
+| The viewport is byte-for-byte the canonical pixels | **750 / 750** |
+| The pick is the pixel the file holds | **750 / 750** |
+| The fill changes exactly the rectangle that was asked for | **750 / 750** |
+| The undo puts the pixels back | **750 / 750** |
+| The saved file holds the fill and nothing else | **750 / 750** |
+| The saved file passes `vpng check` | **750 / 750** (0 failures) |
+| Every untouched tile keeps its payload byte for byte | **750 / 750** |
+
+**A grey file takes the mean of the colour, rounded half up.** The
+measurement filled with `(17, 34, 51, 255)`, which a grey file cannot hold:
+it receives grey **34**, because `(17 + 34 + 51 + 1) / 3 = 34`. The first
+pass of the measurement expected the colour itself and **49 grey images
+failed** — the checker was wrong, not the editor, and the checker was
+corrected to ask what the file's own format can hold.
+
+Across the corpus the edit dirtied **989** tiles and the save copied
+**7,955** — **8,944** tiles in all, which is every tile of every file. The
+copied payloads carried **378,961,695** bytes and the rewritten ones
+**74,338,188**. The viewer's planner ran on every picture: **2,378** tiles
+were visible, **2,140** more were wanted next, and **2,140** of those were
+fetched.
+
+### The memory figures, on the 16K photograph
+
+**Scope.** The editor process's **peak working set**, taken from the
+operating system's own `GetProcessMemoryInfo` while the process was alive.
+**Included**: the operating system, the loader, the binary's text and data,
+the Rust heap, the decoded-tile cache, the display buffer, the undo history
+and every other buffer the editor allocated. **Excluded**: nothing — the
+figure is the whole process.
+
+| Figure | Value |
+|---|---:|
+| The editor's peak working set on the 16K photograph | **30,752,768 bytes** |
+| The 64 MiB target | 67,108,864 bytes |
+| The share of the target | **45.8%** |
+
+The five runs peaked at 30,466,048, 30,478,336, 30,732,288, 30,740,480
+and 30,752,768 bytes — a spread of about 1% — and each run rewrote **2**
+tiles and copied **2,038**.
+
+The editor's own buffers are reported separately, so the two can be told
+apart: the decoded-tile cache's budget is 16 MiB and the undo history's is
+16 MiB.
+
 ## Measured: large-image stress (2026-11-15, with Predictor)
 
 Host: 12 logical CPUs, 7,916 MB physical RAM, Windows `x86_64-pc-windows-gnu`,

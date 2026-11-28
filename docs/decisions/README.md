@@ -25,6 +25,7 @@ with a status, the question, the decision, the rationale, and the consequences.
 | [0017](ADR-0017-wasm-abi.md) | the WebAssembly package's shape and its raw `extern "C"` ABI | accepted |
 | [0018](ADR-0018-layers-and-masks.md) | layers, masks, the layer table's place, and the v0.4 version rule | accepted |
 | [0019](ADR-0019-gpu-payloads.md) | the optional GPU payload, its sibling status, and the v0.5 version rule | accepted |
+| [0020](ADR-0020-graphical-editor.md) | the graphical editor's shape: a local program with a browser front end | accepted |
 
 ### Still open
 

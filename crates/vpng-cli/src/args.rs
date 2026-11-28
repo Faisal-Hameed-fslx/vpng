@@ -33,11 +33,22 @@ const VALUE_OPTIONS: &[&str] = &[
     "level",
     "layer",
     "manifest",
+    "port",
+    "max-region",
 ];
 
 /// Long options that are simple flags.
 const SWITCH_OPTIONS: &[&str] = &[
-    "json", "help", "verbose", "quiet", "force", "version", "pyramid", "adaptive", "gpu",
+    "json",
+    "help",
+    "verbose",
+    "quiet",
+    "force",
+    "version",
+    "pyramid",
+    "adaptive",
+    "gpu",
+    "no-browser",
 ];
 
 #[derive(Debug, Default, Clone)]

@@ -1,0 +1,77 @@
+{
+ "schema": "vpng.ui.memory.v1",
+ "generated_by": "benchmarks/ui/measure_ui_memory.py",
+ "image": {
+  "id": "user-photo-15360x8640",
+  "width": 15360,
+  "height": 8640,
+  "pixel_format": "rgb8",
+  "canonical_bytes": 398131200,
+  "tile_size": 256
+ },
+ "file_bytes": 124197035,
+ "viewport": {
+  "width": 1024,
+  "height": 1024,
+  "pixels": 1048576,
+  "rgba_bytes": 4194304
+ },
+ "runs": 5,
+ "scope": {
+  "measured": "the editor process's peak working set, from the operating system's GetProcessMemoryInfo, taken while the process was alive",
+  "included": "the operating system, the loader, the binary's text and data, the Rust heap, the decoded-tile cache, the display buffer, the undo history and every other buffer the editor allocated",
+  "excluded": "nothing: the figure is the whole process",
+  "target_bytes": 67108864,
+  "note": "the figure is a whole-process number; the editor's own buffers are reported separately so the two can be told apart"
+ },
+ "peak_working_set_bytes": {
+  "min": 30466048,
+  "max": 30752768,
+  "median": 30732288,
+  "per_run": [
+   30740480,
+   30752768,
+   30732288,
+   30478336,
+   30466048
+  ]
+ },
+ "editor_buffers_bytes": {
+  "cache_current": 16711680,
+  "history_current": 0
+ },
+ "timings_ms": {
+  "first_viewport": {
+   "count": 5,
+   "min": 280.687,
+   "max": 321.102,
+   "median": 286.843,
+   "mean": 293.179
+  },
+  "pan": {
+   "count": 5,
+   "min": 546.789,
+   "max": 650.609,
+   "median": 559.288,
+   "mean": 581.575
+  },
+  "pick": {
+   "count": 5,
+   "min": 1.576,
+   "max": 11.891,
+   "median": 5.53,
+   "mean": 6.14
+  },
+  "save": {
+   "count": 5,
+   "min": 199.727,
+   "max": 235.439,
+   "median": 215.463,
+   "mean": 216.947
+  }
+ },
+ "tile_count": 2040,
+ "visible_tiles": 20,
+ "prefetch_tiles": 52,
+ "max_region_pixels": 4194304
+}

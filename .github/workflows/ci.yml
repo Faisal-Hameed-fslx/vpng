@@ -19,6 +19,8 @@ name: CI
 # * `python-ext` — the native extension builds and its own test suite passes.
 # * `wasm`       — the WebAssembly module builds for `wasm32` and produces the
 #                  command line's pixels.
+# * `ui`         — the graphical editor's window arithmetic runs in Node, and
+#                  the editor serves its window over real HTTP.
 #
 # The HTTP Range crate and the WebAssembly package are covered by the
 # ordinary `build`, `clippy` and `test` jobs: they are workspace members
@@ -221,6 +223,10 @@ jobs:
         run: python benchmarks/corpus/run_gpu_corpus.py --help
       - name: The GPU memory runner must show its help
         run: python benchmarks/gpu/measure_gpu_memory.py --help
+      - name: The editor corpus runner must show its help
+        run: python benchmarks/ui/run_ui_corpus.py --help
+      - name: The editor memory runner must show its help
+        run: python benchmarks/ui/measure_ui_memory.py --help
       - name: The reports must match the raw data
         run: python benchmarks/verify_reports.py
 
@@ -291,3 +297,27 @@ jobs:
         run: node --test wasm/test/vpng.test.mjs
       - name: The module must export its functions
         run: node wasm/check_exports.mjs
+
+  ui:
+    name: graphical editor
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Build the editor
+        run: cargo build --release -p vpng-cli
+      - name: Run the window's test suite
+        # The window's arithmetic is pure, so it is tested in Node without a
+        # browser and without a display server.
+        run: node --test ui/test/geometry.test.mjs
+      - name: The editor must serve its window
+        # The editor needs no display server, so the whole of it is exercised
+        # here: the program is started, its address is used, and the picture
+        # that comes back is checked.
+        run: cargo test --release -p vpng-ui
+      - name: The editor's command line
+        run: cargo test --release -p vpng-cli --test ui_command

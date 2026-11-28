@@ -8,6 +8,51 @@ separately as major.minor in the header.
 
 ### Added
 
+* **A graphical editor, measured over the whole 750-image corpus (Phase C,
+  P11).** `vpng ui <file.vpng>` opens the file in a graphical editor.
+  * **The window is a browser.** The editor is a local program that serves
+    a small web application on the **loopback** interface and opens it. The
+    choice was forced by three properties of this repository: the
+    workspace's minimum Rust version is **1.74** and the current graphical
+    toolkits need more, the workspace deliberately has no windowing stack,
+    and the continuous-integration job has no display server — a browser
+    front end can be tested, a native window cannot. The editor is a
+    **client of the format**: it introduces **no format revision**, no new
+    header field and no new directory flag.
+  * **It drives the engines the project already has.** `vpng-view` decides
+    which tiles are on screen and which are wanted next; `vpng-editing`
+    decodes them, changes them and commits them. There is still **one
+    decoder** in the process, and the editor adds **no new dependency** to
+    the workspace.
+  * **Everything it does is exact.** A viewport comes back byte-for-byte as
+    the file's own pixels; a pick names the exact pixel; a fill changes
+    exactly the rectangle that was asked for; an undo puts the pixels back;
+    and **a save rewrites only the tiles the edit dirtied** — every other
+    tile keeps its payload byte for byte, and the saved file still passes
+    `vpng check`.
+  * **Measured over the whole 750-image corpus**: the viewport is the
+    canonical pixels on **750 of 750** images, the pick is exact on **750
+    of 750**, the fill is exact on **750 of 750**, the undo is exact on
+    **750 of 750**, the saved file holds the fill and nothing else on
+    **750 of 750**, **0** saved files failed `vpng check`, and every
+    untouched tile kept its payload byte for byte. On the 16K photograph
+    the editor's peak working set is **30,752,768 bytes** against the
+    67,108,864-byte target — **45.8%**.
+  * **What it does not do.** The editor does **not** use the preview
+    pyramid: it shows the picture's original level, and the window says so.
+    It **refuses** a file that carries a layer table or a GPU payload
+    table, with the editing engine's own reason. It listens on the
+    loopback interface only, checks that the `Host` header names a
+    loopback address, and requires a session token on every API call.
+  * **The front end is source, not build output.** The page, the
+    stylesheet, the application script and the geometry module live in
+    `ui/` and are compiled into the binary with `include_str!`. The
+    geometry is **pure** — no DOM, no canvas, no network — so it is
+    tested in Node with no browser and no display server.
+* **A shared strict JSON reader and writer (`crates/vpng-json`).** The
+  reader moved out of the command line, where it had lived, and the
+  writer is new; the command line and the editor now share one
+  definition of the format rather than two.
 * **GPU payloads, measured over the whole 750-image corpus (Phase C, P15).**
   A container may now carry, beside every tile's lossless payload, an
   **optional GPU payload**: the same picture in the block format a GPU

@@ -531,6 +531,7 @@ dependencies = [
 name = "vpng-cli"
 version = "0.1.0"
 dependencies = [
+ "ureq",
  "vpng-codecs",
  "vpng-container",
  "vpng-core",
@@ -538,8 +539,10 @@ dependencies = [
  "vpng-encoder",
  "vpng-http",
  "vpng-image",
+ "vpng-json",
  "vpng-source",
  "vpng-tiling",
+ "vpng-ui",
 ]
 
 [[package]]
@@ -642,6 +645,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "vpng-json"
+version = "0.1.0"
+dependencies = [
+ "vpng-core",
+]
+
+[[package]]
 name = "vpng-python"
 version = "0.1.0"
 dependencies = [
@@ -695,6 +705,20 @@ name = "vpng-tiling"
 version = "0.1.0"
 dependencies = [
  "vpng-core",
+]
+
+[[package]]
+name = "vpng-ui"
+version = "0.1.0"
+dependencies = [
+ "ureq",
+ "vpng-container",
+ "vpng-core",
+ "vpng-decoder",
+ "vpng-editing",
+ "vpng-encoder",
+ "vpng-json",
+ "vpng-view",
 ]
 
 [[package]]

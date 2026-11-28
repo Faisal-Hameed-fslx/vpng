@@ -9,9 +9,9 @@
 
 mod args;
 mod gpu;
-mod json;
 mod layers;
 mod size;
+mod ui;
 
 use std::process::ExitCode;
 
@@ -63,6 +63,7 @@ fn run(argv: &[String]) -> Result<()> {
         "layers" => layers::cmd_layers(&args),
         "gpu-info" => gpu::cmd_gpu_info(&args),
         "gpu-decode" => gpu::cmd_gpu_decode(&args),
+        "ui" => ui::cmd_ui(&args),
         "info" => cmd_info(&args),
         "check" => cmd_check(&args),
         "verify" => cmd_verify(&args),
@@ -765,6 +766,7 @@ COMMANDS:
     layers <input.vpng>                List the layers of a file
     gpu-info <input.vpng>              List the file's GPU payload table
     gpu-decode <input.vpng> <out>      Decode a rectangle of the GPU payload (LOSSY)
+    ui <input.vpng>                    Open the graphical editor in a browser
     info <input.vpng>                  Print header and directory summary
     check <input.vpng>                 Verify container integrity (every payload CRC32C)
     verify <original> <candidate.vpng> Fail unless pixels round-trip exactly
@@ -804,6 +806,10 @@ OPTIONS:
     --level <n>            Which level to decode (default 0, the original)
     --layer <n>            Which layer to decode (default 0, the base layer)
     --manifest <path>      The layer manifest `encode-layers` reads (JSON)
+    --port <n>             The port `ui` listens on (default: a free one)
+    --max-region <n>       The largest number of pixels one display request may
+                           carry in `ui` (default: 4194304)
+    --no-browser           `ui` prints the address instead of opening a browser
     --workers <n>          Encoder worker threads (default: the logical CPU count).
                            The worker count changes the speed and not the bytes:
                            one worker and N workers write the same file.

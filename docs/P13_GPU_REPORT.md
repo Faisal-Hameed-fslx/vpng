@@ -25,7 +25,7 @@ figure below is read out of the raw JSON, and `check_gpu()` in
 
 ## 1. What this is
 
-Phase C step 4 of the agreed plan: **the format's optional GPU payload.**
+Phase C step 5 of the agreed plan: **the format's optional GPU payload.**
 
 A v0.5 container may carry, beside every tile's lossless payload, a second,
 explicitly named, **lossy** payload: the same picture in the block format a

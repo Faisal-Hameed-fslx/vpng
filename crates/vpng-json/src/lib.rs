@@ -1,10 +1,12 @@
-//! A small, strict JSON reader.
+//! `vpng-json` — a small, strict JSON reader and writer.
 //!
-//! The CLI needs to read exactly one kind of JSON: the **layer manifest**,
-//! which says how to build a layered file. Rather than take a dependency on a
-//! JSON crate — and rather than hand-roll a fragile ad-hoc parser for one
-//! file format — this is a complete, small JSON reader with the strictness a
-//! configuration file needs:
+//! Two things in the repository need JSON: the **command line's layer
+//! manifest**, which says how to build a layered file, and the **graphical
+//! editor's protocol**, which carries the session's state between the Rust
+//! engine and the browser front end. Rather than take a dependency on a JSON
+//! crate — and rather than hand-roll a fragile ad-hoc parser for one file
+//! format — this is a complete, small JSON implementation with the strictness
+//! a configuration file and a protocol need:
 //!
 //! * no trailing commas;
 //! * no comments;
@@ -13,8 +15,25 @@
 //! * every number is finite.
 //!
 //! It parses into a [`Json`] tree, and the tree answers the few questions
-//! the manifest asks of it. The parser never executes anything and never
+//! the callers ask of it. The parser never executes anything and never
 //! allocates beyond the text it was given.
+//!
+//! # The writer
+//!
+//! The same tree is written back out. The writer emits exactly the JSON the
+//! parser accepts, so a value that round-trips through [`parse`] and
+//! [`Json::to_string`] is a value the reader accepts again. Numbers are
+//! written as the text they are held as, so an integer stays an integer and a
+//! pixel coordinate never becomes a float on the way through.
+//!
+//! # What this is not
+//!
+//! This is not a general-purpose JSON library. It has no schema, no
+//! serialisation traits, no streaming parser and no `serde` support. It is
+//! the JSON the project itself speaks, in one place.
+
+#![deny(missing_docs)]
+#![forbid(unsafe_code)]
 
 use vpng_core::{Error, Result};
 
@@ -68,6 +87,19 @@ impl Json {
         }
     }
 
+    /// The number, if this is a number that is a whole number and fits.
+    pub fn as_u32(&self) -> Option<u32> {
+        self.as_u64().and_then(|value| u32::try_from(value).ok())
+    }
+
+    /// The number, if this is a number that is a whole number.
+    pub fn as_i64(&self) -> Option<i64> {
+        match self {
+            Json::Number(text) => text.parse::<i64>().ok(),
+            _ => None,
+        }
+    }
+
     /// The elements, if this is an array.
     pub fn as_array(&self) -> Option<&[Json]> {
         match self {
@@ -100,6 +132,147 @@ impl Json {
             Json::Object(_) => "an object",
         }
     }
+
+    /// A whole number.
+    pub fn number(value: u64) -> Self {
+        Json::Number(value.to_string())
+    }
+
+    /// A negative whole number.
+    pub fn signed(value: i64) -> Self {
+        Json::Number(value.to_string())
+    }
+
+    /// A finite floating-point number, kept as the shortest text that reads
+    /// back as the same value.
+    ///
+    /// A number that is not finite is refused: JSON has no way to write
+    /// `NaN` or `Infinity`, and the reader would not accept them either.
+    pub fn floating(value: f64) -> Result<Self> {
+        if !value.is_finite() {
+            return Err(Error::invalid(
+                "a JSON number must be finite; NaN and Infinity cannot be written",
+            ));
+        }
+        Ok(Json::Number(format!("{value:?}")))
+    }
+
+    /// Write this value as JSON into a string.
+    pub fn write_to(&self, out: &mut String) {
+        match self {
+            Json::Null => out.push_str("null"),
+            Json::Bool(true) => out.push_str("true"),
+            Json::Bool(false) => out.push_str("false"),
+            Json::Number(text) => out.push_str(text),
+            Json::String(text) => write_string(text, out),
+            Json::Array(items) => {
+                out.push('[');
+                for (index, item) in items.iter().enumerate() {
+                    if index > 0 {
+                        out.push(',');
+                    }
+                    item.write_to(out);
+                }
+                out.push(']');
+            }
+            Json::Object(entries) => {
+                out.push('{');
+                for (index, (key, value)) in entries.iter().enumerate() {
+                    if index > 0 {
+                        out.push(',');
+                    }
+                    write_string(key, out);
+                    out.push(':');
+                    value.write_to(out);
+                }
+                out.push('}');
+            }
+        }
+    }
+}
+
+impl std::fmt::Display for Json {
+    /// Write this value as JSON.
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut out = String::new();
+        self.write_to(&mut out);
+        formatter.write_str(&out)
+    }
+}
+
+impl From<bool> for Json {
+    fn from(value: bool) -> Self {
+        Json::Bool(value)
+    }
+}
+
+impl From<u64> for Json {
+    fn from(value: u64) -> Self {
+        Json::number(value)
+    }
+}
+
+impl From<u32> for Json {
+    fn from(value: u32) -> Self {
+        Json::number(value as u64)
+    }
+}
+
+impl From<u16> for Json {
+    fn from(value: u16) -> Self {
+        Json::number(value as u64)
+    }
+}
+
+impl From<u8> for Json {
+    fn from(value: u8) -> Self {
+        Json::number(value as u64)
+    }
+}
+
+impl From<usize> for Json {
+    fn from(value: usize) -> Self {
+        Json::number(value as u64)
+    }
+}
+
+impl From<i64> for Json {
+    fn from(value: i64) -> Self {
+        Json::signed(value)
+    }
+}
+
+impl From<&str> for Json {
+    fn from(value: &str) -> Self {
+        Json::String(value.to_string())
+    }
+}
+
+impl From<String> for Json {
+    fn from(value: String) -> Self {
+        Json::String(value)
+    }
+}
+
+/// Write a string as a JSON string, with the escapes JSON requires.
+fn write_string(text: &str, out: &mut String) {
+    out.push('"');
+    for character in text.chars() {
+        match character {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '\u{8}' => out.push_str("\\b"),
+            '\u{c}' => out.push_str("\\f"),
+            character if (character as u32) < 0x20 => {
+                out.push_str(&format!("\\u{:04x}", character as u32));
+            }
+            character => out.push(character),
+        }
+    }
+    out.push('"');
 }
 
 /// Parse a JSON document.
@@ -476,5 +649,68 @@ mod tests {
         let entries = value.as_object().unwrap();
         assert_eq!(entries[0].0, "b");
         assert_eq!(entries[1].0, "a");
+    }
+
+    #[test]
+    fn writes_an_object() {
+        let value = Json::Object(vec![
+            ("name".into(), Json::from("base")),
+            ("x".into(), Json::from(10u64)),
+            ("ok".into(), Json::from(true)),
+            ("none".into(), Json::Null),
+        ]);
+        assert_eq!(
+            value.to_string(),
+            r#"{"name":"base","x":10,"ok":true,"none":null}"#
+        );
+    }
+
+    #[test]
+    fn writes_the_escapes() {
+        let value = Json::from("a\"b\\c\nd\u{1}e");
+        assert_eq!(value.to_string(), r#""a\"b\\c\nd\u0001e""#);
+    }
+
+    #[test]
+    fn writes_a_round_trip() {
+        let text = r#"{"name":"base","x":10,"y":0,"list":[1,2,3],"nested":{"a":null},"s":"é"}"#;
+        let value = parse(text).unwrap();
+        let written = value.to_string();
+        assert_eq!(parse(&written).unwrap(), value);
+    }
+
+    #[test]
+    fn keeps_an_integer_an_integer() {
+        let value = Json::Object(vec![("x".into(), Json::from(4_294_967_295u64))]);
+        assert_eq!(value.to_string(), r#"{"x":4294967295}"#);
+        assert_eq!(
+            parse(&value.to_string())
+                .unwrap()
+                .get("x")
+                .unwrap()
+                .as_u64(),
+            Some(4_294_967_295)
+        );
+    }
+
+    #[test]
+    fn refuses_a_non_finite_float() {
+        assert!(Json::floating(f64::NAN).is_err());
+        assert!(Json::floating(f64::INFINITY).is_err());
+        assert!(Json::floating(0.5).is_ok());
+    }
+
+    #[test]
+    fn reads_a_negative_number() {
+        let value = parse("-5").unwrap();
+        assert_eq!(value.as_i64(), Some(-5));
+        assert_eq!(value.as_u64(), None);
+    }
+
+    #[test]
+    fn reads_a_number_that_does_not_fit_a_u32() {
+        let value = parse("4294967296").unwrap();
+        assert_eq!(value.as_u32(), None);
+        assert_eq!(value.as_u64(), Some(4_294_967_296));
     }
 }
