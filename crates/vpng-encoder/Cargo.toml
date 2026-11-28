@@ -11,4 +11,9 @@ description = "VPNG encoder: canonical pixels to a complete .vpng byte stream."
 vpng-core.workspace = true
 vpng-container.workspace = true
 vpng-codecs.workspace = true
+vpng-gpu.workspace = true
 vpng-tiling.workspace = true
+
+[dev-dependencies]
+vpng-decoder.workspace = true
+vpng-gpu.workspace = true

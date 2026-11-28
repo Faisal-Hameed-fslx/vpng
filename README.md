@@ -24,10 +24,13 @@ are recorded in `docs/BENCHMARKS.md`, `docs/P5_REPORT.md` and
   `docs/VPNG_SPEC_0_2.md` (the same layout, with the level index carried in
   the directory entry's `flags` and a level's tiles allowed to differ in
   size), `docs/VPNG_SPEC_0_3.md` (the same layout again, with the rule
-  that lets the promoted codecs 4–6 reach a file) and
-  `docs/VPNG_SPEC_0_4.md` (the same layout once more, with the layer table's
-  offset and length in the header's reserved last eight bytes and the layer
-  index in the directory entry's reserved flag bits).
+  that lets the promoted codecs 4–6 reach a file), `docs/VPNG_SPEC_0_4.md`
+  (the same layout once more, with the layer table's offset and length in
+  the header's reserved last eight bytes and the layer index in the
+  directory entry's reserved flag bits) and `docs/VPNG_SPEC_0_5.md` (the
+  header grown to **72 bytes** through the `header_size` field that exists
+  for that purpose, with the GPU table's offset and length in the new last
+  eight bytes and the checksum rule unchanged for a 64-byte header).
 * All eight v0.1 pixel formats (Gray/GrayAlpha/RGB/RGBA at 8 and 16 bits).
 * A validated container: 64-byte header, 40-byte directory entries, CRC32C
   checksums, whole-image canonical SHA-256 digest.
@@ -130,6 +133,20 @@ are recorded in `docs/BENCHMARKS.md`, `docs/P5_REPORT.md` and
   **54.054054%** of the corpus's smallest file (111 bytes), and both numbers
   are reported. The **editing engine refuses a layered file** rather
   than dropping its layers. See `docs/P12_LAYERS_REPORT.md`.
+* **GPU payloads** (format v0.5): a container may carry, beside every tile's
+  lossless payload, an **optional, explicitly named, lossy** payload in the
+  block format a GPU samples as a texture — **BC1** colour blocks and **BC4**
+  alpha blocks. The lossless payload stays normative: a directory entry
+  **never** names a GPU block codec, and nothing exact reads the GPU
+  payload. Measured over the whole 750-image corpus, every one of the **750**
+  GPU files still reconstructs the picture **byte for byte** through its
+  lossless payload, **0** files failed `vpng check`, and the default path's
+  bytes did not move. The cost is stated and it is large: the GPU payload
+  takes **55.472482%** of the corpus's bytes — **274.325592%** of a UI
+  screenshot's — and the fidelity is measured too: **37.2237 dB** pooled
+  PSNR, a worst single difference of **170** levels, and a worst image at
+  **13.3972 dB**. The **editing engine refuses a GPU file** rather than
+  copying a stale payload. See `docs/P13_GPU_REPORT.md`.
 * A **measurement foundation** (`crates/vpng-validation`): every benchmark
   case is repeated ten times and reported with a **median** and a **p95**,
   not a single figure, against a sequential baseline measured in the same
@@ -139,7 +156,7 @@ are recorded in `docs/BENCHMARKS.md`, `docs/P5_REPORT.md` and
 * Conformance tests: exhaustive round-trip, region-vs-crop, malformed-input
   sweeps, a bounded mutation sweep, golden files, the `default_codec`
   clarification, and a deterministic fuzzing harness over seven targets.
-  536 Rust tests, 53 Python tests and 15 WebAssembly tests, all passing.
+  610 Rust tests, 62 Python tests and 18 WebAssembly tests, all passing.
 * Layered integrity: `info` (structure only), `check` (every payload CRC32C),
   `verify` (exact pixels against a reference).
 * Measured evidence: large-image stress (up to a 15360×8640 photo and
@@ -160,14 +177,15 @@ are recorded in `docs/BENCHMARKS.md`, `docs/P5_REPORT.md` and
 
 ## What is explicitly not here yet
 
-GPU-ready
-payloads, and a frozen v1.0 format. (HTTP Range streaming **is** here — see
+A frozen v1.0 format. (HTTP Range streaming **is** here — see
 `docs/P10_HTTP_REPORT.md` — and so is the **WebAssembly decoder**, see
 `docs/P11_WASM_REPORT.md`; the module does not encode and does not edit yet.
 **Layers and masks are here too**, see `docs/P12_LAYERS_REPORT.md`, but the
 **editing engine refuses a layered file** rather than dropping its layers,
 and the HTTP and WebAssembly readers read the **base layer** without
-compositing.)
+compositing. **GPU payloads are here too**, see `docs/P13_GPU_REPORT.md`, but
+the payload is **lossy**, it is never used by an exact operation, and the
+**editing engine refuses a file that carries one**.)
 The research-only
 pipelines that were **not** promoted — the other CARC models and the other
 hybrids — keep their ids in `0x80..=0xFF`: they cannot reach a file, and the
@@ -397,6 +415,29 @@ straight alpha with integer arithmetic, and a one-layer file composites to
 rather than dropping its layers. See `docs/VPNG_SPEC_0_4.md` and
 `docs/P12_LAYERS_REPORT.md`.
 
+### GPU payloads
+
+```bash
+vpng encode picture.vpng --gpu
+vpng gpu-info picture.vpng --json
+vpng gpu-decode picture.vpng gpu.png --x 0 --y 0 --width 1024 --height 1024
+```
+
+A container may carry an **optional GPU payload** beside every tile's
+lossless payload: the same picture in the block format a GPU samples as a
+texture — **BC1** colour blocks and, when the format has an alpha channel,
+**BC4** alpha blocks.
+
+The GPU payload is a **sibling** of the lossless payload, never a
+replacement for it. A **directory entry may never name a GPU block codec**,
+nothing exact reads the GPU payload, and the file reports the size of
+**both** payloads so the trade is visible rather than implied. The GPU
+payload is **lossy by construction**; the exact pixels come from the
+lossless payload, and `vpng decode` and `vpng verify` still read that one.
+The editing engine **refuses** a file that carries a GPU table rather than
+copying a stale payload or dropping the feature. See
+`docs/VPNG_SPEC_0_5.md` and `docs/P13_GPU_REPORT.md`.
+
 ## Layout
 
 ```text
@@ -404,7 +445,9 @@ crates/vpng-core        formats, geometry, checked arithmetic, errors, limits
 crates/vpng-container   header, directory, layer table, checksums, canonical digest
 crates/vpng-codecs      TileCodec trait + Raw, Palette, Run-length, Predictor (ids 0-3)
                          + the promoted LZ77, predictor+dictionary and context-entropy codecs (ids 4-6)
+                         + the GPU block codec ids (BC1 = 7, BC4 = 8), which never name a directory entry
                          + the remaining research-only CARC / hybrid pipelines under src/experimental/
+crates/vpng-gpu          the GPU block codecs: BC1 colour blocks and BC4 alpha blocks
 crates/vpng-tiling      TileGrid and region-to-tile mapping
 crates/vpng-image       PNG and raw conversion: the one place that knows what a PNG means
 crates/vpng-encoder     canonical pixels -> .vpng bytes

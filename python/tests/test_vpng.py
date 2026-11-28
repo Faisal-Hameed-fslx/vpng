@@ -512,11 +512,114 @@ class TestLayers(VpngTestCase):
             vpng.encode_layers(self.layered, [])
 
 
+class TestGpu(VpngTestCase):
+    """The optional, lossy GPU payload table."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.pixels = gradient(64, 48, 4)
+        self.gpu = self.dir / "gpu.vpng"
+
+    def encode(self, **kwargs: object) -> object:
+        return vpng.encode_pixels(
+            self.pixels, 64, 48, self.gpu, format="rgba8", tile_size=32, **kwargs
+        )
+
+    def test_a_gpu_file_is_a_v0_5_file(self) -> None:
+        result = self.encode(gpu=True)
+        self.assertEqual(result.format_minor, 5)
+        self.assertEqual(vpng.info(self.gpu)["minor"], 5)
+        self.assertGreater(vpng.info(self.gpu)["gpu_table_length"], 0)
+
+    def test_the_default_encode_is_still_a_v0_1_file(self) -> None:
+        result = self.encode()
+        self.assertEqual(result.format_minor, 1)
+        self.assertEqual(vpng.info(self.gpu)["gpu_table_length"], 0)
+
+    def test_the_lossless_pixels_still_round_trip_exactly(self) -> None:
+        self.encode(gpu=True)
+        self.assertEqual(vpng.decode_to_bytes(self.gpu), self.pixels)
+
+    def test_the_gpu_payload_is_lossy(self) -> None:
+        self.encode(gpu=True)
+        gpu_pixels = vpng.decode_gpu_to_bytes(self.gpu, 0, 0, 64, 48)
+        self.assertEqual(len(gpu_pixels), 64 * 48 * 4)
+        self.assertNotEqual(gpu_pixels, self.pixels)
+
+    def test_the_gpu_table_is_listed(self) -> None:
+        self.encode(gpu=True)
+        info = vpng.gpu_info(self.gpu)
+        self.assertEqual(info["record_count"], 4)
+        self.assertGreater(info["gpu_payload_bytes"], 0)
+        self.assertEqual(info["tiles_with_colour"], 4)
+        self.assertEqual(info["tiles_with_alpha"], 4)
+        self.assertTrue(info["lossy"])
+
+    def test_a_file_without_a_gpu_table_says_so(self) -> None:
+        self.encode()
+        with self.assertRaises(vpng.UnsupportedFeatureError):
+            vpng.gpu_info(self.gpu)
+
+    def test_the_editing_engine_refuses_a_gpu_file(self) -> None:
+        self.encode(gpu=True)
+        with self.assertRaises(vpng.UnsupportedFeatureError):
+            vpng.open_document(self.gpu)
+
+    def test_a_sixteen_bit_picture_is_refused(self) -> None:
+        pixels = gradient(16, 16, 8)
+        with self.assertRaises(vpng.InvalidArgumentError):
+            vpng.encode_pixels(pixels, 16, 16, self.gpu, format="rgba16", gpu=True)
+
+    def test_a_layered_gpu_file_carries_the_masks_coverage_alone(self) -> None:
+        # A **mask** layer's colour channels carry no meaning: its coverage is
+        # its alpha channel. Its GPU payload therefore holds the coverage
+        # alone, in BC4 blocks, with no colour blocks at all.
+        base = gradient(64, 48, 4)
+        coverage = bytes([0x80] * (32 * 16 * 4))
+        layered = self.dir / "layered-gpu.vpng"
+
+        result = vpng.encode_layers(
+            layered,
+            [
+                {"name": "base", "pixels": base, "width": 64, "height": 48},
+                {
+                    "name": "m",
+                    "kind": "mask",
+                    "pixels": coverage,
+                    "width": 32,
+                    "height": 16,
+                    "x": 8,
+                    "y": 8,
+                },
+            ],
+            format="rgba8",
+            tile_size=32,
+            gpu=True,
+        )
+        self.assertEqual(result.format_minor, 5)
+
+        info = vpng.gpu_info(layered)
+        records = info["records"]
+        self.assertGreaterEqual(len(records), 2)
+
+        # Every base-layer tile carries BC1 colour and BC4 alpha.
+        for record in records[:-1]:
+            self.assertEqual(record["colour_codec"], 7)
+            self.assertEqual(record["alpha_codec"], 8)
+
+        # The mask layer's tile carries the coverage alone.
+        self.assertEqual(records[-1]["colour_codec"], 0)
+        self.assertEqual(records[-1]["alpha_codec"], 8)
+
+        # And the file is still exact.
+        self.assertEqual(vpng.decode_layer_to_bytes(layered, 0), base)
+
+
 class TestModuleSurface(VpngTestCase):
     """The names the package promises."""
 
     def test_the_constants_are_present(self) -> None:
-        self.assertEqual(vpng.FORMAT_VERSION, "0.4")
+        self.assertEqual(vpng.FORMAT_VERSION, "0.5")
         self.assertEqual(vpng.DEFAULT_TILE_SIZE, 256)
         self.assertIn("rgba8", vpng.FORMATS)
         self.assertIn(6, vpng.CODECS)

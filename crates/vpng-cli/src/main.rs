@@ -8,6 +8,7 @@
 #![forbid(unsafe_code)]
 
 mod args;
+mod gpu;
 mod json;
 mod layers;
 mod size;
@@ -60,6 +61,8 @@ fn run(argv: &[String]) -> Result<()> {
         "decode-layer" => layers::cmd_decode_layer(&args),
         "composite" => layers::cmd_composite(&args),
         "layers" => layers::cmd_layers(&args),
+        "gpu-info" => gpu::cmd_gpu_info(&args),
+        "gpu-decode" => gpu::cmd_gpu_decode(&args),
         "info" => cmd_info(&args),
         "check" => cmd_check(&args),
         "verify" => cmd_verify(&args),
@@ -210,6 +213,12 @@ fn cmd_encode(args: &Args) -> Result<()> {
         ));
     }
 
+    // The GPU payload is opt-in. Without it the encoder writes the v0.1 bytes
+    // it has always written.
+    if args.has("gpu") {
+        options = options.with_gpu();
+    }
+
     // The streaming writer is used rather than the batch encoder, so the
     // finished file is never held in memory: it is written straight to
     // disk, through a temporary name that is renamed over the target.
@@ -234,7 +243,7 @@ fn cmd_encode(args: &Args) -> Result<()> {
     let digest = to_hex(&canonical_digest(&image));
     if args.has("json") {
         println!(
-            "{{\"output\":\"{}\",\"input\":\"{}\",\"width\":{},\"height\":{},\"format\":\"{}\",\"tiles\":{},\"levels\":{},\"file_size\":{},\"ratio\":{:.4},\"bpp\":{:.4},\"workers\":{},\"pyramid\":{},\"adaptive\":{},\"canonical_sha256\":\"{}\"}}",
+            "{{\"output\":\"{}\",\"input\":\"{}\",\"width\":{},\"height\":{},\"format\":\"{}\",\"tiles\":{},\"levels\":{},\"file_size\":{},\"ratio\":{:.4},\"bpp\":{:.4},\"workers\":{},\"pyramid\":{},\"adaptive\":{},\"gpu\":{},\"gpu_payload_bytes\":{},\"gpu_table_bytes\":{},\"canonical_sha256\":\"{}\"}}",
             escape(&output),
             escape(&input),
             image.width(),
@@ -248,6 +257,9 @@ fn cmd_encode(args: &Args) -> Result<()> {
             workers,
             options.pyramid,
             options.adaptive,
+            options.gpu,
+            report.gpu_payload_bytes,
+            report.gpu_table_bytes,
             digest
         );
     } else {
@@ -271,6 +283,12 @@ fn cmd_encode(args: &Args) -> Result<()> {
         }
         if options.adaptive {
             println!("  adaptive partition: the tile sizes follow the picture's content");
+        }
+        if options.gpu {
+            println!(
+                "  GPU payloads: {} bytes in {} bytes of table (LOSSY; the lossless payload is unchanged)",
+                report.gpu_payload_bytes, report.gpu_table_bytes
+            );
         }
         println!("  canonical sha256 {digest}");
     }
@@ -337,7 +355,7 @@ fn cmd_info(args: &Args) -> Result<()> {
 
     if args.has("json") {
         println!(
-            "{{\"file\":\"{}\",\"file_size\":{},\"major\":{},\"minor\":{},\"width\":{},\"height\":{},\"color_model\":\"{}\",\"bits_per_channel\":{},\"channels\":{},\"default_codec\":{},\"tile_count\":{},\"tile_width\":{},\"tile_height\":{},\"level_count\":{},\"layer_count\":{},\"layer_table_offset\":{},\"layer_table_length\":{},\"directory_offset\":{},\"declared_file_size\":{},\"feature_flags\":{},\"payloads_verified\":false}}",
+            "{{\"file\":\"{}\",\"file_size\":{},\"major\":{},\"minor\":{},\"width\":{},\"height\":{},\"color_model\":\"{}\",\"bits_per_channel\":{},\"channels\":{},\"default_codec\":{},\"tile_count\":{},\"tile_width\":{},\"tile_height\":{},\"level_count\":{},\"layer_count\":{},\"layer_table_offset\":{},\"layer_table_length\":{},\"gpu_table_offset\":{},\"gpu_table_length\":{},\"directory_offset\":{},\"declared_file_size\":{},\"feature_flags\":{},\"payloads_verified\":false}}",
             escape(&input),
             bytes.len(),
             header.major,
@@ -355,6 +373,8 @@ fn cmd_info(args: &Args) -> Result<()> {
             document.layer_count(),
             header.layer_table_offset,
             header.layer_table_length,
+            header.gpu_table_offset,
+            header.gpu_table_length,
             header.directory_offset,
             header.declared_file_size,
             header.feature_flags
@@ -399,6 +419,12 @@ fn cmd_info(args: &Args) -> Result<()> {
     println!("directory offset  {}", header.directory_offset);
     println!("declared size     {}", header.declared_file_size);
     println!("feature flags     {:#010x}", header.feature_flags);
+    if header.has_gpu() {
+        println!(
+            "GPU table         {} bytes at offset {}",
+            header.gpu_table_length, header.gpu_table_offset
+        );
+    }
     if header.has_layers() {
         println!(
             "layer table       {} bytes at offset {}",
@@ -737,6 +763,8 @@ COMMANDS:
     decode-layer <input.vpng> <out>    Decode one layer's own pixels (--layer)
     composite <input.vpng> <output>    Blend every layer into one image
     layers <input.vpng>                List the layers of a file
+    gpu-info <input.vpng>              List the file's GPU payload table
+    gpu-decode <input.vpng> <out>      Decode a rectangle of the GPU payload (LOSSY)
     info <input.vpng>                  Print header and directory summary
     check <input.vpng>                 Verify container integrity (every payload CRC32C)
     verify <original> <candidate.vpng> Fail unless pixels round-trip exactly
@@ -767,6 +795,12 @@ OPTIONS:
                            pixel exactly once.
     --adaptive-threshold <n>  The busyness threshold of the adaptive planner
                            (default 8: a mean neighbour difference of 8/255)
+    --gpu                 Give every tile an optional LOSSY GPU payload beside
+                           its lossless one (a v0.5 file). The lossless
+                           payload is untouched and still reconstructs the
+                           image exactly. With `encode-layers`, a mask
+                           layer's tile carries its coverage alone (BC4),
+                           because a mask's colour channels carry no meaning.
     --level <n>            Which level to decode (default 0, the original)
     --layer <n>            Which layer to decode (default 0, the base layer)
     --manifest <path>      The layer manifest `encode-layers` reads (JSON)

@@ -21,6 +21,7 @@ import argparse
 import json
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -56,21 +57,33 @@ def cache_index(cache_root: Path) -> dict[str, Path]:
 
 
 def measure(command: list[str]) -> dict:
-    """Run a command and report its peak working set and its time."""
+    """Run a command and report its peak working set and its time.
+
+    The child's output goes to **temporary files**, not to pipes. A pipe
+    holds only a few kilobytes before the writer blocks, and this driver
+    never reads the pipes while the child runs — so a command that prints
+    more than a pipe's worth would wait for a reader that never comes. A
+    file never blocks, and the output is still read back afterwards.
+    """
     started = time.perf_counter()
-    process = subprocess.Popen(
-        command, stdout=subprocess.PIPE, stderr=subprocess.PIPE
-    )
-    peak = 0
-    while process.poll() is None:
+    with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
+        process = subprocess.Popen(command, stdout=out, stderr=err)
+        peak = 0
+        while process.poll() is None:
+            peak = max(peak, peak_working_set(process.pid))
+        process.wait()
         peak = max(peak, peak_working_set(process.pid))
-    process.wait()
-    peak = max(peak, peak_working_set(process.pid))
+        out.seek(0)
+        err.seek(0)
+        stdout = out.read().decode("utf-8", "replace")
+        stderr = err.read().decode("utf-8", "replace")
     return {
         "command": command[1:],
         "exit": process.returncode,
         "peak_working_set_bytes": peak,
         "elapsed_ms": round((time.perf_counter() - started) * 1000),
+        "stdout_bytes": len(stdout),
+        "stderr_tail": stderr[-500:],
     }
 
 

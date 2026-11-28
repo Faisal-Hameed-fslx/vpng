@@ -43,6 +43,17 @@ pub const CODEC_LZ77: u8 = 4;
 pub const CODEC_PREDICTOR_DICTIONARY: u8 = 5;
 /// Codec id 6: context-adaptive entropy coding. Stable from format v0.3.
 pub const CODEC_CONTEXT_ENTROPY: u8 = 6;
+/// Codec id 7: BC1 GPU colour blocks. Stable from format v0.5.
+///
+/// This id belongs to the **GPU payload table**, never to a directory entry.
+/// BC1 is lossy, and a tile's lossless payload is always lossless, so a
+/// directory entry that names this id is malformed.
+pub const CODEC_BC1: u8 = 7;
+/// Codec id 8: BC4 GPU single-channel blocks. Stable from format v0.5.
+///
+/// Like [`CODEC_BC1`], this id belongs to the GPU payload table and never to
+/// a directory entry.
+pub const CODEC_BC4: u8 = 8;
 
 /// Sentinel for "let the encoder pick the smallest codec for each tile".
 ///
@@ -75,6 +86,23 @@ pub const CODEC_IDS_V0_2: &[u8] = &[CODEC_RAW, CODEC_PALETTE, CODEC_RLE, CODEC_P
 ///
 /// This is every implemented codec.
 pub const CODEC_IDS_V0_3: &[u8] = IMPLEMENTED_CODEC_IDS;
+
+/// The **GPU block** codecs, which may only appear in a GPU payload table.
+///
+/// They are not in [`IMPLEMENTED_CODEC_IDS`], because that list is the set a
+/// cost-based selector chooses from and the set a directory entry may name,
+/// and a GPU block codec is neither: it is lossy, and a tile's lossless
+/// payload is not.
+pub const GPU_BLOCK_CODEC_IDS: &[u8] = &[CODEC_BC1, CODEC_BC4];
+
+/// Whether a codec id is a GPU block codec.
+///
+/// A GPU block codec may only be named by a GPU payload table's record. A
+/// directory entry that names one is refused with
+/// [`vpng_core::ErrorKind::UnsupportedFeature`].
+pub fn is_gpu_block_codec(id: u8) -> bool {
+    GPU_BLOCK_CODEC_IDS.contains(&id)
+}
 
 /// Whether a codec id was promoted in format v0.3.
 pub fn is_v0_3_codec(id: u8) -> bool {
@@ -181,6 +209,8 @@ pub fn codec_name(id: u8) -> Option<&'static str> {
         CODEC_LZ77 => "lz77",
         CODEC_PREDICTOR_DICTIONARY => "predictor+dictionary",
         CODEC_CONTEXT_ENTROPY => "context-entropy",
+        CODEC_BC1 => "bc1",
+        CODEC_BC4 => "bc4",
         _ => return None,
     })
 }

@@ -24,6 +24,7 @@ with a status, the question, the decision, the rationale, and the consequences.
 | [0016](ADR-0016-http-range-source.md) | the byte-source abstraction, the HTTP Range client, and what a non-conforming server gets | accepted |
 | [0017](ADR-0017-wasm-abi.md) | the WebAssembly package's shape and its raw `extern "C"` ABI | accepted |
 | [0018](ADR-0018-layers-and-masks.md) | layers, masks, the layer table's place, and the v0.4 version rule | accepted |
+| [0019](ADR-0019-gpu-payloads.md) | the optional GPU payload, its sibling status, and the v0.5 version rule | accepted |
 
 ### Still open
 

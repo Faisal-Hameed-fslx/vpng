@@ -5,6 +5,7 @@ members = [
     "crates/vpng-container",
     "crates/vpng-cache",
     "crates/vpng-codecs",
+    "crates/vpng-gpu",
     "crates/vpng-tiling",
     "crates/vpng-image",
     "crates/vpng-encoder",
@@ -36,6 +37,7 @@ vpng-core = { path = "crates/vpng-core" }
 vpng-container = { path = "crates/vpng-container" }
 vpng-cache = { path = "crates/vpng-cache" }
 vpng-codecs = { path = "crates/vpng-codecs" }
+vpng-gpu = { path = "crates/vpng-gpu" }
 vpng-tiling = { path = "crates/vpng-tiling" }
 vpng-image = { path = "crates/vpng-image" }
 vpng-encoder = { path = "crates/vpng-encoder" }

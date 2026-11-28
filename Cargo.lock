@@ -570,6 +570,7 @@ dependencies = [
  "vpng-container",
  "vpng-core",
  "vpng-encoder",
+ "vpng-gpu",
  "vpng-tiling",
 ]
 
@@ -595,6 +596,8 @@ dependencies = [
  "vpng-codecs",
  "vpng-container",
  "vpng-core",
+ "vpng-decoder",
+ "vpng-gpu",
  "vpng-tiling",
 ]
 
@@ -610,6 +613,14 @@ dependencies = [
  "vpng-encoder",
  "vpng-testkit",
  "vpng-tiling",
+]
+
+[[package]]
+name = "vpng-gpu"
+version = "0.1.0"
+dependencies = [
+ "vpng-codecs",
+ "vpng-core",
 ]
 
 [[package]]

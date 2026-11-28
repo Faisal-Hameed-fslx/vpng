@@ -95,6 +95,7 @@ no generated glue and no build-time code generation.
 | `vpng_open(ptr, len)` | `i32` | Open a whole container; returns a handle. |
 | `vpng_open_parts(hptr, hlen, dptr, dlen, size)` | `i32` | Open from the header and the directory. |
 | `vpng_open_parts_with_layers(hptr, hlen, dptr, dlen, tptr, tlen, size)` | `i32` | Open from the header, the directory and the layer table. |
+| `vpng_open_parts_with_tables(hptr, hlen, dptr, dlen, lptr, llen, gptr, glen, size)` | `i32` | Open from the header, the directory, the layer table and the GPU table. |
 | `vpng_close(handle)` | `i32` | Close a document. |
 | `vpng_width(handle)` | `i32` | The image's width. |
 | `vpng_height(handle)` | `i32` | The image's height. |
@@ -126,6 +127,16 @@ no generated glue and no build-time code generation.
 | `vpng_layer_is_mask(handle, layer)` | `i32` | Whether a layer is a mask. |
 | `vpng_layer_length(handle, layer)` | `i64` | The bytes a layer's own pixels take. |
 | `vpng_decode_layer(handle, layer, out)` | `i64` | Decode one layer's own pixels. |
+| `vpng_gpu_has_table(handle)` | `i32` | Whether the container carries a GPU table. |
+| `vpng_gpu_record_count(handle)` | `i32` | The number of GPU records. |
+| `vpng_gpu_payload_bytes(handle)` | `i64` | The GPU payloads' total size. |
+| `vpng_gpu_payload_offset(handle, index)` | `i64` | One GPU payload's offset in the file. |
+| `vpng_gpu_payload_length(handle, index)` | `i64` | One GPU payload's length. |
+| `vpng_gpu_colour_codec(handle, index)` | `i32` | One record's colour codec id: 7 is BC1. |
+| `vpng_gpu_alpha_codec(handle, index)` | `i32` | One record's alpha codec id: 8 is BC4. |
+| `vpng_gpu_region_length(h, x, y, w, h)` | `i64` | The bytes a GPU region takes. |
+| `vpng_decode_gpu_region(h, x, y, w, h, out)` | `i64` | Decode a region of the **lossy** GPU payload. |
+| `vpng_decode_gpu_payload(h, index, ptr, len, out)` | `i64` | Decode one fetched GPU payload. |
 
 The conventions:
 
@@ -201,6 +212,51 @@ const image = vpng.openPartsWithLayers(
 The module **does not composite**: it reports the layers and decodes them,
 and the caller blends them if it wants a flattened picture.
 
+## The GPU payload
+
+A container written for format v0.5 may carry an **optional GPU payload**:
+beside every tile's lossless payload, a second, explicitly named, **lossy**
+payload in the block format a GPU samples as a texture — BC1 colour blocks
+and, when the format has an alpha channel, BC4 alpha blocks.
+
+The GPU payload is a **sibling** of the lossless payload, never a
+replacement for it. Nothing exact reads it.
+
+```js
+console.log(vpng.gpuHasTable(image));            // true
+console.log(vpng.gpuRecordCount(image));          // the tile count
+console.log(vpng.gpuPayloadBytes(image));         // the payloads' total size
+console.log(vpng.gpuColourCodec(image, 0));       // 7 — BC1
+console.log(vpng.gpuAlphaCodec(image, 0));        // 8 — BC4, or 0 for none
+
+// The GPU payload decodes to RGBA8, and it is LOSSY.
+const pixels = vpng.decodeGpuRegion(image, 0, 0, 1024, 1024);
+```
+
+The **parts** path needs the GPU table as well, because the directory alone
+does not say which block codec a tile's GPU payload uses:
+
+```js
+const view = new DataView(containerBytes.buffer);
+const headerSize = view.getUint32(12, true);         // 72 for a v0.5 file
+const directoryOffset = Number(view.getBigUint64(32, true));
+const tileCount = view.getUint32(28, true);
+const tableOffset = view.getUint32(64, true);
+const tableLength = view.getUint32(68, true);
+
+const image = vpng.openPartsWithTables(
+  containerBytes.subarray(0, headerSize),
+  containerBytes.subarray(directoryOffset, directoryOffset + tileCount * 40 + 4),
+  null,
+  containerBytes.subarray(tableOffset, tableOffset + tableLength),
+  containerBytes.length,
+);
+```
+
+A container with no GPU table says so: `gpuHasTable` returns `false` and
+`decodeGpuRegion` **refuses** with the unsupported-feature code, rather than
+returning an empty picture.
+
 ## What this package does not do
 
 * It does not **encode**. The module is a decoder. Encoding in a browser is
@@ -212,3 +268,5 @@ and the caller blends them if it wants a flattened picture.
 * It does not change the **format**. Not one byte of the header or the
   directory entry moved: the v0.4 layer table uses header bytes that were
   reserved, and the layer index uses directory flag bits that were reserved.
+* It does not use the **GPU payload** for anything exact. The GPU payload is
+  lossy by construction; the exact pixels come from the lossless payload.

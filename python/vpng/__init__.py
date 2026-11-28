@@ -77,6 +77,9 @@ __all__ = [
     "decode_layer_to_bytes",
     "composite",
     "composite_to_bytes",
+    "gpu_info",
+    "decode_gpu",
+    "decode_gpu_to_bytes",
     "verify",
     "check",
     "info",
@@ -180,6 +183,7 @@ def encode(
     codec_set: str = "stable",
     tile_size: int = DEFAULT_TILE_SIZE,
     workers: int = 1,
+    gpu: bool = False,
 ) -> EncodeResult:
     """Encode a picture into a ``.vpng`` file.
 
@@ -192,6 +196,11 @@ def encode(
     ``codec_set`` is ``"stable"`` (the four original codecs) or ``"extended"``
     (which adds the three codecs promoted in format v0.3). The worker count
     changes the speed, never the bytes.
+
+    ``gpu`` gives every tile an optional **lossy** GPU payload beside its
+    lossless one, which makes the file a **v0.5** file. The GPU payload is
+    never used to reconstruct the image: the lossless payload is untouched and
+    still reconstructs it exactly.
     """
     return _vpng.encode(
         os.fspath(input),
@@ -204,6 +213,7 @@ def encode(
         codec_set=codec_set,
         tile_size=tile_size,
         workers=workers,
+        gpu=gpu,
     )
 
 
@@ -222,6 +232,7 @@ def encode_pixels(
     codec_set: str = "stable",
     tile_size: int = DEFAULT_TILE_SIZE,
     workers: int = 1,
+    gpu: bool = False,
 ) -> EncodeResult:
     """Encode canonical pixel bytes straight into a ``.vpng`` file.
 
@@ -231,6 +242,9 @@ def encode_pixels(
 
     This is the entry point for a caller that already has the pixels in
     memory; it never writes an intermediate PNG.
+
+    ``gpu`` gives every tile an optional **lossy** GPU payload beside its
+    lossless one, which makes the file a **v0.5** file.
     """
     return _vpng.encode_pixels(
         bytes(pixels),
@@ -246,6 +260,7 @@ def encode_pixels(
         codec_set=codec_set,
         tile_size=tile_size,
         workers=workers,
+        gpu=gpu,
     )
 
 
@@ -256,6 +271,7 @@ def encode_layers(
     format: str = "rgba8",
     tile_size: int = DEFAULT_TILE_SIZE,
     workers: int = 1,
+    gpu: bool = False,
 ) -> EncodeResult:
     """Encode several layers into a ``.vpng`` file.
 
@@ -286,6 +302,13 @@ def encode_layers(
                  "width": 32, "height": 16, "x": 8, "y": 8},
             ],
         )
+
+    With ``gpu=True`` the file also carries an **optional, explicitly named,
+    lossy** GPU payload beside every tile's lossless payload, and the file
+    becomes a **v0.5** file. The lossless payload is untouched and still
+    reconstructs the image exactly. A **mask** layer's tile carries its
+    coverage alone, in BC4 blocks, because a mask's colour channels carry no
+    meaning.
     """
     return _vpng.encode_layers(
         os.fspath(output),
@@ -293,6 +316,7 @@ def encode_layers(
         format=format,
         tile_size=tile_size,
         workers=workers,
+        gpu=gpu,
     )
 
 
@@ -383,6 +407,61 @@ def composite(source: str | os.PathLike[str], output: str | os.PathLike[str]) ->
 def composite_to_bytes(source: str | os.PathLike[str]) -> bytes:
     """Composite every layer into canonical pixel bytes."""
     return _vpng.composite_to_bytes(os.fspath(source))
+
+
+def gpu_info(source: str | os.PathLike[str]) -> dict[str, Any]:
+    """Read a ``.vpng`` file's GPU payload table.
+
+    The GPU payload is the file's optional, explicitly named, **lossy**
+    sibling of a tile's lossless payload: the same picture in the block
+    format a GPU samples as a texture. It is never used to reconstruct the
+    image, and the lossless payload is untouched.
+
+    A file written before format v0.5 carries no GPU table, and this raises
+    :class:`UnsupportedFeatureError` for one.
+
+    The returned mapping holds the table's own totals and, under
+    ``"records"``, one entry per tile in the directory's canonical order.
+    Each record names its tile, its payload's offset and length in the file,
+    and the block codecs it uses: ``"colour_codec"`` is 7 for BC1 and 0 for
+    none, and ``"alpha_codec"`` is 8 for BC4 and 0 for none. A **mask**
+    layer's tile carries its coverage alone, so its colour codec is 0.
+    """
+    return _vpng.gpu_info(os.fspath(source))
+
+
+def decode_gpu(
+    source: str | os.PathLike[str],
+    output: str | os.PathLike[str],
+    x: int,
+    y: int,
+    width: int,
+    height: int,
+) -> DecodeResult:
+    """Decode a rectangle of a ``.vpng`` file's **GPU payload** into a picture.
+
+    The result is **lossy** — BC1 and BC4 throw information away — and it is
+    always **RGBA8**, whatever the file's own format is: a GPU payload is
+    always eight-bit, and a texture is always RGBA.
+
+    The exact pixels are :func:`decode_region`; nothing exact reads this path.
+    """
+    return _vpng.decode_gpu(os.fspath(source), os.fspath(output), x, y, width, height)
+
+
+def decode_gpu_to_bytes(
+    source: str | os.PathLike[str],
+    x: int,
+    y: int,
+    width: int,
+    height: int,
+) -> bytes:
+    """Decode a rectangle of a ``.vpng`` file's **GPU payload** into canonical
+    RGBA8 pixel bytes.
+
+    The bytes are **lossy** and always four channels.
+    """
+    return _vpng.decode_gpu_to_bytes(os.fspath(source), x, y, width, height)
 
 
 def verify(input: str | os.PathLike[str], source: str | os.PathLike[str]) -> bool:

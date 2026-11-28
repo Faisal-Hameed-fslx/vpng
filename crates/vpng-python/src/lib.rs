@@ -43,7 +43,7 @@ use crate::image::{format_name, parse_format};
 use crate::report::{CheckResult, DecodeResult, EncodeResult};
 
 /// The version of the VPNG container this extension writes.
-const FORMAT_VERSION: &str = "0.4";
+const FORMAT_VERSION: &str = "0.5";
 
 /// The default tile edge.
 const DEFAULT_TILE_SIZE: u32 = vpng_encoder::DEFAULT_TILE_SIZE;
@@ -106,7 +106,8 @@ fn _register_exceptions(mapping: &Bound<'_, pyo3::types::PyDict>) -> PyResult<()
     codec = "auto",
     codec_set = "stable",
     tile_size = DEFAULT_TILE_SIZE,
-    workers = 1
+    workers = 1,
+    gpu = false
 ))]
 fn encode(
     input: PathBuf,
@@ -119,6 +120,7 @@ fn encode(
     codec_set: &str,
     tile_size: u32,
     workers: usize,
+    gpu: bool,
 ) -> PyResult<EncodeResult> {
     let limits = Limits::default();
     let image = to_py_result(read_picture(&input, &limits))?;
@@ -133,6 +135,7 @@ fn encode(
         codec_set,
         tile_size,
         workers,
+        gpu,
     )
 }
 
@@ -160,7 +163,8 @@ fn encode(
     codec = "auto",
     codec_set = "stable",
     tile_size = DEFAULT_TILE_SIZE,
-    workers = 1
+    workers = 1,
+    gpu = false
 ))]
 fn encode_pixels(
     pixels: Vec<u8>,
@@ -176,6 +180,7 @@ fn encode_pixels(
     codec_set: &str,
     tile_size: u32,
     workers: usize,
+    gpu: bool,
 ) -> PyResult<EncodeResult> {
     let limits = Limits::default();
     let format: PixelFormat = to_py_result(parse_format(format))?;
@@ -193,6 +198,7 @@ fn encode_pixels(
         codec_set,
         tile_size,
         workers,
+        gpu,
     )
 }
 
@@ -212,6 +218,7 @@ fn encode_image(
     codec_set: &str,
     tile_size: u32,
     workers: usize,
+    gpu: bool,
 ) -> PyResult<EncodeResult> {
     if !lossless {
         return Err(pyo3::exceptions::PyValueError::new_err(
@@ -258,6 +265,9 @@ fn encode_image(
     if pyramid_levels > 0 {
         options = options.with_pyramid(pyramid_levels);
     }
+    if gpu {
+        options = options.with_gpu();
+    }
 
     let parallel = ParallelOptions::default().with_workers(workers);
     let report = to_py_result(encode_to_file(image, &options, &parallel, &output))?;
@@ -287,6 +297,13 @@ fn encode_image(
 /// * `mask` — the index of the layer that masks this one (default: none).
 ///
 /// The base layer is layer 0: it must cover the whole canvas.
+///
+/// With `gpu=True` the file also carries an **optional, explicitly named,
+/// lossy** GPU payload beside every tile's lossless payload, and the file
+/// becomes a **v0.5** file. The lossless payload is untouched and still
+/// reconstructs the image exactly. A **mask** layer's tile carries its
+/// coverage alone, in BC4 blocks, because a mask's colour channels carry no
+/// meaning.
 #[pyfunction]
 #[pyo3(signature = (
     output,
@@ -294,7 +311,8 @@ fn encode_image(
     *,
     format = "rgba8",
     tile_size = DEFAULT_TILE_SIZE,
-    workers = 1
+    workers = 1,
+    gpu = false
 ))]
 fn encode_layers(
     output: PathBuf,
@@ -302,6 +320,7 @@ fn encode_layers(
     format: &str,
     tile_size: u32,
     workers: usize,
+    gpu: bool,
 ) -> PyResult<EncodeResult> {
     if tile_size == 0 {
         return Err(pyo3::exceptions::PyValueError::new_err(
@@ -393,9 +412,12 @@ fn encode_layers(
         inputs.push(layer);
     }
 
-    let options = EncodeOptions::default()
+    let mut options = EncodeOptions::default()
         .with_tile_size(tile_size, tile_size)
         .with_limits(limits);
+    if gpu {
+        options = options.with_gpu();
+    }
     let parallel = ParallelOptions::default().with_workers(workers);
     let report = to_py_result(vpng_encoder::stream::encode_layers_to_file(
         &inputs, &options, &parallel, &output,
@@ -648,6 +670,131 @@ fn composite_to_bytes<'py>(source: PathBuf, py: Python<'py>) -> PyResult<Bound<'
     Ok(PyBytes::new(py, image.data()))
 }
 
+/// Read a `.vpng` file's GPU payload table.
+///
+/// The GPU payload is the file's optional, explicitly named, **lossy**
+/// sibling of a tile's lossless payload: the same picture in the block
+/// format a GPU samples as a texture. It is never used to reconstruct the
+/// image, and the lossless payload is untouched.
+///
+/// A file written before format v0.5 carries no GPU table, and this raises
+/// `UnsupportedFeatureError` for one.
+#[pyfunction]
+fn gpu_info<'py>(source: PathBuf, py: Python<'py>) -> PyResult<Bound<'py, pyo3::types::PyDict>> {
+    let limits = Limits::default();
+    let bytes = io_result(std::fs::read(&source))?;
+    let document = to_py_result(Document::parse(&bytes, &limits))?;
+    let table = match document.gpu_table() {
+        Some(table) => table,
+        None => {
+            return Err(to_py_result::<()>(Err(Error::unsupported(format!(
+                "this file carries no GPU payload table; its minor version is {}",
+                document.header().minor
+            ))))
+            .unwrap_err())
+        }
+    };
+
+    let total_payload: u64 = table
+        .records
+        .iter()
+        .map(|record| u64::from(record.payload_length))
+        .sum();
+    let with_colour = table
+        .records
+        .iter()
+        .filter(|record| record.colour_codec != 0)
+        .count();
+    let with_alpha = table
+        .records
+        .iter()
+        .filter(|record| record.alpha_codec != 0)
+        .count();
+
+    let info = pyo3::types::PyDict::new(py);
+    info.set_item("file", source.to_string_lossy().into_owned())?;
+    info.set_item("minor", document.header().minor)?;
+    info.set_item("record_count", table.len())?;
+    info.set_item("gpu_table_offset", document.header().gpu_table_offset)?;
+    info.set_item("gpu_table_length", document.header().gpu_table_length)?;
+    info.set_item("gpu_payload_bytes", total_payload)?;
+    info.set_item("tiles_with_colour", with_colour)?;
+    info.set_item("tiles_with_alpha", with_alpha)?;
+    info.set_item("lossy", true)?;
+
+    // The records themselves, in the same canonical order as the directory:
+    // a reader — or a caller — can see which tile carries which block codec.
+    let records = pyo3::types::PyList::empty(py);
+    for (index, record) in table.records.iter().enumerate() {
+        let entry = pyo3::types::PyDict::new(py);
+        entry.set_item("tile", index)?;
+        entry.set_item("offset", record.payload_offset)?;
+        entry.set_item("length", record.payload_length)?;
+        entry.set_item("colour_codec", record.colour_codec)?;
+        entry.set_item("alpha_codec", record.alpha_codec)?;
+        entry.set_item("present", record.is_present())?;
+        records.append(entry)?;
+    }
+    info.set_item("records", records)?;
+    Ok(info)
+}
+
+/// Decode a rectangle of a `.vpng` file's **GPU payload** into a picture.
+///
+/// The result is **lossy** — BC1 and BC4 throw information away — and it is
+/// always **RGBA8**, whatever the file's own format is: a GPU payload is
+/// always eight-bit, and a texture is always RGBA.
+///
+/// The exact pixels are `decode_region()`; nothing exact reads this path.
+#[pyfunction]
+#[pyo3(signature = (source, output, x, y, width, height))]
+fn decode_gpu(
+    source: PathBuf,
+    output: PathBuf,
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+) -> PyResult<DecodeResult> {
+    let limits = Limits::default();
+    let bytes = io_result(std::fs::read(&source))?;
+    let document = to_py_result(Document::parse(&bytes, &limits))?;
+    let rect = to_py_result(Rect::new(x, y, width, height))?;
+    let image = to_py_result(document.decode_gpu_region(rect, &limits))?;
+    to_py_result(write_picture(&output, &image))?;
+    let written_bytes = io_result(std::fs::metadata(&output).map(|m| m.len()))?;
+    Ok(DecodeResult::new(
+        image.width(),
+        image.height(),
+        format_name(image.format()),
+        bytes.len() as u64,
+        0,
+        written_bytes,
+    ))
+}
+
+/// Decode a rectangle of a `.vpng` file's **GPU payload** into canonical
+/// RGBA8 pixel bytes.
+///
+/// The bytes are **lossy** and always four channels.
+#[pyfunction]
+#[pyo3(signature = (source, x, y, width, height))]
+fn decode_gpu_to_bytes<'py>(
+    source: PathBuf,
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+    py: Python<'py>,
+) -> PyResult<Bound<'py, PyBytes>> {
+    let limits = Limits::default();
+    let bytes = io_result(std::fs::read(&source))?;
+    let document = to_py_result(Document::parse(&bytes, &limits))?;
+    let rect = to_py_result(Rect::new(x, y, width, height))?;
+    let image = to_py_result(document.decode_gpu_region(rect, &limits))?;
+    Ok(PyBytes::new(py, image.data()))
+}
+
 /// Compare a `.vpng` file with the picture it was made from.
 ///
 /// Returns `True` when the decoded pixels are **exactly** the original's, and
@@ -706,6 +853,11 @@ fn info<'py>(source: PathBuf, py: Python<'py>) -> PyResult<Bound<'py, pyo3::type
     info.set_item("typical_tile_height", typical_height)?;
     info.set_item("uniform_tiles", document.partition().is_uniform_size())?;
     info.set_item("level_count", document.level_count())?;
+    info.set_item("layer_count", document.layer_count())?;
+    info.set_item("layer_table_offset", header.layer_table_offset)?;
+    info.set_item("layer_table_length", header.layer_table_length)?;
+    info.set_item("gpu_table_offset", header.gpu_table_offset)?;
+    info.set_item("gpu_table_length", header.gpu_table_length)?;
     info.set_item("directory_offset", header.directory_offset)?;
     info.set_item("declared_file_size", header.declared_file_size)?;
     info.set_item("feature_flags", header.feature_flags)?;
@@ -773,6 +925,9 @@ fn _vpng(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(decode_layer_to_bytes, module)?)?;
     module.add_function(wrap_pyfunction!(composite, module)?)?;
     module.add_function(wrap_pyfunction!(composite_to_bytes, module)?)?;
+    module.add_function(wrap_pyfunction!(gpu_info, module)?)?;
+    module.add_function(wrap_pyfunction!(decode_gpu, module)?)?;
+    module.add_function(wrap_pyfunction!(decode_gpu_to_bytes, module)?)?;
     module.add_function(wrap_pyfunction!(verify, module)?)?;
     module.add_function(wrap_pyfunction!(check, module)?)?;
     module.add_function(wrap_pyfunction!(info, module)?)?;

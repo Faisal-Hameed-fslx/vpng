@@ -44,15 +44,21 @@ pub(crate) struct LayerSource<'a> {
     inner: &'a dyn PixelSource,
     origin_x: u32,
     origin_y: u32,
+    coverage_only: bool,
 }
 
 impl<'a> LayerSource<'a> {
     /// Read a layer that sits at `origin` on the canvas.
-    pub(crate) fn new(inner: &'a dyn PixelSource, origin: Rect) -> Self {
+    ///
+    /// A **mask** layer's pixels are a coverage rather than a picture, so the
+    /// source says so: its GPU payload holds the coverage alone, in BC4
+    /// blocks, with no colour blocks at all.
+    pub(crate) fn new(inner: &'a dyn PixelSource, origin: Rect, kind: LayerKind) -> Self {
         LayerSource {
             inner,
             origin_x: origin.x,
             origin_y: origin.y,
+            coverage_only: kind.is_mask(),
         }
     }
 }
@@ -78,6 +84,10 @@ impl PixelSource for LayerSource<'_> {
             rect.height,
         )?;
         self.inner.tile_pixels(index, &local, out)
+    }
+
+    fn is_coverage_only(&self) -> bool {
+        self.coverage_only
     }
 }
 
@@ -335,7 +345,7 @@ pub fn encode_layers_parallel(
     let mut levels: Vec<EncodedLevel> = Vec::with_capacity(planned.len());
     let sources: Vec<LayerSource<'_>> = planned
         .iter()
-        .map(|layer| LayerSource::new(layer.source, layer.rect))
+        .map(|layer| LayerSource::new(layer.source, layer.rect, layer.kind))
         .collect();
     for (index, layer) in planned.iter().enumerate() {
         let payloads = crate::parallel::encode_all_tiles(

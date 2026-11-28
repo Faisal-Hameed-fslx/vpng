@@ -1581,6 +1581,268 @@ def check_layers() -> None:
     )
 
 
+def check_gpu() -> None:
+    """Check the GPU-payload report against the raw data."""
+    report = (REPO / "docs/P13_GPU_REPORT.md").read_text(encoding="utf-8")
+    report = report.replace("−", "-")
+    raw = json.loads(
+        (REPO / "benchmarks/p13_gpu_results.json").read_text(encoding="utf-8")
+    )
+    memory = json.loads(
+        (REPO / "benchmarks/p13_gpu_memory_results.json").read_text(encoding="utf-8")
+    )
+    manifest = json.loads((REPO / "benchmarks/corpus_manifest.json").read_text(encoding="utf-8"))
+    summary = raw["summary"]
+    overall = summary["overall"]
+    records = raw["records"]
+
+    def quoted(value, fmt) -> None:
+        text = format(value, fmt)
+        check(text in report, f"the GPU report does not contain the figure {text!r}")
+
+    # ---- the corpus is the corpus ---------------------------------------------
+    manifest_ids = {entry["id"] for entry in manifest["images"]}
+    result_ids = {record["id"] for record in records}
+    check(
+        manifest_ids == result_ids,
+        "the manifest and the GPU measurement file do not hold the same images",
+    )
+    check(
+        len(records) == manifest["total_images"],
+        f"the GPU measurement file holds {len(records)} images, the manifest says "
+        f"{manifest['total_images']}",
+    )
+    quoted(len(records), ",")
+    quoted(len(records), "d")
+
+    # ---- the plain files are the published baseline's -------------------------
+    check(
+        overall["plain_bytes"] == 453_767_460,
+        f"the plain total is {overall['plain_bytes']}, the published stable baseline is "
+        "453767460",
+    )
+    quoted(overall["plain_bytes"], ",")
+    check(
+        overall["canonical_bytes"] == 1_450_363_330,
+        f"the canonical total is {overall['canonical_bytes']}, the published one is "
+        "1450363330",
+    )
+    quoted(overall["canonical_bytes"], ",")
+
+    # ---- the headline counts ---------------------------------------------------
+    check(
+        overall["lossless_exact"] == len(records),
+        f"{len(records) - overall['lossless_exact']} GPU files do not reconstruct the "
+        "picture exactly",
+    )
+    check(overall["check_failures"] == 0, f"{overall['check_failures']} files failed the check")
+    check(
+        overall["bytes_add_up_failures"] == 0,
+        f"{overall['bytes_add_up_failures']} files do not add up",
+    )
+    check(
+        overall["minor_versions"] == [5],
+        f"the GPU files report minor versions {overall['minor_versions']}, not [5]",
+    )
+    quoted(overall["lossless_exact"], "d")
+    quoted(overall["check_failures"], "d")
+    quoted(overall["bytes_add_up_failures"], "d")
+
+    # The GPU payload is lossy — but a picture BC1 happens to represent
+    # exactly comes back identical, and that is measured rather than assumed.
+    check(
+        overall["gpu_payload_differs"] == 746,
+        f"{overall['gpu_payload_differs']} GPU payloads differ from the original, not 746",
+    )
+    identical = len(records) - overall["gpu_payload_differs"]
+    check(
+        identical == 4,
+        f"{identical} GPU payloads are identical to the original, not 4",
+    )
+    quoted(overall["gpu_payload_differs"], "d")
+    quoted(identical, "d")
+    for record in records:
+        if record["fidelity"]["max_absolute_error"] == 0:
+            check(
+                record["fidelity"]["psnr_db"] is None,
+                f"{record['id']}: an identical payload has a PSNR",
+            )
+
+    # ---- the GPU payload's cost -------------------------------------------------
+    quoted(overall["gpu_file_bytes"], ",")
+    quoted(overall["gpu_payload_bytes"], ",")
+    quoted(overall["gpu_table_bytes"], ",")
+    quoted(overall["gpu_overhead_bytes"], ",")
+    quoted(overall["gpu_overhead_ratio"] * 100, ".6f")
+    quoted(overall["gpu_payload_ratio_to_canonical"] * 100, ".6f")
+
+    # The file must be the plain file plus the GPU table, the GPU payloads and
+    # the eight bytes the header grew by.
+    for record in records:
+        check(
+            record["bytes_add_up"],
+            f"{record['id']}: the file does not add up",
+        )
+        check(
+            record["gpu_file_bytes"] > record["plain_bytes"],
+            f"{record['id']}: the GPU file is not bigger than the plain one",
+        )
+        check(
+            record["gpu_minor"] == 5,
+            f"{record['id']}: the GPU file is minor version {record['gpu_minor']}",
+        )
+        check(
+            record["gpu_record_count"] == record["gpu_tile_count"],
+            f"{record['id']}: the GPU table has {record['gpu_record_count']} records for "
+            f"{record['gpu_tile_count']} tiles",
+        )
+
+    # ---- the per-category table -------------------------------------------------
+    for name, row in summary["by_category"].items():
+        quoted(row["count"], "d")
+        quoted(row["plain_bytes"], ",")
+        quoted(row["gpu_file_bytes"], ",")
+        quoted(row["gpu_payload_bytes"], ",")
+        quoted(row["gpu_table_bytes"], ",")
+        quoted(row["gpu_overhead_bytes"], ",")
+        quoted(row["gpu_overhead_ratio"] * 100, ".6f")
+        quoted(row["gpu_payload_ratio_to_canonical"] * 100, ".6f")
+        quoted(row["fidelity"]["psnr_db"], ".4f")
+        check(
+            row["lossless_exact"] == row["count"],
+            f"{name}: not every GPU file reconstructs the picture exactly",
+        )
+        check(row["check_failures"] == 0, f"{name}: {row['check_failures']} files failed")
+        check(
+            row["bytes_add_up_failures"] == 0,
+            f"{name}: {row['bytes_add_up_failures']} files do not add up",
+        )
+
+    # The category totals must add up to the overall total.
+    check(
+        sum(row["plain_bytes"] for row in summary["by_category"].values())
+        == overall["plain_bytes"],
+        "the per-category plain totals do not add up to the overall total",
+    )
+    check(
+        sum(row["gpu_file_bytes"] for row in summary["by_category"].values())
+        == overall["gpu_file_bytes"],
+        "the per-category GPU totals do not add up to the overall total",
+    )
+
+    # ---- the fidelity ------------------------------------------------------------
+    quoted(overall["fidelity"]["psnr_db"], ".4f")
+    quoted(overall["fidelity"]["mean_absolute_error"], ".6f")
+    quoted(overall["fidelity"]["max_absolute_error"], "d")
+    quoted(overall["psnr_distribution"]["median"], ".4f")
+    quoted(overall["psnr_distribution"]["min"], ".4f")
+    quoted(overall["psnr_distribution"]["max"], ".4f")
+    quoted(overall["max_error_distribution"]["median"], ".0f")
+    quoted(overall["max_error_distribution"]["max"], ".0f")
+
+    # ---- the encode time ----------------------------------------------------------
+    quoted(summary["encode_ms"]["plain"]["median"], ".0f")
+    quoted(summary["encode_ms"]["gpu"]["median"], ".0f")
+    quoted(summary["encode_ms"]["gpu_over_plain"], ".4f")
+
+    # ---- the 16K photograph ---------------------------------------------------------
+    baseline = next(
+        (record for record in records if record["id"] == "user-photo-15360x8640"), None
+    )
+    check(baseline is not None, "the 16K photograph is not in the GPU measurement")
+    if baseline is not None:
+        check(
+            baseline["plain_bytes"] == 124_197_035,
+            f"the 16K plain file is {baseline['plain_bytes']} bytes, the published "
+            "baseline is 124197035",
+        )
+        check(
+            baseline["plain_sha256"]
+            == "d029a7ebc1e0347cb3399ab6f9de9653da5853c96b38d95cddc3b8bb45a14dbf",
+            "the 16K plain digest is not the published P5.2 baseline digest",
+        )
+        quoted(baseline["plain_bytes"], ",")
+        quoted(baseline["gpu_file_bytes"], ",")
+        quoted(baseline["gpu_payload_bytes"], ",")
+        quoted(baseline["plain_sha256"], "")
+        quoted(baseline["gpu_file_sha256"], "")
+        quoted(baseline["fidelity"]["psnr_db"], ".4f")
+
+    # ---- the memory figures ----------------------------------------------------------
+    check(
+        memory["image"]["canonical_bytes"] == 398_131_200,
+        f"the memory case's image is {memory['image']['canonical_bytes']} canonical "
+        "bytes, not 398131200",
+    )
+    quoted(memory["image"]["canonical_bytes"], ",")
+    quoted(memory["files"]["plain_bytes"], ",")
+    quoted(memory["files"]["gpu_bytes"], ",")
+    quoted(memory["files"]["gpu_payload_bytes"], ",")
+    quoted(memory["files"]["gpu_table_bytes"], ",")
+    quoted(memory["files"]["gpu_overhead_bytes"], ",")
+
+    # The file must be the plain file plus the GPU table, the GPU payloads
+    # and the eight bytes the header grew by.
+    check(
+        memory["files"]["gpu_overhead_bytes"]
+        == memory["files"]["gpu_payload_bytes"]
+        + memory["files"]["gpu_table_bytes"]
+        + 8,
+        "the memory case's file does not add up",
+    )
+    check(
+        memory["files"]["gpu_payload_bytes"]
+        == baseline["gpu_payload_bytes"]
+        if baseline is not None
+        else False,
+        "the memory case's GPU payload is not the corpus measurement's",
+    )
+    for name, case in memory["cases"].items():
+        quoted(case["peak_working_set_bytes"], ",")
+        check(
+            case["exit"] == 0,
+            f"the memory case {name} exited with {case['exit']}",
+        )
+    check(
+        "included" in memory["scope"] and "excluded" in memory["scope"],
+        "the memory scope does not say what is included and what is excluded",
+    )
+
+    # ---- the size ceiling --------------------------------------------------------------
+    check(
+        overall["gpu_under_ceiling"] <= overall["plain_under_ceiling"],
+        "the GPU payload pushed a file over the 10 MB ceiling that was under it",
+    )
+    quoted(overall["plain_under_ceiling"], "d")
+    quoted(overall["gpu_under_ceiling"], "d")
+
+    # ---- the report says what it does and does not claim ---------------------------------
+    check(
+        "included" in report.lower() and "excluded" in report.lower(),
+        "the GPU report does not state the measurement scope",
+    )
+    check(
+        "PASS" in report and "BLOCKED" in report,
+        "the GPU report does not use the gate vocabulary",
+    )
+    check(
+        "lossy" in report.lower(),
+        "the GPU report does not state that the GPU payload is lossy",
+    )
+    check(
+        "12" in report and "Q12" in report,
+        "the GPU report does not answer all twelve questions",
+    )
+    check(
+        "refuses" in report.lower(),
+        "the GPU report does not say that the editing engine refuses a GPU file",
+    )
+    check(
+        "BC1" in report and "BC4" in report,
+        "the GPU report does not name the block codecs it measures",
+    )
+
+
 def main() -> int:
     raw = json.loads((REPO / "benchmarks/p3_5_raw_results.json").read_text(encoding="utf-8"))
     report = (REPO / "docs/P3_5_COMPRESSION_RESEARCH_REPORT.md").read_text(encoding="utf-8")
@@ -1838,6 +2100,9 @@ def main() -> int:
 
     # ---- Phase C: layers and masks ------------------------------------------------
     check_layers()
+
+    # ---- Phase C: the GPU payload ---------------------------------------------------
+    check_gpu()
 
     if problems:
         print(f"{len(problems)} problem(s):")

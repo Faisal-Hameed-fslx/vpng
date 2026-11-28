@@ -47,6 +47,26 @@ fn refuse_layers(header: &Header) -> Result<()> {
     Ok(())
 }
 
+/// Refuse a file that carries a GPU payload table.
+///
+/// The editing engine rewrites the tiles it changes and copies the payloads
+/// of the tiles it does not. A GPU payload is a **lossy sibling** of a tile's
+/// lossless payload, and the engine has no way to rebuild it from the
+/// rewritten pixels — the BC1 and BC4 encoders are lossy, so the result
+/// would not be the same bytes. Copying the old GPU payload would leave a
+/// stale picture in the file; dropping it would quietly remove a feature.
+///
+/// The engine refuses the file instead. The lossless payload — the one that
+/// reconstructs the image exactly — is untouched by this rule.
+fn refuse_gpu(header: &Header) -> Result<()> {
+    if header.has_gpu() {
+        return Err(Error::unsupported(
+            "the editing engine cannot rewrite a file that carries a GPU table: the GPU payload is lossy and cannot be rebuilt exactly",
+        ));
+    }
+    Ok(())
+}
+
 /// Everything an editing session needs to know about a file's tiles.
 pub trait TileSource {
     /// The file's pixel format.
@@ -121,9 +141,14 @@ impl<'a> DocumentSource<'a> {
     /// A file that carries a layer table is refused: the editing engine
     /// edits one layer, and a commit to a layered file would have to drop
     /// the other layers.
+    ///
+    /// A file that carries a GPU payload table is refused too: the GPU
+    /// payload is lossy and cannot be rebuilt exactly from the edited
+    /// pixels.
     pub fn parse(bytes: &'a [u8], limits: &Limits) -> Result<Self> {
         let document = Document::parse(bytes, limits)?;
         refuse_layers(document.header())?;
+        refuse_gpu(document.header())?;
         Ok(DocumentSource { document })
     }
 
@@ -204,9 +229,14 @@ impl FileSource {
     /// A file that carries a layer table is refused: the editing engine
     /// edits one layer, and a commit to a layered file would have to drop
     /// the other layers.
+    ///
+    /// A file that carries a GPU payload table is refused too: the GPU
+    /// payload is lossy and cannot be rebuilt exactly from the edited
+    /// pixels.
     pub fn open(path: &Path, limits: &Limits) -> Result<Self> {
         let reader = TileReader::open(path, limits)?;
         refuse_layers(reader.meta().header())?;
+        refuse_gpu(reader.meta().header())?;
         Ok(FileSource { reader })
     }
 

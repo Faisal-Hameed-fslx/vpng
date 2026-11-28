@@ -180,6 +180,7 @@ def encode(
     codec_set: str = "stable",
     tile_size: int = DEFAULT_TILE_SIZE,
     workers: int = 1,
+    gpu: bool = False,
 ) -> EncodeResult: ...
 def encode_pixels(
     pixels: bytes,
@@ -196,6 +197,7 @@ def encode_pixels(
     codec_set: str = "stable",
     tile_size: int = DEFAULT_TILE_SIZE,
     workers: int = 1,
+    gpu: bool = False,
 ) -> EncodeResult: ...
 def encode_layers(
     output: str | os.PathLike[str],
@@ -204,6 +206,7 @@ def encode_layers(
     format: str = "rgba8",
     tile_size: int = DEFAULT_TILE_SIZE,
     workers: int = 1,
+    gpu: bool = False,
 ) -> EncodeResult: ...
 def decode(
     source: str | os.PathLike[str],
@@ -229,6 +232,22 @@ def decode_layer(
 def decode_layer_to_bytes(source: str | os.PathLike[str], layer: int) -> bytes: ...
 def composite(source: str | os.PathLike[str], output: str | os.PathLike[str]) -> DecodeResult: ...
 def composite_to_bytes(source: str | os.PathLike[str]) -> bytes: ...
+def gpu_info(source: str | os.PathLike[str]) -> dict[str, Any]: ...
+def decode_gpu(
+    source: str | os.PathLike[str],
+    output: str | os.PathLike[str],
+    x: int,
+    y: int,
+    width: int,
+    height: int,
+) -> DecodeResult: ...
+def decode_gpu_to_bytes(
+    source: str | os.PathLike[str],
+    x: int,
+    y: int,
+    width: int,
+    height: int,
+) -> bytes: ...
 def verify(input: str | os.PathLike[str], source: str | os.PathLike[str]) -> bool: ...
 def check(source: str | os.PathLike[str]) -> CheckResult: ...
 def info(source: str | os.PathLike[str]) -> dict[str, Any]: ...

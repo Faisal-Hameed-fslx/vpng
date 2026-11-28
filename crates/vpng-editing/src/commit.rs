@@ -291,6 +291,12 @@ pub(crate) fn write_document<S: TileSource>(
         // table. A file that has layers is refused before it gets here.
         layer_table_offset: 0,
         layer_table_length: 0,
+        // The editing engine never writes a GPU payload table either: the
+        // GPU payload is lossy and cannot be rebuilt exactly from the
+        // rewritten pixels. A file that has one is refused before it gets
+        // here.
+        gpu_table_offset: 0,
+        gpu_table_length: 0,
     };
     let header_bytes = header.to_bytes()?;
 

@@ -1,0 +1,135 @@
+{
+ "schema": "vpng.gpu.memory.v1",
+ "generated_by": "benchmarks/gpu/measure_gpu_memory.py",
+ "image": {
+  "id": "user-photo-15360x8640",
+  "width": 15360,
+  "height": 8640,
+  "pixel_format": "rgb8",
+  "canonical_bytes": 398131200,
+  "tile_size": 256
+ },
+ "files": {
+  "plain_bytes": 124197035,
+  "gpu_bytes": 190593067,
+  "gpu_overhead_bytes": 66396032,
+  "gpu_payload_bytes": 66355200,
+  "gpu_table_bytes": 40824
+ },
+ "scope": {
+  "measured": "the process's peak working set, from the operating system's GetProcessMemoryInfo, taken while the process was alive",
+  "included": "the operating system, the loader, the binary's text and data, the Rust heap, every buffer the command allocated, and the file it read",
+  "excluded": "nothing: the figure is the whole process",
+  "not_a_target": "this is a process figure for a whole-picture operation; it is not the 64 MB localized-editing target, which is a different operation"
+ },
+ "cases": {
+  "encode_plain": {
+   "command": [
+    "encode",
+    "E:\\VPNG\\corpus-data\\cache\\7479807165b6411a-1006677.raw",
+    "E:\\VPNG\\benchmarks\\work\\gpu-memory\\plain.vpng",
+    "--input-format",
+    "raw",
+    "--width",
+    "15360",
+    "--height",
+    "8640",
+    "--format",
+    "rgb8",
+    "--tile-size",
+    "256",
+    "--workers",
+    "4"
+   ],
+   "exit": 0,
+   "peak_working_set_bytes": 410099712,
+   "elapsed_ms": 26372,
+   "stdout_bytes": 280,
+   "stderr_tail": ""
+  },
+  "encode_gpu": {
+   "command": [
+    "encode",
+    "E:\\VPNG\\corpus-data\\cache\\7479807165b6411a-1006677.raw",
+    "E:\\VPNG\\benchmarks\\work\\gpu-memory\\gpu.vpng",
+    "--input-format",
+    "raw",
+    "--width",
+    "15360",
+    "--height",
+    "8640",
+    "--format",
+    "rgb8",
+    "--tile-size",
+    "256",
+    "--workers",
+    "4",
+    "--gpu"
+   ],
+   "exit": 0,
+   "peak_working_set_bytes": 411205632,
+   "elapsed_ms": 27290,
+   "stdout_bytes": 376,
+   "stderr_tail": ""
+  },
+  "gpu_info": {
+   "command": [
+    "gpu-info",
+    "E:\\VPNG\\benchmarks\\work\\gpu-memory\\gpu.vpng",
+    "--json"
+   ],
+   "exit": 0,
+   "peak_working_set_bytes": 195555328,
+   "elapsed_ms": 169,
+   "stdout_bytes": 193801,
+   "stderr_tail": ""
+  },
+  "check": {
+   "command": [
+    "check",
+    "E:\\VPNG\\benchmarks\\work\\gpu-memory\\gpu.vpng"
+   ],
+   "exit": 0,
+   "peak_working_set_bytes": 194916352,
+   "elapsed_ms": 122,
+   "stdout_bytes": 109,
+   "stderr_tail": ""
+  },
+  "decode_exact": {
+   "command": [
+    "decode",
+    "E:\\VPNG\\benchmarks\\work\\gpu-memory\\gpu.vpng",
+    "E:\\VPNG\\benchmarks\\work\\gpu-memory\\exact.raw",
+    "--format",
+    "raw"
+   ],
+   "exit": 0,
+   "peak_working_set_bytes": 594096128,
+   "elapsed_ms": 21086,
+   "stdout_bytes": 138,
+   "stderr_tail": ""
+  },
+  "decode_gpu": {
+   "command": [
+    "gpu-decode",
+    "E:\\VPNG\\benchmarks\\work\\gpu-memory\\gpu.vpng",
+    "E:\\VPNG\\benchmarks\\work\\gpu-memory\\gpu.raw",
+    "--format",
+    "raw",
+    "--x",
+    "0",
+    "--y",
+    "0",
+    "--width",
+    "15360",
+    "--height",
+    "8640"
+   ],
+   "exit": 0,
+   "peak_working_set_bytes": 726097920,
+   "elapsed_ms": 1608,
+   "stdout_bytes": 175,
+   "stderr_tail": ""
+  }
+ }
+}

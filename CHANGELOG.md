@@ -8,6 +8,99 @@ separately as major.minor in the header.
 
 ### Added
 
+* **GPU payloads, measured over the whole 750-image corpus (Phase C, P15).**
+  A container may now carry, beside every tile's lossless payload, an
+  **optional GPU payload**: the same picture in the block format a GPU
+  samples as a texture — **BC1** colour blocks and, when the format has an
+  alpha channel, **BC4** alpha blocks. The format revision is **v0.4 →
+  v0.5**.
+  * **The lossless payload stays normative.** The directory entry's
+    `codec_id` **never** names a GPU block codec — a reader refuses such an
+    entry with `UnsupportedFeature` — and the decoder's exact paths
+    (`decode_region`, `decode_layer`, `composite`, `verify`, `check`)
+    **never** read the GPU payload. It is read only by an explicitly named
+    API that says it is **lossy** in its own name and in its output. So a
+    file that carries a GPU payload still reconstructs **exactly**, through
+    its lossless payload, as if the GPU payload were not there.
+  * **The header grows to 72 bytes, through the field that exists for it.**
+    Bytes 64..68 hold the **GPU table's offset** and bytes 68..72 its
+    **length**. The header checksum rule becomes "bytes `0..52` and
+    `56..header_size`", which for a 64-byte header is exactly the rule
+    v0.1–v0.4 use — so **no existing file's checksum changes and no existing
+    byte moves**. The 40-byte directory entry keeps its exact layout.
+  * **The GPU table sits with the other tables** — after the directory, and
+    after the layer table when there is one. Its header is 24 bytes (record
+    count, descriptor-array length, a CRC32C over that array, one reserved
+    word, the total GPU payload bytes) and it is followed by **one 20-byte
+    record per tile**, in the same canonical `(layer, level, y, x)` order as
+    the directory. Each record carries the payload's **absolute offset**, its
+    length, the codec ids of its colour and alpha blocks, and a CRC32C of
+    the payload — so an HTTP Range reader fetches exactly one tile's GPU
+    payload and nothing else.
+  * **The payloads are interleaved** with the lossless payloads, so the
+    encoder never holds the whole GPU region in memory: about 66 MB for the
+    16K photograph, more than the project's 64 MB budget.
+  * **A mask layer's tile carries BC4 coverage alone**, with no colour
+    blocks, because a mask's colour channels carry no meaning.
+  * **The measurements are exact.** Over the **whole 750-image corpus**: the
+    **lossless** payload of every one of the **750** GPU files reconstructs
+    the picture byte for byte; **0** files failed `vpng check`; **0** files
+    fail the byte accounting; and every one of them reports minor version
+    **5**. The default path's total is the published stable baseline's
+    **453,767,460** bytes, to the byte.
+  * **The cost is stated, and it is large.** The GPU payloads take
+    **251,513,192** bytes and the tables **196,880**, so the GPU payload
+    costs **251,716,072** bytes over the corpus — **55.472482%** of the
+    plain total, and **17.341392%** of the canonical pixels. The
+    **unfavourable rows are kept**: a **UI screenshot** spends
+    **274.325592%** of its bytes on the GPU payload, a **pixel-art** image
+    **265.562284%**, and the corpus's worst single case — a 25,977-byte
+    screenshot — spends **1451.79197%**. The payload also pushes **three**
+    files over the 10 MB ceiling that were under it before.
+  * **The fidelity is measured, not assumed.** Over **1,998,310,392**
+    channel samples the pooled PSNR is **37.2237 dB**, the mean absolute
+    error is **1.456997** levels of 255 and the worst single difference is
+    **170**. The per-image PSNR runs from **13.3972 dB** — a pure-noise
+    image, the worst possible input for a block codec — to **57.4420 dB**.
+    Four pixel-art images come back from the GPU payload **byte for byte
+    identical** to the original, because BC1 reproduces a flat colour and a
+    hard black-and-white block exactly.
+  * **The editing engine refuses a GPU file, and says so.** It cannot
+    rebuild a lossy payload from the rewritten pixels, and copying the old
+    one would leave a stale picture in the file, so it returns
+    `UnsupportedFeature` with a message that says "GPU table".
+  * **New surfaces.** The command line gained `vpng gpu-info` and
+    `vpng gpu-decode` (and `vpng encode --gpu`); the Python package gained
+    the `gpu` keyword on `encode`/`encode_pixels` plus `gpu_info`,
+    `decode_gpu` and `decode_gpu_to_bytes`; and the WebAssembly module
+    gained eleven exports (`vpng_gpu_has_table`,
+    `vpng_gpu_record_count`, `vpng_gpu_payload_bytes`,
+    `vpng_gpu_payload_offset`, `vpng_gpu_payload_length`,
+    `vpng_gpu_colour_codec`, `vpng_gpu_alpha_codec`,
+    `vpng_gpu_region_length`, `vpng_decode_gpu_region`,
+    `vpng_decode_gpu_payload`) plus `vpng_open_parts_with_tables`.
+  * **A layered file may carry a GPU payload too.** `vpng encode-layers
+    --gpu` and the Python `encode_layers(..., gpu=True)` both write one, and
+    a **mask** layer's tile carries its coverage alone, in BC4 blocks, with
+    no colour blocks at all — because a mask's colour channels carry no
+    meaning. The Python `gpu_info` now returns the table's **records**, so a
+    caller can see which tile carries which block codec.
+  * **New documentation and evidence.** `docs/VPNG_SPEC_0_5.md` (the
+    normative specification), `docs/P13_GPU_REPORT.md` (the report, with the
+    twelve questions and the acceptance gates),
+    `docs/decisions/ADR-0019-gpu-payloads.md` (the decision record),
+    `benchmarks/p13_gpu_results.json` and
+    `benchmarks/p13_gpu_memory_results.json` (the raw data), the measurement
+    drivers `benchmarks/corpus/run_gpu_corpus.py` and
+    `benchmarks/gpu/measure_gpu_memory.py`, and `check_gpu()` in
+    `benchmarks/verify_reports.py`, which binds every quoted figure to the
+    raw data. Sixteen tests in `crates/vpng-testkit/tests/v5_formats.rs`,
+    six in `crates/vpng-encoder/tests/gpu_identity.rs`, twenty-one unit
+    tests in the new `crates/vpng-gpu`, three in
+    `crates/vpng-editing/tests/v5_gpu.rs` and nine in
+    `crates/vpng-cli/tests/v5_features.rs` pin the format's rules, the
+    encoder's, the block codecs', the refusal's and the command line's.
+
 * **Layers and masks, measured over the whole 750-image corpus (Phase C,
   P14).** A container may now hold several **named tile grids** — layers —
   in one file, each with its own rectangle on the canvas, its own opacity

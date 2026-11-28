@@ -262,6 +262,9 @@ pub fn cmd_encode_layers(args: &Args) -> Result<()> {
     if let Some(set) = args.get("codec-set") {
         options = options.with_codec_set(crate::parse_codec_set(set)?);
     }
+    if args.has("gpu") {
+        options = options.with_gpu();
+    }
 
     let mut layers: Vec<LayerInput<'_>> = Vec::with_capacity(images.len());
     for (index, (entry, image)) in images.iter().enumerate() {
@@ -323,13 +326,16 @@ pub fn cmd_encode_layers(args: &Args) -> Result<()> {
 
     if args.has("json") {
         println!(
-            "{{\"output\":\"{}\",\"manifest\":\"{}\",\"layers\":{},\"tiles\":{},\"file_size\":{},\"workers\":{}}}",
+            "{{\"output\":\"{}\",\"manifest\":\"{}\",\"layers\":{},\"tiles\":{},\"file_size\":{},\"workers\":{},\"gpu\":{},\"gpu_payload_bytes\":{},\"gpu_table_bytes\":{}}}",
             escape(&output),
             escape(&manifest_path),
             report.layer_count,
             report.tile_count,
             report.file_size,
             workers,
+            options.gpu,
+            report.gpu_payload_bytes,
+            report.gpu_table_bytes,
         );
     } else {
         println!("encoded {manifest_path} -> {output}");
@@ -337,6 +343,12 @@ pub fn cmd_encode_layers(args: &Args) -> Result<()> {
             "  {} layer(s), {} tiles, {} bytes, {workers} workers",
             report.layer_count, report.tile_count, report.file_size,
         );
+        if options.gpu {
+            println!(
+                "  GPU payloads: {} B, GPU table: {} B (LOSSY)",
+                report.gpu_payload_bytes, report.gpu_table_bytes,
+            );
+        }
         for (index, layer) in report.layer_uncompressed_bytes.iter().enumerate() {
             let compressed = report
                 .layer_compressed_bytes

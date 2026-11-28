@@ -7,7 +7,7 @@
 
 use std::cell::RefCell;
 
-use vpng_core::{Error, Limits, Rect, Result};
+use vpng_core::{Error, Limits, PixelFormat, Rect, Result};
 use vpng_decoder::decode_tile_payload;
 use vpng_source::{ContainerMeta, MemorySource, RangeReader};
 
@@ -103,6 +103,76 @@ impl Document {
             )),
         }
     }
+
+    /// Decode one rectangle of the **GPU payload**.
+    ///
+    /// The result is **lossy** — BC1 and BC4 throw information away — and it
+    /// is always **RGBA8**, whatever the container's own format is: a GPU
+    /// payload is always eight-bit, and a texture is always RGBA.
+    ///
+    /// Nothing exact reads this path.
+    pub fn decode_gpu_region(&mut self, rect: Rect, limits: &Limits) -> Result<Vec<u8>> {
+        match self {
+            Document::Whole(reader) => {
+                let level = reader.meta().base_level().clone();
+                let image = vpng_decoder::decode_region_from(
+                    &level,
+                    PixelFormat::rgba8(),
+                    rect,
+                    limits,
+                    |index| reader.decode_gpu_tile(index),
+                )?;
+                Ok(image.into_data())
+            }
+            Document::Parts(_) => Err(Error::unsupported(
+                "this document holds only the header and the directory, so the caller must \
+                 supply the GPU payloads; fetch them one at a time with `decode_gpu_payload`",
+            )),
+        }
+    }
+
+    /// Decode one tile's **GPU payload** the caller has fetched.
+    ///
+    /// The payload's CRC32C is verified against the GPU table before the
+    /// block decoder sees it, and the decoded length is checked against the
+    /// tile's geometry. The result is **lossy** and is always RGBA8.
+    pub fn decode_gpu_payload(
+        &self,
+        index: usize,
+        payload: &[u8],
+        limits: &Limits,
+    ) -> Result<Vec<u8>> {
+        let record = *self
+            .meta()
+            .gpu_table()
+            .and_then(|table| table.get(index))
+            .ok_or_else(|| Error::unsupported("this file carries no GPU payload table"))?;
+        let entry = *self
+            .meta()
+            .tile_entry(index)
+            .ok_or_else(|| Error::invalid(format!("tile index {index} is out of range")))?;
+        if payload.len() != record.payload_length as usize {
+            return Err(Error::corrupt(format!(
+                "tile {index} GPU payload is {} bytes, the table says {}",
+                payload.len(),
+                record.payload_length
+            )));
+        }
+        let checksum = vpng_container::crc32c(payload);
+        if checksum != record.payload_checksum {
+            return Err(Error::corrupt(format!(
+                "the GPU payload of tile {index} has checksum {checksum:#010x}, the table says {:#010x}",
+                record.payload_checksum
+            )));
+        }
+        let _ = limits;
+        vpng_decoder::gpu::decode_gpu_tile(
+            &record,
+            u32::from(entry.width),
+            u32::from(entry.height),
+            payload,
+        )
+    }
 }
 
 /// The open documents, addressed by handle.
@@ -134,7 +204,9 @@ impl Registry {
     /// what the payload ranges are checked against.
     ///
     /// A container with a layer table needs the table as well, so this
-    /// refuses one: use [`Registry::open_parts_with_layers`].
+    /// refuses one: use [`Registry::open_parts_with_layers`]. A container
+    /// with a GPU payload table needs that table too, so this refuses one:
+    /// use [`Registry::open_parts_with_tables`].
     pub fn open_parts(&self, header: &[u8], directory: &[u8], file_size: u64) -> Result<i32> {
         self.open_parts_with_layers(header, directory, None, file_size)
     }
@@ -150,10 +222,26 @@ impl Registry {
         layer_table: Option<&[u8]>,
         file_size: u64,
     ) -> Result<i32> {
+        self.open_parts_with_tables(header, directory, layer_table, None, file_size)
+    }
+
+    /// Open a container from its header, its directory and its tables.
+    ///
+    /// `layer_table` and `gpu_table` are the tables' bytes, or `None` for a
+    /// container that has none.
+    pub fn open_parts_with_tables(
+        &self,
+        header: &[u8],
+        directory: &[u8],
+        layer_table: Option<&[u8]>,
+        gpu_table: Option<&[u8]>,
+        file_size: u64,
+    ) -> Result<i32> {
         let meta = ContainerMeta::parse(
             header,
             directory,
             layer_table,
+            gpu_table,
             file_size,
             &Limits::default(),
         )?;

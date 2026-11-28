@@ -265,6 +265,37 @@ pub extern "C" fn vpng_open_parts_with_layers(
     layer_table_len: u32,
     file_size: u32,
 ) -> i32 {
+    vpng_open_parts_with_tables(
+        header_ptr,
+        header_len,
+        directory_ptr,
+        directory_len,
+        layer_table_ptr,
+        layer_table_len,
+        0,
+        0,
+        file_size,
+    )
+}
+
+/// Open a container from its header, its directory and its tables.
+///
+/// The layer table's and the GPU table's pointers and lengths may all be
+/// zero, which means the container has none of them. A container that
+/// *declares* a table and is given none is refused: the table says what the
+/// container means.
+#[no_mangle]
+pub extern "C" fn vpng_open_parts_with_tables(
+    header_ptr: u32,
+    header_len: u32,
+    directory_ptr: u32,
+    directory_len: u32,
+    layer_table_ptr: u32,
+    layer_table_len: u32,
+    gpu_table_ptr: u32,
+    gpu_table_len: u32,
+    file_size: u32,
+) -> i32 {
     let header = match read_slice(header_ptr, header_len) {
         Ok(bytes) => bytes.to_vec(),
         Err(error) => return fail(error),
@@ -281,11 +312,20 @@ pub extern "C" fn vpng_open_parts_with_layers(
             Err(error) => return fail(error),
         }
     };
+    let gpu_table = if gpu_table_len == 0 {
+        None
+    } else {
+        match read_slice(gpu_table_ptr, gpu_table_len) {
+            Ok(bytes) => Some(bytes.to_vec()),
+            Err(error) => return fail(error),
+        }
+    };
     let registry = registry();
-    match registry.open_parts_with_layers(
+    match registry.open_parts_with_tables(
         &header,
         &directory,
         layer_table.as_deref(),
+        gpu_table.as_deref(),
         file_size as u64,
     ) {
         Ok(handle) => handle,
@@ -710,6 +750,199 @@ pub extern "C" fn vpng_check(handle: i32) -> i32 {
                 reader.decode_tile(index, &Limits::default())?;
             }
             Ok(())
+        })
+    })
+}
+
+/// Whether the container carries a GPU payload table.
+///
+/// Returns 1 when it does, 0 when it does not, or a negative error code.
+///
+/// The GPU payload is the file's optional, explicitly named, **lossy**
+/// sibling of a tile's lossless payload. It is never used to reconstruct the
+/// image.
+#[no_mangle]
+pub extern "C" fn vpng_gpu_has_table(handle: i32) -> i32 {
+    let registry = registry();
+    guard(|| {
+        registry.with(handle, |document| {
+            Ok(i32::from(document.meta().gpu_table().is_some()))
+        })
+    })
+}
+
+/// The number of records in the container's GPU payload table.
+///
+/// One record per tile, in the directory's canonical order. A container with
+/// no GPU table has zero records.
+#[no_mangle]
+pub extern "C" fn vpng_gpu_record_count(handle: i32) -> i32 {
+    let registry = registry();
+    guard(|| {
+        registry.with(handle, |document| {
+            Ok(document.meta().gpu_table().map_or(0, |table| table.len()) as i32)
+        })
+    })
+}
+
+/// The number of bytes every GPU payload in the container occupies.
+#[no_mangle]
+pub extern "C" fn vpng_gpu_payload_bytes(handle: i32) -> i64 {
+    let registry = registry();
+    guard(|| {
+        registry.with(handle, |document| {
+            Ok(document
+                .meta()
+                .gpu_table()
+                .map_or(0, |table| table.total_payload_bytes()) as i64)
+        })
+    })
+}
+
+/// The byte offset of a tile's GPU payload, or a negative error code.
+///
+/// A caller that reads over HTTP uses this to build its own range request.
+#[no_mangle]
+pub extern "C" fn vpng_gpu_payload_offset(handle: i32, index: u32) -> i64 {
+    let registry = registry();
+    guard(|| {
+        registry.with(handle, |document| {
+            let record = document
+                .meta()
+                .gpu_table()
+                .and_then(|table| table.get(index as usize))
+                .ok_or_else(|| Error::invalid(format!("tile index {index} is out of range")))?;
+            Ok(record.payload_offset as i64)
+        })
+    })
+}
+
+/// The length of a tile's GPU payload, or a negative error code.
+#[no_mangle]
+pub extern "C" fn vpng_gpu_payload_length(handle: i32, index: u32) -> i64 {
+    let registry = registry();
+    guard(|| {
+        registry.with(handle, |document| {
+            let record = document
+                .meta()
+                .gpu_table()
+                .and_then(|table| table.get(index as usize))
+                .ok_or_else(|| Error::invalid(format!("tile index {index} is out of range")))?;
+            Ok(i64::from(record.payload_length))
+        })
+    })
+}
+
+/// The colour codec a tile's GPU payload uses: 0 for none, 7 for BC1.
+#[no_mangle]
+pub extern "C" fn vpng_gpu_colour_codec(handle: i32, index: u32) -> i32 {
+    let registry = registry();
+    guard(|| {
+        registry.with(handle, |document| {
+            let record = document
+                .meta()
+                .gpu_table()
+                .and_then(|table| table.get(index as usize))
+                .ok_or_else(|| Error::invalid(format!("tile index {index} is out of range")))?;
+            Ok(i32::from(record.colour_codec))
+        })
+    })
+}
+
+/// The alpha codec a tile's GPU payload uses: 0 for none, 8 for BC4.
+#[no_mangle]
+pub extern "C" fn vpng_gpu_alpha_codec(handle: i32, index: u32) -> i32 {
+    let registry = registry();
+    guard(|| {
+        registry.with(handle, |document| {
+            let record = document
+                .meta()
+                .gpu_table()
+                .and_then(|table| table.get(index as usize))
+                .ok_or_else(|| Error::invalid(format!("tile index {index} is out of range")))?;
+            Ok(i32::from(record.alpha_codec))
+        })
+    })
+}
+
+/// The number of canonical bytes a GPU region takes, or a negative error code.
+///
+/// The result is always **RGBA8**: a GPU payload is always eight-bit, and a
+/// texture is always RGBA.
+#[no_mangle]
+pub extern "C" fn vpng_gpu_region_length(
+    handle: i32,
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+) -> i64 {
+    let registry = registry();
+    guard(|| {
+        registry.with(handle, |document| {
+            let rect = checked_rect(document, x, y, width, height)?;
+            Ok(rect.width as i64 * rect.height as i64 * 4)
+        })
+    })
+}
+
+/// Decode one rectangle of the container's **GPU payload** into the caller's
+/// buffer.
+///
+/// The result is **lossy** — BC1 and BC4 throw information away — and it is
+/// always **RGBA8**. The exact pixels are [`vpng_decode_region`], and nothing
+/// exact reads this path.
+///
+/// Returns the number of bytes written, or a negative error code. The buffer
+/// must be at least [`vpng_gpu_region_length`] bytes long.
+#[no_mangle]
+pub extern "C" fn vpng_decode_gpu_region(
+    handle: i32,
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+    out_ptr: u32,
+) -> i64 {
+    let registry = registry();
+    guard(|| {
+        registry.with_mut(handle, |document| {
+            let rect = checked_rect(document, x, y, width, height)?;
+            let pixels = document.decode_gpu_region(rect, &Limits::default())?;
+            let out = write_slice(out_ptr, pixels.len() as u32)?;
+            out.copy_from_slice(&pixels);
+            Ok(pixels.len() as i64)
+        })
+    })
+}
+
+/// Decode one tile's **GPU payload**, which the caller has fetched, into the
+/// caller's buffer.
+///
+/// The payload's checksum is verified against the GPU table before the block
+/// decoder sees it. The result is **lossy** and is always RGBA8.
+///
+/// Returns the number of bytes written, or a negative error code.
+#[no_mangle]
+pub extern "C" fn vpng_decode_gpu_payload(
+    handle: i32,
+    index: u32,
+    payload_ptr: u32,
+    payload_len: u32,
+    out_ptr: u32,
+) -> i64 {
+    let payload = match read_slice(payload_ptr, payload_len) {
+        Ok(bytes) => bytes.to_vec(),
+        Err(error) => return fail(error) as i64,
+    };
+    let registry = registry();
+    guard(|| {
+        registry.with(handle, |document| {
+            let pixels =
+                document.decode_gpu_payload(index as usize, &payload, &Limits::default())?;
+            let out = write_slice(out_ptr, pixels.len() as u32)?;
+            out.copy_from_slice(&pixels);
+            Ok(pixels.len() as i64)
         })
     })
 }

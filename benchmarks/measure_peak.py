@@ -24,6 +24,7 @@ import ctypes
 import json
 import subprocess
 import sys
+import tempfile
 from ctypes import wintypes
 
 
@@ -65,18 +66,28 @@ def main() -> int:
         print(__doc__)
         return 2
     command = sys.argv[1:]
-    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    # The handle is taken while the process is alive, so the counters stay
-    # readable after it exits.
-    peak = 0
-    while process.poll() is None:
+    # The child's output goes to temporary files, not to pipes: a pipe holds
+    # only a few kilobytes before the writer blocks, and this script never
+    # reads the pipes while the child runs.
+    with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
+        process = subprocess.Popen(command, stdout=out, stderr=err)
+        # The handle is taken while the process is alive, so the counters stay
+        # readable after it exits.
+        peak = 0
+        while process.poll() is None:
+            peak = max(peak, peak_working_set(process.pid))
+        process.wait()
         peak = max(peak, peak_working_set(process.pid))
-    process.wait()
-    peak = max(peak, peak_working_set(process.pid))
+        out.seek(0)
+        err.seek(0)
+        stdout = out.read().decode("utf-8", "replace")
+        stderr = err.read().decode("utf-8", "replace")
     payload = {
         "command": command,
         "exit": process.returncode,
         "peak_working_set_bytes": peak,
+        "stdout_bytes": len(stdout),
+        "stderr_tail": stderr[-500:],
     }
     print(json.dumps(payload))
     return 0

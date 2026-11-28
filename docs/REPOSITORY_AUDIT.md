@@ -70,9 +70,10 @@ set is pinned by `Cargo.lock`, so builds remain reproducible either way.
 
 ## 3. Workspace produced in this phase
 
-A Rust workspace with eight crates, plus docs, tests, benchmark harnesses, the
-corpus manifest, and a Python experiment skeleton. See `docs/ROADMAP_STATUS.md`
-for the phase mapping and `docs/VPNG_SPEC_0_1.md` for the format.
+A Rust workspace with thirteen crates, plus docs, tests, benchmark harnesses,
+the corpus manifest, a Python package and a WebAssembly package. See
+`docs/ROADMAP_STATUS.md` for the phase mapping and `docs/VPNG_SPEC_0_1.md`
+for the format, revised through `docs/VPNG_SPEC_0_5.md`.
 
 ```text
 vpng/ (root = E:\VPNG)
@@ -83,11 +84,12 @@ vpng/ (root = E:\VPNG)
 ├── crates/
 │   ├── vpng-core/                 formats, geometry, checked math, errors, limits
 │   ├── vpng-container/            header, directory, layer table, checksums, canonical digest
-│   ├── vpng-codecs/               TileCodec trait + Raw/Palette/RLE/Predictor codecs; ids 4-6 reserved
+│   ├── vpng-codecs/               TileCodec trait + Raw/Palette/RLE/Predictor codecs; ids 4-6 stable
+│   ├── vpng-gpu/                  the GPU block codecs: BC1 colour blocks, BC4 alpha blocks
 │   ├── vpng-tiling/               TileGrid, region-to-tile mapping
 │   ├── vpng-image/                PNG and raw conversion: the one place that knows what a PNG means
-│   ├── vpng-encoder/              canonical pixels -> .vpng bytes (flat or layered)
-│   ├── vpng-decoder/              .vpng bytes -> full/tile/region/layer pixels + compositing
+│   ├── vpng-encoder/              canonical pixels -> .vpng bytes (flat or layered, with or without a GPU payload)
+│   ├── vpng-decoder/              .vpng bytes -> full/tile/region/layer pixels + compositing + GPU payloads
 │   ├── vpng-testkit/              deterministic fixtures + conformance tests
 │   ├── vpng-python/               the PyO3 extension behind the Python package
 │   ├── vpng-http/                 the HTTP Range source: a container fetched over the network
@@ -95,6 +97,7 @@ vpng/ (root = E:\VPNG)
 │   └── vpng-cli/                  encode/decode/info/check/verify/decode-region/extract-tile
 │                                    + http-info/http-decode-region
 │                                    + layers/decode-layer/composite/encode-layers
+│                                    + gpu-info/gpu-decode
 ├── docs/                          spec, audit, status, threat model, ADRs
 ├── benchmarks/
 │   ├── corpus_manifest.json       provenance, license, dimensions, SHA-256
@@ -104,6 +107,7 @@ vpng/ (root = E:\VPNG)
 │   ├── http/                      the HTTP Range measurement driver
 │   ├── wasm/                      the WebAssembly measurement driver
 │   ├── layers/                    the layer-model memory driver
+│   ├── gpu/                       the GPU-payload memory driver
 │   └── results/                   git-ignored JSON/Markdown run output
 ├── corpus-data/                   git-ignored image bytes (provenance in the manifest)
 ├── python/                        the `vpng` package, its tests, and the experiment tooling
@@ -129,6 +133,26 @@ The WebAssembly package adds **none**: it is a raw `extern "C"` ABI over the
 crates that are already here, so `cargo build --release --target
 wasm32-unknown-unknown -p vpng-wasm` needs no `wasm-bindgen`, no code
 generation and no extra toolchain.
+
+The **GPU block codecs** add none either, for the same reason and a second
+one: BC1 and BC4 live in their own crate (`crates/vpng-gpu`) rather than in
+`vpng-codecs`, because that crate's own contract is that a codec is *exactly
+reversible* and neither BC1 nor BC4 is. The crate needs no dependency at
+all — the block arithmetic is the reference arithmetic, written out.
+
+## 4.1 The test inventory (executed)
+
+Command: `cargo test --workspace --all-targets -j 2`, release and debug
+profiles, `x86_64-pc-windows-gnu`.
+
+| | Tests | Result |
+|---|---:|---|
+| Rust workspace | **610** | **610 passed, 0 failed** |
+| Python package (`python -m unittest discover -s python/tests`) | **62** | **OK** |
+| WebAssembly package (`node --test wasm/test/vpng.test.mjs`) | **18** | **18 pass, 0 fail** |
+| WebAssembly export check (`node wasm/check_exports.mjs`) | **47** exports | every documented export is really exported |
+
+The per-suite breakdown is in `docs/ROADMAP_STATUS.md` §5.
 
 ## 5. Risks and unknowns carried into the next phase
 

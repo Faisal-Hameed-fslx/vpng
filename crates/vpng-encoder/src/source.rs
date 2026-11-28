@@ -33,6 +33,17 @@ pub trait PixelSource: Sync {
     /// The rectangle is given rather than a grid position because a v0.2 file
     /// may hold an **adaptive** partition, whose tiles do not share a grid.
     fn tile_pixels(&self, index: usize, rect: &TileRect, out: &mut Vec<u8>) -> Result<()>;
+
+    /// Whether these pixels are a **mask's coverage** rather than a picture.
+    ///
+    /// A mask layer's colour channels carry no meaning: its coverage is its
+    /// alpha channel. A GPU payload for a mask therefore holds **only** the
+    /// coverage, in BC4 blocks, and no colour blocks at all.
+    ///
+    /// A plain picture is not a mask, so the default is `false`.
+    fn is_coverage_only(&self) -> bool {
+        false
+    }
 }
 
 impl PixelSource for CanonicalImage {

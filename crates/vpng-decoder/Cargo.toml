@@ -11,6 +11,7 @@ description = "VPNG decoder: full decode, tile decode, and region decode."
 vpng-core.workspace = true
 vpng-container.workspace = true
 vpng-codecs.workspace = true
+vpng-gpu.workspace = true
 vpng-tiling.workspace = true
 
 [dev-dependencies]

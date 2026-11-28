@@ -281,6 +281,48 @@ export class Vpng {
     }
   }
 
+  /**
+   * Open a container from its header, its directory and its tables.
+   *
+   * A v0.4 container carries a layer table between the directory and the
+   * payloads, and a v0.5 container carries a GPU payload table as well. A
+   * table may be omitted for a container that has none; a container that
+   * *declares* a table and is given none is refused.
+   *
+   * @param {Uint8Array} header the 64-byte header, or the 72-byte one of a
+   *   v0.5 file
+   * @param {Uint8Array} directory the directory, including its checksum
+   * @param {Uint8Array|null} layerTable the layer table, or null
+   * @param {Uint8Array|null} gpuTable the GPU payload table, or null
+   * @param {number} fileSize the size the container claims for itself
+   * @returns {number} the document handle
+   */
+  openPartsWithTables(header, directory, layerTable, gpuTable, fileSize) {
+    const head = this.put(header);
+    const tail = this.put(directory);
+    const layers = layerTable ? this.put(layerTable) : { pointer: 0, length: 0 };
+    const gpu = gpuTable ? this.put(gpuTable) : { pointer: 0, length: 0 };
+    try {
+      return this.i32(
+        'vpng_open_parts_with_tables',
+        head.pointer,
+        head.length,
+        tail.pointer,
+        tail.length,
+        layers.pointer,
+        layers.length,
+        gpu.pointer,
+        gpu.length,
+        fileSize,
+      );
+    } finally {
+      this.exports.vpng_dealloc(head.pointer, head.length);
+      this.exports.vpng_dealloc(tail.pointer, tail.length);
+      if (layerTable) this.exports.vpng_dealloc(layers.pointer, layers.length);
+      if (gpuTable) this.exports.vpng_dealloc(gpu.pointer, gpu.length);
+    }
+  }
+
   /** Close a document. */
   close(handle) {
     this.i32('vpng_close', handle);
@@ -642,6 +684,129 @@ export class Vpng {
     const code = this.exports.vpng_check(handle);
     if (code < 0) this.fail(code);
     return true;
+  }
+
+  /**
+   * Whether the container carries a GPU payload table.
+   *
+   * The GPU payload is the file's optional, explicitly named, **lossy**
+   * sibling of a tile's lossless payload. It is never used to reconstruct
+   * the image.
+   *
+   * @param {number} handle the document
+   * @returns {boolean} true when the container has a GPU table
+   */
+  gpuHasTable(handle) {
+    return this.i32('vpng_gpu_has_table', handle) === 1;
+  }
+
+  /** The number of records in the container's GPU payload table. */
+  gpuRecordCount(handle) {
+    return this.i32('vpng_gpu_record_count', handle);
+  }
+
+  /** The number of bytes every GPU payload in the container occupies. */
+  gpuPayloadBytes(handle) {
+    return this.i64('vpng_gpu_payload_bytes', handle);
+  }
+
+  /** The byte offset of a tile's GPU payload. */
+  gpuPayloadOffset(handle, index) {
+    return this.i64('vpng_gpu_payload_offset', handle, index);
+  }
+
+  /** The length of a tile's GPU payload. */
+  gpuPayloadLength(handle, index) {
+    return this.i64('vpng_gpu_payload_length', handle, index);
+  }
+
+  /** The colour codec a tile's GPU payload uses: 0 for none, 7 for BC1. */
+  gpuColourCodec(handle, index) {
+    return this.i32('vpng_gpu_colour_codec', handle, index);
+  }
+
+  /** The alpha codec a tile's GPU payload uses: 0 for none, 8 for BC4. */
+  gpuAlphaCodec(handle, index) {
+    return this.i32('vpng_gpu_alpha_codec', handle, index);
+  }
+
+  /** The number of canonical bytes a GPU region takes. */
+  gpuRegionLength(handle, x, y, width, height) {
+    return this.i64('vpng_gpu_region_length', handle, x, y, width, height);
+  }
+
+  /**
+   * Decode a rectangle of the container's **GPU payload**.
+   *
+   * The result is **lossy** — BC1 and BC4 throw information away — and it is
+   * always **RGBA8**. The exact pixels are `decodeRegion`, and nothing exact
+   * reads this path.
+   *
+   * @param {number} handle the document
+   * @param {number} x the rectangle's left edge
+   * @param {number} y the rectangle's top edge
+   * @param {number} width the rectangle's width
+   * @param {number} height the rectangle's height
+   * @returns {Uint8Array} the canonical RGBA8 pixels
+   */
+  decodeGpuRegion(handle, x, y, width, height) {
+    const length = this.gpuRegionLength(handle, x, y, width, height);
+    const pointer = this.exports.vpng_alloc(length);
+    if (pointer === 0) {
+      throw new VpngError(5, `the module could not allocate ${length} bytes`);
+    }
+    try {
+      const written = this.i64(
+        'vpng_decode_gpu_region',
+        handle,
+        x,
+        y,
+        width,
+        height,
+        pointer,
+      );
+      const view = new Uint8Array(this.memory.buffer, pointer, written);
+      return view.slice();
+    } finally {
+      this.exports.vpng_dealloc(pointer, length);
+    }
+  }
+
+  /**
+   * Decode a tile's **GPU payload**, which the caller has fetched.
+   *
+   * The payload's CRC32C is verified against the GPU table before the block
+   * decoder sees it. The result is **lossy** and is always RGBA8.
+   *
+   * @param {number} handle the document
+   * @param {number} index the tile's index
+   * @param {Uint8Array} payload the GPU payload
+   * @returns {Uint8Array} the tile's canonical RGBA8 pixels
+   */
+  decodeGpuPayload(handle, index, payload) {
+    const input = this.put(payload);
+    const tile = this.tileRect(handle, index);
+    const size = tile.width * tile.height * 4;
+    const output = this.exports.vpng_alloc(size);
+    if (output === 0) {
+      this.exports.vpng_dealloc(input.pointer, input.length);
+      throw new VpngError(5, `the module could not allocate ${size} bytes`);
+    }
+    try {
+      const written = this.i64(
+        'vpng_decode_gpu_payload',
+        handle,
+        index,
+        input.pointer,
+        input.length,
+        output,
+      );
+      const view = new Uint8Array(this.memory.buffer, output, written);
+      return view.slice();
+    } finally {
+      this.exports.vpng_dealloc(input.pointer, input.length);
+      this.exports.vpng_dealloc(output, size);
+    }
   }
 
   /**

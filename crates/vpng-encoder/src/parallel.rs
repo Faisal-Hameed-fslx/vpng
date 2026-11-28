@@ -95,7 +95,7 @@ pub fn encode_parallel(
         let plan = crate::plan_file(&image, options)?;
         (Some(image), plan)
     } else {
-        (None, crate::plan_uniform(dims, options)?)
+        (None, crate::plan_uniform(dims, source.format(), options)?)
     };
 
     let level0: &dyn PixelSource = match &materialized {
@@ -298,9 +298,29 @@ fn encode_tile(
     };
 
     let (codec_id, bytes) = select_payload(pixels.as_slice(), &ctx, options)?;
+
+    // The tile's **lossy** GPU payload, when the file carries one. It is
+    // built from the tile's original pixels, before any prediction, so it
+    // does not depend on the lossless codec that was chosen.
+    //
+    // A **mask** layer's tile holds a coverage rather than a picture, so its
+    // payload is BC4 coverage alone, with no colour blocks.
+    let gpu = if options.gpu {
+        Some(vpng_gpu::encode_tile(
+            source.format(),
+            rect.width,
+            rect.height,
+            pixels.as_slice(),
+            source.is_coverage_only(),
+        )?)
+    } else {
+        None
+    };
+
     Ok(TilePayload {
         codec_id,
         bytes,
         uncompressed_length,
+        gpu,
     })
 }

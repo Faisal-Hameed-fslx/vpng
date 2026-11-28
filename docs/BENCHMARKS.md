@@ -764,6 +764,140 @@ and the one-layer file.
 is a driver total — it includes the Python driver's own work and the writes
 of the raw files — not a benchmark.
 
+## Measured: the GPU payload (2026-11-28)
+
+Driver: `benchmarks/corpus/run_gpu_corpus.py`; raw data:
+`benchmarks/p13_gpu_results.json`. Report: `docs/P13_GPU_REPORT.md`.
+
+Host: 12 logical CPUs, `x86_64-pc-windows-gnu`, `rustc 1.100.0`, `--release`
+build, tile size 256, **4 encoder workers**, one image at a time. The same
+**750-image corpus** the other reports use, on the same cached canonical
+pixels.
+
+### The corpus measurement
+
+For each image two files are built with the real `vpng` binary: the plain
+`vpng encode` (a v0.1 file) and the same encode with `--gpu` (a v0.5 file
+carrying a BC1/BC4 payload beside every tile's lossless payload). Every GPU
+file is checked with `vpng check`, decoded exactly with `vpng decode` and
+compared with the canonical pixels byte for byte, and decoded lossily with
+`vpng gpu-decode` and compared with them channel by channel.
+
+| | |
+|---|---|
+| Images measured | **750** of 750 |
+| GPU files whose **lossless** payload is **exactly** the picture | **750** of 750 |
+| Files that failed `vpng check` | **0** |
+| Files whose byte accounting does not add up | **0** |
+| Files that report minor version **5** | **750** of 750 |
+| GPU payloads that **differ** from the original | **746** of 750 |
+| GPU payloads that are **identical** to the original | **4** of 750 |
+| Plain (v0.1) total | **453,767,460** bytes — the published stable baseline's |
+| GPU (v0.5) total | **705,483,532** bytes |
+| The GPU payloads' bytes | **251,513,192** bytes |
+| The GPU tables' bytes | **196,880** bytes |
+| The GPU payload's cost | **251,716,072** bytes — **55.472482%** |
+| Canonical pixel bytes | **1,450,363,330** bytes |
+
+### What a GPU payload costs, and what it buys
+
+The payload is a **fixed 8 bytes per 4×4 block** whatever the picture is,
+while the lossless codecs do far better on flat and UI-like images. The two
+move in opposite directions, and the share is the interesting number:
+
+| Category | Images | Plain (v0.1) | GPU (v0.5) | GPU payloads | Overhead | Overhead share | Payload / canonical |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| photos | 300 | 234,827,986 | 334,041,218 | 99,134,352 | 99,213,232 | 42.249322% | 16.726497% |
+| pixel_art | 100 | 365,091 | 1,334,635 | 964,144 | 969,544 | **265.562284%** | 25.044009% |
+| scans | 100 | 67,871,353 | 107,133,989 | 39,229,816 | 39,262,636 | 57.848613% | 19.710657% |
+| textures | 150 | 133,872,854 | 199,974,034 | 66,054,960 | 66,101,180 | 49.376089% | 17.050101% |
+| ui | 100 | 16,830,176 | 62,999,656 | 46,129,920 | 46,169,480 | **274.325592%** | 17.251941% |
+| **all** | **750** | **453,767,460** | **705,483,532** | **251,513,192** | **251,716,072** | **55.472482%** | **17.341392%** |
+
+The corpus's **worst single case** is a **25,977-byte** UI screenshot whose
+GPU file is **403,109** bytes: the GPU payload is **1451.79197%** of the
+plain file. The **10 MB ceiling** is where the trade bites: the plain files
+clear it on **748** of 750 and the GPU files on **745**, so the payload
+pushed **three** files over the line.
+
+What it buys is a **lossy** picture: over **1,998,310,392** channel samples,
+the pooled PSNR is **37.2237 dB**, the mean absolute error is **1.456997**
+levels of 255 and the worst single difference is **170**. The per-image PSNR
+runs from **13.3972 dB** (a pure-noise image, the worst possible input for a
+block codec) to **57.4420 dB**, with a median of **36.4972** and a p95 of
+**44.3597**. Four pixel-art images come back from the GPU payload **byte for
+byte identical** to the original, because BC1 reproduces a flat colour and a
+hard black-and-white block exactly.
+
+### The 16K photograph
+
+| | bytes | tiles |
+|---|---:|---:|
+| The plain v0.1 file | 124,197,035 | 2,040 |
+| The GPU v0.5 file | **190,593,067** | 2,040 |
+| The GPU payloads | **66,355,200** | — |
+| The GPU table | 40,824 | 2,040 records |
+
+The GPU file is the plain file plus **66,396,032** bytes — **53.460239%** —
+which is the payloads, the table (24 bytes of header and 20 bytes per tile)
+and the header's eight extra bytes, and nothing else. The 16K photograph's
+GPU payload has the best PSNR of the corpus's photographs: **45.0635 dB**, a
+mean absolute error of **0.916696** levels and a worst difference of **46**.
+
+### The byte-count and timing scope
+
+**Included** in the byte figures: the complete size of every file that was
+written — header, directory, GPU table and payloads alike.
+**Excluded**: the decoded pixels, the raw files the GPU payload was written
+to, the driver's own allocations, and every process working set. The GPU
+payload's overhead is therefore the **whole** difference between the plain
+file and the GPU file.
+
+**There is no speed claim.** The driver records each encode's wall-clock
+time, and the GPU encode came out at **0.8617×** the plain encode's total —
+but each case is a **single run**, and in every pair the plain encode ran
+**first** and the GPU encode **second**, with the file system's cache already
+warm. That is an artefact of the order, not a measurement. The corpus pass
+took **1160.77 s** wall-clock for 750 images and two files each, and that
+figure is a driver total, not a benchmark.
+
+### The memory figures
+
+Driver: `benchmarks/gpu/measure_gpu_memory.py`; raw data:
+`benchmarks/p13_gpu_memory_results.json`. The 16K photograph, measured with
+the release binary.
+
+**Scope.** The process's **peak working set**, taken from the operating
+system's own `GetProcessMemoryInfo` while the process was alive.
+**Included**: the operating system, the loader, the binary's text and data,
+the Rust heap, every buffer the command allocated, and the file it read.
+**Excluded**: nothing — the figure is the whole process. **Not a target
+claim**: the **64 MB localized-editing target** applies to *editing*, and
+these commands encode, check and decode **whole pictures**, so they hold
+whole pictures. The two kinds of number are not compared.
+
+| Command | Peak working set | Wall clock |
+|---|---:|---:|
+| `vpng encode` (plain) | **410,099,712** | 26,372 ms |
+| `vpng encode --gpu` | **411,205,632** | 27,290 ms |
+| `vpng gpu-info --json` | **195,555,328** | 169 ms |
+| `vpng check` | **194,916,352** | 122 ms |
+| `vpng decode` (exact, raw) | **594,096,128** | 21,086 ms |
+| `vpng gpu-decode` (lossy, raw) | **726,097,920** | 1,608 ms |
+
+**The encoder's GPU payload costs 1,105,920 bytes of memory** — the GPU
+encode's peak against the plain encode's. That is the **interleaving**
+paying off: the encoder writes each tile's GPU payload straight after that
+tile's lossless payload, so it never holds the whole 66,355,200-byte GPU
+region in memory, which would have been more than the project's 64 MB budget
+on its own. The figure is a **single run**, and the plain encode's own peak
+moved by a few hundred kilobytes between runs, so it is read as "the GPU
+payload adds about a megabyte", not as an exact constant.
+
+The lossy reader costs most: `vpng gpu-decode` peaks at 726,097,920 bytes
+because it writes the picture as **RGBA8** — 530,841,600 bytes — whatever the
+file's own format is.
+
 ## Measured: large-image stress (2026-11-15, with Predictor)
 
 Host: 12 logical CPUs, 7,916 MB physical RAM, Windows `x86_64-pc-windows-gnu`,

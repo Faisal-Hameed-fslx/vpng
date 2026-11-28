@@ -30,6 +30,7 @@ const REQUIRED = [
   'vpng_open',
   'vpng_open_parts',
   'vpng_open_parts_with_layers',
+  'vpng_open_parts_with_tables',
   'vpng_close',
   // Layout.
   'vpng_width',
@@ -52,6 +53,17 @@ const REQUIRED = [
   'vpng_layer_is_mask',
   'vpng_layer_length',
   'vpng_decode_layer',
+  // GPU payloads.
+  'vpng_gpu_has_table',
+  'vpng_gpu_record_count',
+  'vpng_gpu_payload_bytes',
+  'vpng_gpu_payload_offset',
+  'vpng_gpu_payload_length',
+  'vpng_gpu_colour_codec',
+  'vpng_gpu_alpha_codec',
+  'vpng_gpu_region_length',
+  'vpng_decode_gpu_region',
+  'vpng_decode_gpu_payload',
   // Decoding.
   'vpng_region_length',
   'vpng_region_tiles',

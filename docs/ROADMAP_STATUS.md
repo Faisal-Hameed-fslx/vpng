@@ -18,7 +18,7 @@
 | Default host | `x86_64-pc-windows-gnu` |
 | Active toolchain | overridden by `E:\VPNG\rust-toolchain.toml` |
 | `cargo build --workspace` | **exit 0**, `Finished dev profile ... in 3.85s` |
-| `cargo test --workspace --all-targets` | **exit 0**, `536 passed; 0 failed` |
+| `cargo test --workspace --all-targets` | **exit 0**, `610 passed; 0 failed` |
 | `cargo fmt --all --check` | **exit 0**, no diffs |
 | `cargo clippy --workspace --all-targets` | **exit 0**, zero warnings |
 
@@ -48,7 +48,7 @@ No Visual Studio is required: the GNU host ships `rust-lld` and a
 | P6 — 16K and memory engineering | 16K stress; streaming; budgets | **PARTIAL** | A tile-by-tile streaming writer and a 12-case memory matrix now exist: 4096², 8192² and 16384² × {gray8, rgb8, rgba8, rgba16}, **12 PASS / 0 FAIL / 0 BLOCKED**. The 16384×16384 RGBA16 case (2 GiB of canonical pixels) writes in an 8.8 MB heap peak and edits with a 13.2 MB resident-set growth, against a 64 MB target. A bounded cache and a bounded history are implemented. The parallel engine is now measured on a 16K workload: a full viewing run peaks at 47.9 MB of resident set and 43.8 MB of heap against the 64 MB target (`docs/P5_REPORT.md` §3.5). The **streaming encoder** and the **parallel encoder** are both done: `vpng encode` writes through the streaming writer with `--workers N`, one worker and N workers produce the same file byte for byte (144 encode cases), and the streaming writer holds a 1 GiB image to **19,296,256 B** of resident set. **Still open:** a streaming *input* decoder — `vpng encode` still reads the whole input PNG into memory before it encodes. Evidence: `docs/P4_MEMORY_VALIDATION.md`, `docs/P5_ENCODER_REPORT.md`, `benchmarks/p4_memory_results.json`, `benchmarks/p5_view_results.json`, `benchmarks/p5_encode_results.json`. |
 | P7 — compression research | controlled experiments | **PARTIAL** | Eleven codecs were measured on identical pixels and identical tile layouts: the four stable codecs, four context-adaptive residual models (CARC A–D), an LZ77 dictionary codec and three hybrids, with pinned golden vectors for each. Every image was also measured against PNG, WebP lossless and JPEG XL lossless, so every column of the comparison shares one denominator. The results are in `benchmarks/p3_5_raw_results.json` (per-image, per-tile, per-category, per-resolution, aggregate and worst-case) and `benchmarks/p3_5_comparison.csv`. The **750-image corpus now exists** (`benchmarks/corpus_manifest.json`, version 2) and the study has **not** been re-run on it: the eleven-codec comparison is still the nine-image seed, and the research codecs are still unpromoted. Evidence: `docs/P3_5_COMPRESSION_RESEARCH_REPORT.md`, `docs/P5_CORPUS_REPORT.md`. |
 | P8 — 10 MB target evaluation | exact accounting; honest failure | **PARTIAL** | Exact size accounting passes (`size_accounting_is_exact`); refusal is honest and typed (`--max-size 1024` → exit 6 reporting the smallest lossless size 240,148). The **750-image corpus now exists and the per-category success distribution is measured**: 748 of 750 images (99.7%) land under the decimal 10,000,000-byte ceiling — photographs 299/300, screenshots 100/100, pixel art 100/100, scans 100/100, textures 149/150 — and both failures are named (the 16K photograph at 124,197,035 bytes, one 2,048 × 2,048 texture at 11,397,940 bytes). Evidence: `docs/P5_CORPUS_REPORT.md`, `benchmarks/p5_corpus_results.json`. |
-| P9 — Python API | bindings around Rust | **PASS** | The binding exists: a PyO3 extension (`crates/vpng-python`) and a Python package (`python/vpng`) that wrap the **same Rust engine** the CLI runs. It was **measured**, not asserted: over the **whole 750-image corpus** the Python API's file is **byte-identical** to the command line's on **750 of 750 images**, and the total is the published stable baseline's (**453,767,460** bytes) — the 16K photograph's digest is the P5.2 tile-256 baseline's. All 750 Python-written files pass `vpng check` and **losslessly** `vpng verify` (**0 failures**), and the worker count does not move the bytes (750 of 750 digests match). A localized edit of the 16K photograph through Python peaks at **44,249,088 bytes** of working set against the 67,108,864-byte target. The surface is `encode`, `encode_pixels`, `decode`, `decode_to_bytes`, `decode_region`, `verify`, `check`, `info`, and a transactional `open_document` editor with undo/redo and an atomic save; `lossless=False` is **refused**, never ignored. The extension uses the **stable ABI** (`abi3-py38`), so one wheel works on every CPython from 3.8 onwards, and a dedicated CI job builds it with `maturin` and runs the Python test suite — 45 tests when this milestone shipped, **53** today, the extra eight covering the layer model. The PNG and raw conversion moved into a shared crate (`crates/vpng-image`) so the CLI and the binding cannot disagree about what a PNG means. Evidence: `docs/P9_PYTHON_REPORT.md`, `benchmarks/p9_python_results.json`, `benchmarks/p9_python_memory_results.json`. |
+| P9 — Python API | bindings around Rust | **PASS** | The binding exists: a PyO3 extension (`crates/vpng-python`) and a Python package (`python/vpng`) that wrap the **same Rust engine** the CLI runs. It was **measured**, not asserted: over the **whole 750-image corpus** the Python API's file is **byte-identical** to the command line's on **750 of 750 images**, and the total is the published stable baseline's (**453,767,460** bytes) — the 16K photograph's digest is the P5.2 tile-256 baseline's. All 750 Python-written files pass `vpng check` and **losslessly** `vpng verify` (**0 failures**), and the worker count does not move the bytes (750 of 750 digests match). A localized edit of the 16K photograph through Python peaks at **44,249,088 bytes** of working set against the 67,108,864-byte target. The surface is `encode`, `encode_pixels`, `decode`, `decode_to_bytes`, `decode_region`, `verify`, `check`, `info`, and a transactional `open_document` editor with undo/redo and an atomic save; `lossless=False` is **refused**, never ignored. The extension uses the **stable ABI** (`abi3-py38`), so one wheel works on every CPython from 3.8 onwards, and a dedicated CI job builds it with `maturin` and runs the Python test suite — 45 tests when this milestone shipped, **62** today, the extra seventeen covering the layer model and the GPU payload. The PNG and raw conversion moved into a shared crate (`crates/vpng-image`) so the CLI and the binding cannot disagree about what a PNG means. Evidence: `docs/P9_PYTHON_REPORT.md`, `benchmarks/p9_python_results.json`, `benchmarks/p9_python_memory_results.json`. |
 | P10 — hardening and v1.0 | fuzzing; freeze | **PARTIAL** | A deterministic mutation harness over 7 targets runs in CI (200,000 iterations × 7 targets = 1,400,000 executions, 0 findings), and the 7 `cargo-fuzz` targets ran **coverage-guided in CI on Linux** (run 44264162940: 132,429,711 executions, 0 findings). A second run (44266490454) **found a real defect** — `Header::parse` accepted a zero-dimension header that `Header::to_bytes` refused to serialize — which is fixed and pinned by a regression test, and a third run (44274770109) re-verified the fix (78,850,985 executions, 0 findings). The coverage-guided fuzzer cannot run on this Windows-GNU host — the toolchain and `cargo-fuzz` install and run, but the AddressSanitizer runtime, LLVM's MSVC-only libFuzzer Windows build and rustc's ELF-only coverage module each stop it there — and the format is not frozen. |
 
 ### 2.1 The forward plan (2026-11-18) and how it maps onto the phases above
@@ -70,13 +70,13 @@ already been done.
 | P7 — adaptive tiling | variable tile dimensions and spatially adaptive layouts | P3 | **CLOSED** (2026-11-21): the variable-size partition is in the container and measured. A level's tiles are now an **exact partition** of the level's rectangle — every pixel covered once — validated by a sweep-line check before a file is written, with the partition representation shared by the encoder, the decoder, the viewer and the editing engine. The **whole 750-image corpus** was encoded both ways on the same canonical pixels: adaptive tiling is a **compression wash** — 452,762,594 bytes against the uniform grid's 453,767,460 (−0.22%), 330 images smaller, 241 larger, 179 identical — and it **hurts UI screenshots** (69 of 100 grow). What it does deliver is **half the tiles at the median** (4 → 2), a smaller directory and fewer requests to serve a region. All 750 adaptive files decode exactly and pass `vpng check`. Evidence: `docs/P6_P7_REPORT.md`, `docs/decisions/ADR-0014-levels-and-partitions.md`, `benchmarks/p7_adaptive_results.json` |
 | P7.5 — promoting the stable codecs 4–6 | turn the three measured research codecs into stable ids, with a format revision, a migration policy and compatibility tests | P2 (the codec table) and the v0.5–v0.7 release rows | **CLOSED** (2026-11-22): the three codecs are promoted under exactly the ids ADR-0004 reserved for them — id 4 `lz77`, id 5 `predictor+dictionary`, id 6 `context-entropy` — and the format's minor version goes to **3**. The revision changes **one rule** and moves no bytes: a directory entry may name id 4, 5 or 6 only if the file's minor version is 3 or newer, and the version states what the file **contains** (a file that ends up using only the original four stays v0.1). Measured over the **whole 750-image corpus** with the production encoder, the extended set writes **−10.46%** bytes — 453,767,460 → 406,294,626 — with **643 images smaller, 107 equal and 0 larger**, and all 1,500 files pass `vpng check` and `vpng verify`. The cost is stated: **3.44×** the encode time, so the extended set stays **opt-in** (`--codec-set extended`) and the default path's bytes did not move — 750 of 750 stable files match the P5 corpus baseline, and the 16K photograph's digest is the P5.2 baseline's. The research ids `0x80..=0xFF` still cannot reach a file. Evidence: `docs/P8_CODEC_REPORT.md`, `docs/VPNG_SPEC_0_3.md`, `docs/decisions/ADR-0015-promoting-codecs-4-to-6.md`, `benchmarks/p8_codec_production_results.json` |
 | P8 — production validation | the 750-image corpus, multiple platforms, 16K workloads | P8 | PARTIAL (the corpus exists and is measured; other platforms and 16K workloads are not) |
-| P9 — Python bindings and integration | expose the stable engine to other applications | P9 | **CLOSED** (2026-11-25): the binding is in and it was **measured against the command line over the whole 750-image corpus** — **750 of 750** files are **byte-identical** to the CLI's, the total is the published stable baseline's (453,767,460 bytes), all 750 pass `vpng check` and **losslessly** `vpng verify` (**0 failures**), and the worker count does not move the bytes. The editing path stays inside the memory target: a localized edit of the 16K photograph through Python peaks at **44,249,088 bytes** against the 67,108,864-byte target. The extension is built with the **stable ABI**, so one wheel covers every CPython from 3.8 onwards, and CI builds it with `maturin` and runs the Python test suite — 45 tests when this milestone shipped, **53** today, the extra eight covering the layer model. The PNG semantics now live in one shared crate (`crates/vpng-image`) that the CLI and the binding both use. Evidence: `docs/P9_PYTHON_REPORT.md` |
+| P9 — Python bindings and integration | expose the stable engine to other applications | P9 | **CLOSED** (2026-11-25): the binding is in and it was **measured against the command line over the whole 750-image corpus** — **750 of 750** files are **byte-identical** to the CLI's, the total is the published stable baseline's (453,767,460 bytes), all 750 pass `vpng check` and **losslessly** `vpng verify` (**0 failures**), and the worker count does not move the bytes. The editing path stays inside the memory target: a localized edit of the 16K photograph through Python peaks at **44,249,088 bytes** against the 67,108,864-byte target. The extension is built with the **stable ABI**, so one wheel covers every CPython from 3.8 onwards, and CI builds it with `maturin` and runs the Python test suite — 45 tests when this milestone shipped, **62** today, the extra seventeen covering the layer model and the GPU payload. The PNG semantics now live in one shared crate (`crates/vpng-image`) that the CLI and the binding both use. Evidence: `docs/P9_PYTHON_REPORT.md` |
 | P10 — format freeze and release | compatibility guarantees, security audit, v1.0 | P10 | PARTIAL (the format is not frozen) |
 | P11 — graphical viewer and editor | a desktop UI over `vpng-view` and `vpng-editing` | P9 (the binding surface) and P5 | NOT STARTED |
 | P12 — WebAssembly package | the decoder, the viewer and the editor in a browser | P9 | PARTIAL (2026-11-26) — the **decoder** is in and it was **measured over the whole 750-image corpus**; the browser **viewer** and **editor** are not |
 | P13 — network streaming | read the header, the directory and the tiles over HTTP Range requests | P5 | **CLOSED** (2026-11-26): the reader is in and it was **measured over the whole 750-image corpus**. The byte source became an abstraction — `ByteSource` with `FileSource` and `HttpSource` behind it — so there is **one** tile-reading path, not two, and the tile payload decoding and the container validation are now one shared `vpng_decoder::decode_tile_payload` and one shared `vpng_decoder::parse_container_parts`. **No format change was needed or made**: every payload already had its own offset and length, and the 64-byte header and the 40-byte directory entry are untouched. The reader fetches only what it needs: the header and the directory cost **0.0901%** of the corpus, and a 1024×1024 viewport of the 16K photograph costs **1,039,409 bytes of 124,197,035 — 0.8369%** of that file. Over HTTP the pixels are **identical to the local read on 750 of 750 images** (both the canonical digest and the PNG digest), and the client's own byte count matches the server's **exactly** — 234,830,932 bytes on both sides. The refusals are pinned by nine tests against a hand-written server: a `200 OK` answer to a range request, a wrong `Content-Range`, a short body and an out-of-range read are all **refused**, never accepted. The unfavourable numbers are kept: over HTTP was **slower** than the local read (51.8445 ms against 41.7015 ms at the median) and 592 of the 750 images are smaller than the viewport, so the corpus-wide fetch share is 51.661%, not a small number. Evidence: `docs/P10_HTTP_REPORT.md`, `docs/decisions/ADR-0016-http-range-source.md`, `benchmarks/p10_http_results.json` |
 | P14 — layers and masks | several named tile grids in one file | P7 (the partition representation) | **CLOSED** (2026-11-27): the layer model is in and it was **measured over the whole 750-image corpus**. The format revision is **v0.3 → v0.4** and it moves **no byte**: the 64-byte header's last eight bytes — reserved in v0.1–v0.3 and required to be zero there — become the **layer table's offset and length**, and the directory entry's `flags` carries the **layer index in bits 8..11** beside the level index it already held. The table sits between the directory and the payloads. The rules are pinned by the reader, not by convention: a file may hold **at most 16 layers**, a layered file may not also have a **preview pyramid** (the two are mutually exclusive, so the per-layer accounting is unambiguous), a **mask** is a layer whose alpha channel is its coverage, a mask layer is never composited on its own, and the compositing is straight-alpha with **integer, deterministic** arithmetic. The layers are encoded **independently** — cross-layer prediction is out of scope — so **adding an overlay does not change the base layer's bytes**, which the measurement checks for every image. Measured: a one-layer file composites to **exactly** its own pixels on **750 of 750** images, a two-layer file's base layer is byte-for-byte the original on **750 of 750**, the two-layer composite provably differs on **750 of 750** (the overlay's colour channels are inverted, and no sample equals its own inverse), and the **114** images with an alpha format all take a mask that changes the result. **0** files failed `vpng check`. The layer table costs a **fixed 60 bytes** per file — **45,000 bytes** over the corpus, **0.009917%** — and that fixed cost is **1.643426%** of a pixel-art file, and **54.054054%** of the corpus's smallest file (111 bytes), which is the unfavourable row and is kept as it is. The default path's bytes did not move: the plain total is the published stable baseline's **453,767,460** bytes, to the byte. Evidence: `docs/P12_LAYERS_REPORT.md`, `docs/VPNG_SPEC_0_4.md`, `docs/decisions/ADR-0018-layers-and-masks.md`, `benchmarks/p12_layers_results.json` |
-| P15 — GPU-ready payloads | BC7/ASTC tile payloads for game-engine asset pipelines | P2 (the codec table) | NOT STARTED — needs a container format revision |
+| P15 — GPU-ready payloads | BC1/BC4 block tile payloads for game-engine asset pipelines | P2 (the codec table) | **CLOSED** (2026-11-28): the GPU payload is in and it was **measured over the whole 750-image corpus**. The format revision is **v0.4 → v0.5** and it **moves no published byte**: the header grows from 64 to **72 bytes** through the `header_size` field that exists for that purpose, and the checksum rule becomes "bytes `0..52` and `56..header_size`", which for a 64-byte header is exactly the rule v0.1–v0.4 use. The GPU payload is an **optional, explicitly named, lossy sibling** of the lossless payload, never a replacement for it: a directory entry **never** names a GPU block codec (id 7 `bc1`, id 8 `bc4`), nothing exact reads the GPU payload, and the file reports the size of **both** payloads. The block codecs live in a new crate, `crates/vpng-gpu`, because `vpng-codecs`'s own contract is that a codec is *exactly reversible* and neither BC1 nor BC4 is. The payloads are **interleaved** with the lossless ones so the encoder never holds the whole GPU region in memory, and a **mask layer's** tile carries BC4 coverage alone. Measured: the **lossless** payload of **750 of 750** GPU files reconstructs the picture byte for byte, **0** files failed `vpng check`, **0** fail the byte accounting, and every one reports minor version **5**; the default path's total is the published stable baseline's **453,767,460** bytes. The cost is stated and it is large: **251,716,072** bytes over the corpus — **55.472482%** of the plain total and **17.341392%** of the canonical pixels — with a **UI screenshot** at **274.325592%** and a **pixel-art** image at **265.562284%**, and the corpus's worst single case at **1451.79197%**; the payload also pushes **three** files over the 10 MB ceiling. The fidelity is measured too: **37.2237 dB** pooled PSNR, a worst single difference of **170** levels, a worst image at **13.3972 dB**, and **4** pixel-art images whose GPU payload is byte-for-byte identical to the original. **BC7 and ASTC are not implemented**; the ids are free for them. The **editing engine refuses a GPU file** rather than copying a stale payload. Evidence: `docs/P13_GPU_REPORT.md`, `docs/VPNG_SPEC_0_5.md`, `docs/decisions/ADR-0019-gpu-payloads.md`, `benchmarks/p13_gpu_results.json` |
 
 ### 2.2 The feature backlog (the capabilities proposed for the project)
 
@@ -97,7 +97,7 @@ not lost.
 | WebAssembly (WASM) package | proposed; not previously in the roadmap | **P12** | PARTIAL — the **decoder** is DONE | A `wasm32` build of the decoder is in: `crates/vpng-wasm` and the JavaScript wrapper `wasm/vpng.js`. It is the **same** decoder the command line runs — the same `vpng-decoder`, the same `vpng-codecs`, the same shared container validation — and the ABI is a **raw `extern "C"`**: no `wasm-bindgen`, no generated glue and **no new dependency**. Measured over the whole 750-image corpus, the module's canonical digest for a region is the command line's on **750 of 750 images**, on the whole-file path **and** on the range path, and the range path moves **exactly** the bytes the native streaming reader moves. The module was **slower** than the native reader — by about 10% at the median — and that is reported rather than hidden. The constraint held: the file format did not change to suit the browser. **Still open**: the browser **viewer** and the browser **editor**, and the module does not encode. Evidence: `docs/P11_WASM_REPORT.md`, `docs/decisions/ADR-0017-wasm-abi.md`, `benchmarks/p11_wasm_results.json`. |
 | HTTP Range-request cloud streaming | proposed; not previously in the roadmap | **P13** | **DONE** | A reader that fetches the 64-byte header, the directory, and then tile payloads by byte range from an object store. The format already supported it: every tile payload has its own offset and length, so **no format change was needed or made**. The byte source is now a trait (`ByteSource`) with a local implementation (`FileSource`) and a network one (`HttpSource`), and `RangeReader<S>` is generic over it — so the local and the network readers are the **same code path**, and the container validation and the tile payload decoding are **one** shared function each. Measured over the whole 750-image corpus: **750 of 750** HTTP reads return **exactly** the same pixels as the local read, the header and directory cost **0.0901%** of the corpus, and a 1024×1024 viewport of the 16K photograph costs **0.8369%** of that file. A server that ignores `Range`, answers the wrong range, truncates the body or claims a length that disagrees with the probe is **refused**. Evidence: `docs/P10_HTTP_REPORT.md`. |
 | Multi-layer / mask compositing | proposed; not previously in the roadmap | **P14** | DONE | Several named tile grids in one file, in the **v0.4** format revision. The revision moves **no byte**: the header's reserved last eight bytes hold the layer table's offset and length, and the directory entry's `flags` holds the layer index in bits 8..11. The 64-byte header and the 40-byte directory entry keep their exact layouts, so the older files still read unchanged. A **mask** is a layer whose alpha channel is its coverage; the blend is straight-alpha and **integer**, so it is deterministic, and a one-layer file composites to **exactly** its own pixels. Measured over the whole 750-image corpus: **750 of 750** one-layer composites are byte-identical to the canonical pixels, **750 of 750** two-layer base layers are byte-identical to the original, the two-layer composite provably differs on **750 of 750**, the 114 alpha-format images all take a mask that changes the result, and **0** files failed `vpng check`. The layer table costs a fixed **60 bytes** per file — **0.009917%** of the corpus's bytes, but **1.643426%** of a pixel-art file and **54.054054%** of the corpus's smallest file (111 bytes), and all three numbers are reported. The **editing engine refuses a layered file** rather than dropping its layers. Evidence: `docs/P12_LAYERS_REPORT.md`, `docs/VPNG_SPEC_0_4.md`, `docs/decisions/ADR-0018-layers-and-masks.md`. |
-| GPU texture block support (BC7/ASTC) | proposed; not previously in the roadmap | **P15** | NOT STARTED | Optional GPU-ready tile payloads. This **changes the codec table** and needs a format revision on the same terms as P14. It is also the one item on this list that is not lossless in the same sense as the rest — a BC7 payload is a lossy GPU block format — so it must be a separate, explicitly named payload kind and never a silent substitute for a lossless tile. |
+| GPU texture block support (BC7/ASTC) | proposed; not previously in the roadmap | **P15** | DONE | Optional GPU-ready tile payloads, in the **v0.5** format revision. The revision moves **no published byte**: the header grows to **72 bytes** through the `header_size` field that exists for that purpose, and the checksum rule is unchanged for a 64-byte header. The GPU payload is an **optional, explicitly named, lossy sibling** of the lossless payload, never a silent substitute: a directory entry **never** names a GPU block codec (id 7 `bc1`, id 8 `bc4`), nothing exact reads the GPU payload, and the file reports the size of **both** payloads. The block codecs live in their own crate (`crates/vpng-gpu`), because `vpng-codecs`'s contract is that a codec is *exactly reversible* and neither BC1 nor BC4 is. The payloads are **interleaved** with the lossless ones so the encoder never holds the whole GPU region in memory, and a **mask layer's** tile carries BC4 coverage alone. Measured over the whole 750-image corpus: **750 of 750** GPU files still reconstruct the picture byte for byte through their lossless payload, **0** files failed `vpng check`, and the default path's total is the published baseline's **453,767,460** bytes. The cost is stated and it is large: **251,716,072** bytes over the corpus — **55.472482%** of the plain total, **274.325592%** of a UI screenshot's — and the fidelity is measured too: **37.2237 dB** pooled PSNR with a worst image at **13.3972 dB** and a worst single difference of **170** levels. **BC7 and ASTC are not implemented**; the ids are free for them. The **editing engine refuses a GPU file**. Evidence: `docs/P13_GPU_REPORT.md`, `docs/VPNG_SPEC_0_5.md`, `docs/decisions/ADR-0019-gpu-payloads.md`. |
 
 Two rules govern every row above:
 
@@ -108,7 +108,12 @@ Two rules govern every row above:
   the v0.4 revision is written down in `docs/VPNG_SPEC_0_4.md` and
   `docs/decisions/ADR-0018-layers-and-masks.md`, the older files are
   unchanged because the two fields that gained a job were **reserved** bytes,
-  and the compatibility is pinned by the test suite. P15 has not started.
+  and the compatibility is pinned by the test suite. P15 met it the same
+  way: the v0.5 revision is written down in `docs/VPNG_SPEC_0_5.md` and
+  `docs/decisions/ADR-0019-gpu-payloads.md`, the older files are unchanged
+  because the header grows only through the `header_size` field that exists
+  for that purpose and the checksum rule is the same for a 64-byte header,
+  and the compatibility is pinned by the test suite.
 * **An item may not be claimed before it is measured.** Every row stays
   NOT STARTED until it has a test that executes, in the same way the phase
   gates do.
@@ -312,20 +317,24 @@ profiles, `x86_64-pc-windows-gnu`.
 | `vpng-cli` `tests/v2_features.rs` | 6 | ok |
 | `vpng-cli` `tests/v3_features.rs` | 7 | ok (the v0.3 surface) |
 | `vpng-cli` `tests/v4_features.rs` | 9 | ok (the v0.4 layer surface) |
+| `vpng-cli` `tests/v5_features.rs` | 9 | ok (the v0.5 GPU surface) |
 | `vpng-codecs` unit | 113 | ok |
-| `vpng-container` unit | 29 | ok (the header, the directory and the layer table) |
+| `vpng-container` unit | 44 | ok (the header, the directory, the layer table and the GPU table) |
 | `vpng-core` unit | 19 | ok |
-| `vpng-decoder` unit | 23 | ok (including the nine compositing tests) |
+| `vpng-decoder` unit | 27 | ok (including the nine compositing tests) |
 | `vpng-editing` unit | 41 | ok |
 | `vpng-editing` `tests/v3_commit.rs` | 4 | ok (the v0.3 version rule on commit) |
 | `vpng-editing` `tests/v4_layers.rs` | 3 | ok (the refusal of a layered file) |
+| `vpng-editing` `tests/v5_gpu.rs` | 3 | ok (the refusal of a GPU file) |
 | `vpng-encoder` unit | 26 | ok |
 | `vpng-encoder` `tests/parallel_identity.rs` | 8 | ok (288 encode cases: 144 per codec set) |
 | `vpng-encoder` `tests/layer_identity.rs` | 6 | ok (the layered encoder's byte identity) |
+| `vpng-encoder` `tests/gpu_identity.rs` | 6 | ok (72 GPU encode cases, and the mask's BC4-only mapping) |
 | `vpng-fuzzing` unit | 0 | ok |
 | `vpng-fuzzing` bin `vpng-fuzz-mutate` | 0 | ok |
 | `vpng-fuzzing` `tests/fuzz_smoke.rs` | 3 | ok |
 | `vpng-fuzzing` `tests/fuzz_regressions.rs` | 3 | ok |
+| `vpng-gpu` unit | 21 | ok (the BC1 and BC4 block codecs) |
 | `vpng-http` unit | 9 | ok (the HTTP Range source, against a hand-written server) |
 | `vpng-image` unit | 3 | ok (the PNG and raw conversion, moved from the CLI) |
 | `vpng-python` unit | 0 | ok (the extension is tested from Python) |
@@ -345,15 +354,16 @@ profiles, `x86_64-pc-windows-gnu`.
 | `tests/v2_formats.rs` | 10 | ok (the v0.2 format revision) |
 | `tests/v3_formats.rs` | 9 | ok (the v0.3 format revision) |
 | `tests/v4_formats.rs` | 16 | ok (the v0.4 format revision) |
+| `tests/v5_formats.rs` | 16 | ok (the v0.5 format revision) |
 | `vpng-tiling` unit | 18 | ok |
 | `vpng-validation` unit | 8 | ok |
 | `vpng-validation` `tests/mem_tracking.rs` | 2 | ok |
 | `vpng-validation` bins | 0 | ok |
 | `vpng-wasm` unit | 10 | ok (the registry, on the host) |
 | Doc-tests | 0 | ok |
-| **Total** | **536** | **536 passed, 0 failed** |
+| **Total** | **610** | **610 passed, 0 failed** |
 
-**The WebAssembly package adds 15 tests of its own**, run by
+**The WebAssembly package adds 18 tests of its own**, run by
 `node --test wasm/test/vpng.test.mjs`: the module's canonical digest for a region is the
 command line's, byte for byte; a region in the middle of the picture is the
 command line's region; the layout the module reports is the layout the
@@ -364,14 +374,16 @@ wrong length is refused; a file that is not a container is refused; a
 pointer outside the module's memory is refused rather than obeyed; every
 payload checksum verifies; the SHA-256 is the known one; the module reports
 the format version it understands; **the layers are visible to the module and
-their pixels are exact**; and **the parts path opens a layered container with
-its layer table**.
+their pixels are exact**; **the parts path opens a layered container with
+its layer table**; **the GPU payload is visible to the module and it is
+LOSSY**; **the parts path opens a container with its GPU table**; and **a
+container without a GPU table says so**.
 
-A sixteenth check, `wasm/check_exports.mjs`, asserts that all **36**
+A sixteenth check, `wasm/check_exports.mjs`, asserts that all **47**
 documented exports are really exported, that the module exports a linear
 memory, and that closing handle zero fails rather than succeeds.
 
-**The Python binding adds 53 tests of its own**, run by
+**The Python binding adds 62 tests of its own**, run by
 `python -m unittest discover -s python/tests`: the round trip is exact for
 8-bit and 16-bit pixels and for grayscale; the worker count does not change
 the file; the stable and extended codec sets both round-trip; the palette
@@ -383,9 +395,14 @@ the document's own pixel format. Eight more cover the **layer model**: the
 file is a v0.4 file; the layers are listed with their own accounting; every
 layer decodes to its own pixels; a one-layer file composites to the base; the
 composite applies the mask; the editing engine refuses a layered file; a
-layer without pixels is refused; and an empty layer list is refused. The
-three unit tests that used to live in the CLI's `convert.rs` moved with the
-code into `crates/vpng-image`, so the Rust total did not change.
+layer without pixels is refused; and an empty layer list is refused. Nine
+more cover the **GPU payload**: the file is a v0.5 file; the default encode is
+still a v0.1 file; the lossless pixels still round-trip exactly; the GPU
+payload is lossy; the GPU table is listed; a file without a GPU table says
+so; the editing engine refuses a GPU file; a 16-bit picture is refused; and a
+layered file's mask carries its coverage alone. The three unit tests that
+used to live in the CLI's `convert.rs` moved with the code into
+`crates/vpng-image`, so the Rust total did not change.
 
 The 115 new tests are: 52 codec tests (22 LZ77, 14 CARC, 12 hybrids, plus
 the registry and entropy-stage tests), 51 editing tests, 3 fuzzing tests,
@@ -453,6 +470,49 @@ so it was transparent rather than opaque; and a test's "the mask must not
 cover" fixture covered its layer after all. The first was a real defect in
 the decoder; the other two were defects in the tests, and they are recorded
 here because a test that cannot fail is worse than no test.
+
+**The v0.5 GPU revision added 74 more** (536 → 610): 21 in the new crate
+`crates/vpng-gpu` (the BC1 and BC4 block codecs — the reference five-bit and
+six-bit expansions, the interpolated colours, the three-colour mode's opaque
+fourth entry, BC4's reference weights and its two modes, and the payload
+lengths the geometry implies), 16 in
+`crates/vpng-testkit/tests/v5_formats.rs` (the default path is still v0.1; a
+GPU file is a v0.5 file with a 72-byte header; the GPU flag is orthogonal to
+the others; the lossless payload still reconstructs the picture exactly; the
+GPU payload is lossy; the table holds one record per tile; a record without
+alpha names no alpha codec; every payload length matches the geometry; every
+payload checksum matches; the bytes add up; a directory entry may never name
+a GPU block codec; a flipped GPU byte is refused; a wrong record count is
+refused; an older file may not claim the GPU feature; a 16-bit picture is
+refused; and a file without a GPU table has none), 15 in the container's unit
+tests (the GPU table's round trip, its checksum, a truncated table, a corrupt
+table, the records' own layout, and the header's new fields), 9 in
+`crates/vpng-cli/tests/v5_features.rs` (the command line's GPU surface, and
+a layered file whose mask carries its coverage alone), 6 in
+`crates/vpng-encoder/tests/gpu_identity.rs` (72 GPU encode cases agree
+across 1, 2, 4 and 8 workers and across the batch and streaming paths; the
+lossless payload is untouched; the file grows by exactly the GPU payload and
+the table; a 16-bit picture is refused; and a mask's tile carries BC4
+coverage and no colour blocks), 4 in the decoder's unit tests (the GPU
+payload's length follows the geometry, an unknown codec is refused, and the
+GPU payload decodes to RGBA8), 3 in
+`crates/vpng-editing/tests/v5_gpu.rs` (the editing engine refuses a GPU file,
+in memory and on disk, and a flat file is still accepted), and the rest in the
+crates the revision touched.
+
+Two **defects** were found and fixed while that work was in progress, and
+both are recorded here because one of them was a documentation disagreement
+and the other was a hang. First, the specification and the decision record
+described a **32-byte** GPU-table header while the code wrote a **24-byte**
+one; the code was right — the extra reserved word bought nothing, because a
+reader already learns the table's length from the main header and learns
+where the descriptor array starts from the header's fixed size — and the two
+documents were corrected to match it. Second, the encoder did not implement
+the rule that a **mask layer's** tile carries BC4 coverage alone: the mask's
+kind was not carried through to the per-tile encoder at all. The rule is now
+implemented and pinned by a test, and it is reachable from the public
+surfaces (`vpng encode-layers --gpu` and the Python
+`encode_layers(..., gpu=True)`), not only from the Rust API.
 
 ## 6. Defects found and fixed this phase
 
@@ -744,7 +804,7 @@ not just a list.
 | v0.12 | WebAssembly package | measure decode time per codec **on the target device** and re-tune the auto-selection thresholds for that device; the build ships the stable codecs only | no | P12 | **PARTIAL** (the **decoder** shipped with the P11 milestone: the module is the same decoder the command line runs, behind a raw `extern "C"` ABI with no new dependency, and it was measured over the whole 750-image corpus — **750 of 750** regions identical to the native read on both the whole-file path and the range path, and the range path moves **exactly** the bytes the native reader moves. The module decodes the **stable** codecs only. The **per-codec** decode time **on the target device** has **not** been measured, and the auto-selection thresholds have **not** been re-tuned, because the measurement host is a Windows desktop and not a browser. Evidence: `docs/P11_WASM_REPORT.md`) |
 | v0.13 | graphical editor | the editor shows a dry-run comparison — what the file would weigh under a different codec — before the commit, measured with the encoder's own selection function | no | P11 | NOT STARTED |
 | v0.14 | layers and masks | each layer is compressed independently and the container reports the per-layer ratio; cross-layer prediction is explicitly out of scope | **yes** — several grids in one file | P14 | **DONE** (the layer model shipped in format **0.4** with the P12 milestone: the layers are compressed **independently**, the container reports the **per-layer ratio** and the reader recomputes it from the directory and refuses a mismatch, and **cross-layer prediction is explicitly out of scope** — the whole 750-image corpus was measured, **750 of 750** one-layer composites are byte-identical to the canonical pixels and the two-layer base layers are byte-identical to the original, the two-layer composite provably differs on **750 of 750**, the 114 alpha-format images all take a mask that changes the result, and **0** files failed `vpng check`. The layer table costs a fixed **60 bytes** per file — **0.009917%** of the corpus's bytes, but **1.643426%** of a pixel-art file and **54.054054%** of the corpus's smallest file (111 bytes), and all three numbers are reported. The **editing engine refuses a layered file** rather than dropping its layers. Evidence: `docs/P12_LAYERS_REPORT.md`, `docs/VPNG_SPEC_0_4.md`, `docs/decisions/ADR-0018-layers-and-masks.md`) |
-| v0.15 | GPU-ready payloads | the lossless payload stays normative; the GPU payload is an optional sibling, and the size of both is reported so the trade is visible rather than implied | **yes** — the payload kinds | P15 | NOT STARTED |
+| v0.15 | GPU-ready payloads | the lossless payload stays normative; the GPU payload is an optional sibling, and the size of both is reported so the trade is visible rather than implied | **yes** — the payload kinds | P15 | **DONE** (the GPU payload shipped in format **0.5** with the P13 milestone: the GPU payload is an **optional, explicitly named, lossy sibling** of the lossless payload, never a silent substitute — a directory entry **never** names a GPU block codec (id 7 `bc1`, id 8 `bc4`), nothing exact reads the GPU payload, and the file reports the size of **both** payloads. The header grows to **72 bytes** through the `header_size` field that exists for that purpose, and the checksum rule is unchanged for a 64-byte header, so **no published byte moves**. The whole 750-image corpus was measured: **750 of 750** GPU files still reconstruct the picture byte for byte through their lossless payload, **0** files failed `vpng check`, and the default path's total is the published baseline's **453,767,460** bytes. The cost is stated and it is large: **251,716,072** bytes over the corpus — **55.472482%** of the plain total and **274.325592%** of a UI screenshot's — and the fidelity is measured too: **37.2237 dB** pooled PSNR, a worst image at **13.3972 dB**, and a worst single difference of **170** levels. **BC7 and ASTC are not implemented**; the ids are free for them. The **editing engine refuses a GPU file**. Evidence: `docs/P13_GPU_REPORT.md`, `docs/VPNG_SPEC_0_5.md`, `docs/decisions/ADR-0019-gpu-payloads.md`) |
 | v0.16 | shared dictionaries | a dictionary shared across the tiles of one layer, measured against the per-tile dictionary on the same corpus | **yes** — the payload context | P7 | NOT STARTED |
 | v0.17 | context modelling | promote a research context model to a stable id **only** if it beats the stable predictor on the full corpus; the evidence is the comparison table, not the seed | **yes** — the codec table | P7, P2 | NOT STARTED |
 | v0.18 | parallel encoding | parallel encoding must not change the bytes: the same file must come out of one thread and of four, byte for byte | no | P5.1, P2 | **DONE** (the parallel encoder landed with P5.1: one worker and N workers produce the same file, verified by digest over 144 encode cases and by the 16K benchmark's four worker counts) |

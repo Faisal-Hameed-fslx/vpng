@@ -170,7 +170,7 @@ test.after(() => {
 test('the module reports the container format it understands', () => {
   const version = vpng.formatVersion();
   assert.equal(version >>> 16, 0, 'the major version is zero');
-  assert.equal(version & 0xffff, 4, 'the minor version is four');
+  assert.equal(version & 0xffff, 5, 'the minor version is five');
 });
 
 test('the pixels are the command line pixels, byte for byte', () => {
@@ -434,5 +434,80 @@ test('the parts path opens a layered container with its layer table', () => {
 
   assert.equal(vpng.layerCount(handle), 3, 'the container has three layers');
   assert.equal(vpng.layerName(handle, 1), 'ink');
+  vpng.close(handle);
+});
+
+test('the GPU payload is visible, and it is LOSSY', () => {
+  const { container, bytes } = encode('gpu', 128, 96, ['--gpu']);
+  const handle = vpng.open(new Uint8Array(bytes));
+
+  assert.equal(vpng.gpuHasTable(handle), true, 'the container has a GPU table');
+  assert.equal(vpng.gpuRecordCount(handle), vpng.tileCount(handle));
+  assert.ok(vpng.gpuPayloadBytes(handle) > 0, 'the GPU payloads are empty');
+  assert.equal(vpng.gpuColourCodec(handle, 0), 7, 'the colour codec is BC1');
+  assert.equal(vpng.gpuAlphaCodec(handle, 0), 0, 'an RGB8 tile has no alpha blocks');
+
+  // The GPU payload decodes to RGBA8, whatever the file's own format is.
+  const pixels = vpng.decodeGpuRegion(handle, 0, 0, 128, 96);
+  assert.equal(pixels.length, 128 * 96 * 4, 'the GPU region is the wrong size');
+
+  // The lossless payload is untouched: the exact pixels still come back
+  // exactly.
+  const native = runJson([
+    'decode-region',
+    container,
+    join(work, 'gpu-exact.png'),
+    '--x',
+    '0',
+    '--y',
+    '0',
+    '--width',
+    '128',
+    '--height',
+    '96',
+  ]);
+  const exact = vpng.decodeRegion(handle, 0, 0, 128, 96);
+  const digest = vpng.canonicalDigest(exact, 128, 96, vpng.format(handle));
+  assert.equal(digest, native.sha256, 'the exact pixels changed');
+
+  // The GPU payload is lossy, so it is NOT the same picture.
+  const lossyDigest = vpng.canonicalDigest(pixels, 128, 96, 6);
+  assert.notEqual(lossyDigest, digest, 'the GPU payload is not lossy');
+
+  vpng.close(handle);
+});
+
+test('the parts path opens a container with its GPU table', () => {
+  const { bytes } = encode('parts-gpu', 128, 96, ['--gpu']);
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const headerSize = view.getUint32(12, true);
+  assert.equal(headerSize, 72, 'a v0.5 header is 72 bytes');
+  const directoryOffset = Number(view.getBigUint64(32, true));
+  const tileCount = view.getUint32(28, true);
+  const directorySize = tileCount * 40 + 4;
+  // The GPU table's offset and length are at bytes 64 and 68.
+  const tableOffset = view.getUint32(64, true);
+  const tableLength = view.getUint32(68, true);
+  assert.ok(tableLength > 0, 'the container declares a GPU table');
+
+  const handle = vpng.openPartsWithTables(
+    new Uint8Array(bytes.subarray(0, headerSize)),
+    new Uint8Array(bytes.subarray(directoryOffset, directoryOffset + directorySize)),
+    null,
+    new Uint8Array(bytes.subarray(tableOffset, tableOffset + tableLength)),
+    bytes.length,
+  );
+
+  assert.equal(vpng.gpuHasTable(handle), true, 'the container has a GPU table');
+  assert.equal(vpng.gpuRecordCount(handle), tileCount);
+  vpng.close(handle);
+});
+
+test('a container without a GPU table says so', () => {
+  const { bytes } = encode('no-gpu', 64, 48);
+  const handle = vpng.open(new Uint8Array(bytes));
+  assert.equal(vpng.gpuHasTable(handle), false, 'the container claims a GPU table');
+  assert.equal(vpng.gpuRecordCount(handle), 0);
+  assert.throws(() => vpng.decodeGpuRegion(handle, 0, 0, 64, 48), VpngError);
   vpng.close(handle);
 });

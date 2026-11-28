@@ -3,7 +3,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use vpng_container::{Directory, DirectoryEntry, Header, HEADER_SIZE};
+use vpng_container::{Directory, DirectoryEntry, GpuTable, Header, HEADER_SIZE};
 use vpng_core::{CanonicalImage, Dimensions, Error, Limits, PixelFormat, Rect, Result};
 use vpng_decoder::{Layer, Level};
 use vpng_tiling::Partition;
@@ -21,6 +21,8 @@ pub struct ContainerMeta {
     header: Header,
     directory: Directory,
     layers: Vec<Layer>,
+    /// The GPU payload table, when the file carries one.
+    gpu: Option<GpuTable>,
     format: PixelFormat,
 }
 
@@ -85,6 +87,11 @@ impl ContainerMeta {
         self.format
     }
 
+    /// The file's GPU payload table, when it has one.
+    pub fn gpu_table(&self) -> Option<&GpuTable> {
+        self.gpu.as_ref()
+    }
+
     /// The image's dimensions.
     pub fn dimensions(&self) -> Dimensions {
         Dimensions {
@@ -133,6 +140,7 @@ impl ContainerMeta {
         header_bytes: &[u8],
         directory_bytes: &[u8],
         layer_table_bytes: Option<&[u8]>,
+        gpu_table_bytes: Option<&[u8]>,
         file_size: u64,
         limits: &Limits,
     ) -> Result<Self> {
@@ -141,6 +149,7 @@ impl ContainerMeta {
             header,
             directory_bytes,
             layer_table_bytes,
+            gpu_table_bytes,
             file_size,
             limits,
         )
@@ -156,6 +165,7 @@ impl ContainerMeta {
         header: Header,
         directory_bytes: &[u8],
         layer_table_bytes: Option<&[u8]>,
+        gpu_table_bytes: Option<&[u8]>,
         file_size: u64,
         limits: &Limits,
     ) -> Result<Self> {
@@ -163,6 +173,7 @@ impl ContainerMeta {
             header,
             directory_bytes,
             layer_table_bytes,
+            gpu_table_bytes,
             file_size,
             limits,
         )?;
@@ -171,6 +182,7 @@ impl ContainerMeta {
             header: *parts.header(),
             directory: parts.directory().clone(),
             layers: parts.layers().to_vec(),
+            gpu: parts.gpu_table().cloned(),
             format: parts.format(),
         })
     }
@@ -223,8 +235,15 @@ impl<S: ByteSource> RangeReader<S> {
             )));
         }
 
-        // The header.
-        let header_bytes = source.read_at(0, HEADER_SIZE)?;
+        // The header. Its size is in the header itself, so the reader reads
+        // the first 64 bytes and then, only for a v0.5 file, the eight more
+        // that the GPU table's location needs.
+        let mut header_bytes = source.read_at(0, HEADER_SIZE)?;
+        let header_size = Header::header_size_from_prefix(&header_bytes)?;
+        if header_size > HEADER_SIZE {
+            let rest = source.read_at(HEADER_SIZE as u64, header_size - HEADER_SIZE)?;
+            header_bytes.extend_from_slice(&rest);
+        }
         let header = Header::parse(&header_bytes)?;
 
         // The directory.
@@ -242,23 +261,34 @@ impl<S: ByteSource> RangeReader<S> {
             None
         };
 
+        // The GPU payload table, when the container has one. It sits with the
+        // other tables.
+        let gpu_table_bytes = if header.has_gpu() {
+            let length = header.gpu_table_length as usize;
+            vpng_core::checked_range(header.gpu_table_offset as u64, length as u64, file_size)?;
+            Some(source.read_at(header.gpu_table_offset as u64, length)?)
+        } else {
+            None
+        };
+
         // The validation itself is shared with every other reader, so a
         // container this reader accepts is one every other reader accepts.
         let meta = ContainerMeta::from_parts(
             header,
             &directory_bytes,
             layer_table_bytes.as_deref(),
+            gpu_table_bytes.as_deref(),
             file_size,
             limits,
         )?;
 
-        let table_bytes = header.layer_table_length as u64;
+        let table_bytes = header.layer_table_length as u64 + header.gpu_table_length as u64;
 
         Ok(RangeReader {
             source,
             meta: Arc::new(meta),
             limits: *limits,
-            bytes_read: (HEADER_SIZE as u64) + directory_size as u64 + table_bytes,
+            bytes_read: (header_size as u64) + directory_size as u64 + table_bytes,
             payloads_read: 0,
         })
     }
@@ -340,6 +370,58 @@ impl<S: ByteSource> RangeReader<S> {
         let payload = self.read_at(entry.payload_offset, entry.compressed_length)?;
         self.payloads_read += 1;
         vpng_decoder::decode_tile_payload(index, &payload, &entry, self.meta.format, limits)
+    }
+
+    /// Fetch one tile's **GPU payload**.
+    ///
+    /// The bytes are read from the file's own range: no read-ahead, and no
+    /// part of any other tile. The payload's CRC32C is verified before the
+    /// bytes are handed over.
+    ///
+    /// The GPU payload is **lossy**. Nothing exact reads it.
+    pub fn gpu_payload(&mut self, index: usize) -> Result<Vec<u8>> {
+        let record = *self
+            .meta
+            .gpu_table()
+            .and_then(|table| table.get(index))
+            .ok_or_else(|| Error::unsupported("this file carries no GPU payload table"))?;
+        if !record.is_present() {
+            return Ok(Vec::new());
+        }
+        let payload = self.read_at(record.payload_offset, u64::from(record.payload_length))?;
+        let checksum = vpng_container::crc32c(&payload);
+        if checksum != record.payload_checksum {
+            return Err(Error::corrupt(format!(
+                "the GPU payload of tile {index} has checksum {checksum:#010x}, the table says {:#010x}",
+                record.payload_checksum
+            )));
+        }
+        self.payloads_read += 1;
+        Ok(payload)
+    }
+
+    /// Decode one tile's **GPU payload** into RGBA8 pixels.
+    ///
+    /// The result is **lossy**: BC1 and BC4 throw information away.
+    pub fn decode_gpu_tile(&mut self, index: usize) -> Result<Vec<u8>> {
+        let record = *self
+            .meta
+            .gpu_table()
+            .and_then(|table| table.get(index))
+            .ok_or_else(|| Error::unsupported("this file carries no GPU payload table"))?;
+        let entry = *self
+            .meta
+            .directory
+            .entries
+            .get(index)
+            .ok_or_else(|| Error::invalid(format!("tile index {index} is out of range")))?;
+        let payload = self.gpu_payload(index)?;
+        vpng_decoder::gpu::decode_gpu_tile(
+            &record,
+            u32::from(entry.width),
+            u32::from(entry.height),
+            &payload,
+        )
     }
 
     /// Decode a region of the image into a fresh buffer.

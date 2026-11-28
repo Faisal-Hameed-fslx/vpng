@@ -86,8 +86,10 @@ pub use layers::{encode_layers, encode_layers_parallel, LayerInput};
 
 use vpng_codecs::{get_codec, CodecSet, EncodeContext, CODEC_AUTO, CODEC_RAW};
 use vpng_container::{
-    crc32c, Directory, DirectoryEntry, Header, LayerDescriptor, LayerKind, LayerTable,
-    FEATURE_LAYERS, FEATURE_PYRAMID, HEADER_SIZE, MINOR_V0_1, MINOR_V0_2, MINOR_V0_3, MINOR_V0_4,
+    crc32c, Directory, DirectoryEntry, GpuRecord, GpuTable, Header, LayerDescriptor, LayerKind,
+    LayerTable, FEATURE_GPU, FEATURE_LAYERS, FEATURE_PYRAMID, GPU_RECORD_SIZE,
+    GPU_TABLE_HEADER_SIZE, HEADER_SIZE, HEADER_SIZE_V0_5, MINOR_V0_1, MINOR_V0_2, MINOR_V0_3,
+    MINOR_V0_4, MINOR_V0_5,
 };
 use vpng_core::{CanonicalImage, Dimensions, Error, ErrorKind, Limits, PixelFormat, Rect, Result};
 use vpng_tiling::{Partition, TileGeometry, TileGrid, TileRect};
@@ -123,6 +125,17 @@ pub struct EncodeOptions {
     pub adaptive: bool,
     /// The busyness threshold of the adaptive planner.
     pub adaptive_threshold: u32,
+    /// Give every tile an optional **lossy GPU payload** beside its lossless
+    /// one (a v0.5 file).
+    ///
+    /// The GPU payload holds the same picture in the block format a GPU
+    /// samples as a texture: BC1 colour blocks, and BC4 blocks for the alpha
+    /// channel. It is **lossy**, it is never used to reconstruct the image,
+    /// and it never replaces the lossless payload — it sits beside it.
+    ///
+    /// The default is off, so the default path still writes the exact v0.1
+    /// bytes the golden fixtures pin.
+    pub gpu: bool,
 }
 
 impl Default for EncodeOptions {
@@ -138,6 +151,7 @@ impl Default for EncodeOptions {
             pyramid_levels: DEFAULT_PYRAMID_LEVELS,
             adaptive: false,
             adaptive_threshold: adaptive::DEFAULT_THRESHOLD,
+            gpu: false,
         }
     }
 }
@@ -234,6 +248,20 @@ impl EncodeOptions {
         self.codec_set == CodecSet::V0_3
             || (self.codec_id != CODEC_AUTO && vpng_codecs::is_v0_3_codec(self.codec_id))
     }
+
+    /// Give every tile a **lossy GPU payload** beside its lossless one.
+    ///
+    /// The file becomes a **v0.5** file: it carries a GPU payload table, and
+    /// its header grows to 72 bytes. The lossless payload is untouched and
+    /// still reconstructs the image exactly.
+    ///
+    /// A 16-bit picture has no GPU payload: the block codecs hold eight bits
+    /// per channel, and the encoder refuses rather than quietly dropping the
+    /// precision.
+    pub fn with_gpu(mut self) -> Self {
+        self.gpu = true;
+        self
+    }
 }
 
 /// The produced file plus per-tile diagnostics.
@@ -274,6 +302,14 @@ pub struct EncodeReport {
     pub layer_uncompressed_bytes: Vec<u64>,
     /// The compressed payload bytes of each layer, in layer order.
     pub layer_compressed_bytes: Vec<u64>,
+    /// The number of bytes the file's GPU payloads occupy.
+    ///
+    /// Zero for every file written before v0.5. The figure is reported
+    /// beside the lossless payload's so that the trade a GPU payload makes is
+    /// visible rather than implied.
+    pub gpu_payload_bytes: u64,
+    /// The number of bytes the file's GPU payload table occupies.
+    pub gpu_table_bytes: u64,
 }
 
 impl EncodeReport {
@@ -313,6 +349,11 @@ pub(crate) struct TilePayload {
     pub(crate) codec_id: u8,
     pub(crate) bytes: Vec<u8>,
     pub(crate) uncompressed_length: u32,
+    /// The tile's **lossy** GPU payload, when the file carries one.
+    ///
+    /// It is built from the tile's original pixels, before any prediction, so
+    /// it does not depend on the lossless codec that was chosen.
+    pub(crate) gpu: Option<vpng_gpu::GpuPayload>,
 }
 
 /// One encoded level: its geometry, its partition and its tiles.
@@ -363,7 +404,7 @@ pub fn encode(image: &CanonicalImage, options: &EncodeOptions) -> Result<EncodeR
 /// when the options ask for one. The preview levels, if any, are uniform
 /// grids over the downsampled image.
 pub(crate) fn plan_file(image: &CanonicalImage, options: &EncodeOptions) -> Result<FilePlan> {
-    validate_options(image.dimensions(), options)?;
+    validate_options(image.dimensions(), image.format(), options)?;
 
     let base = if options.adaptive {
         let grid = uniform_grid(image.dimensions(), options)?;
@@ -393,8 +434,12 @@ pub(crate) fn plan_file(image: &CanonicalImage, options: &EncodeOptions) -> Resu
 ///
 /// This is the path that needs no access to the picture's content, so it
 /// works with any pixel source.
-pub(crate) fn plan_uniform(dims: Dimensions, options: &EncodeOptions) -> Result<FilePlan> {
-    validate_options(dims, options)?;
+pub(crate) fn plan_uniform(
+    dims: Dimensions,
+    format: PixelFormat,
+    options: &EncodeOptions,
+) -> Result<FilePlan> {
+    validate_options(dims, format, options)?;
     Ok(FilePlan {
         base: uniform_partition(dims, options)?,
         previews: Vec::new(),
@@ -403,8 +448,17 @@ pub(crate) fn plan_uniform(dims: Dimensions, options: &EncodeOptions) -> Result<
 
 /// Check everything that must hold before any work starts, so a bad option
 /// fails cleanly rather than partway through a file.
-fn validate_options(dims: Dimensions, options: &EncodeOptions) -> Result<()> {
+fn validate_options(dims: Dimensions, format: PixelFormat, options: &EncodeOptions) -> Result<()> {
     options.limits.validate_dimensions(dims, "encode input")?;
+
+    // The GPU block codecs hold eight bits per channel. A 16-bit picture has
+    // no GPU payload, and the encoder refuses rather than quietly dropping
+    // the precision or quietly writing a lossy copy.
+    if options.gpu && format.bits != vpng_core::BitsPerChannel::Eight {
+        return Err(Error::invalid(
+            "GPU payloads are eight-bit block formats; a 16-bit picture has no GPU payload",
+        ));
+    }
 
     if options.tile_width == 0 || options.tile_height == 0 {
         return Err(Error::invalid("tile dimensions must be non-zero"));
@@ -490,8 +544,15 @@ pub(crate) fn encode_plan(
 ///
 /// The batch assembler and the streaming writer both call this, so the two
 /// cannot disagree about a file's version.
-pub(crate) fn content_minor(codec_ids: &[u8], v2_features: bool, has_layers: bool) -> u16 {
-    if has_layers {
+pub(crate) fn content_minor(
+    codec_ids: &[u8],
+    v2_features: bool,
+    has_layers: bool,
+    has_gpu: bool,
+) -> u16 {
+    if has_gpu {
+        MINOR_V0_5
+    } else if has_layers {
         MINOR_V0_4
     } else if codec_ids.iter().any(|&id| vpng_codecs::is_v0_3_codec(id)) {
         MINOR_V0_3
@@ -504,9 +565,9 @@ pub(crate) fn content_minor(codec_ids: &[u8], v2_features: bool, has_layers: boo
 
 /// Build the header a file's contents call for.
 ///
-/// The header layout is the same 64 bytes in every version; only the minor
-/// version, the feature flags and — from v0.4 — the layer table's location
-/// differ.
+/// The header is 64 bytes in every version up to v0.4, and 72 bytes in v0.5,
+/// which points at a GPU payload table. Only the minor version, the feature
+/// flags and the two tables' locations differ.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn build_header(
     minor: u16,
@@ -517,15 +578,32 @@ pub(crate) fn build_header(
     declared_file_size: u64,
     feature_flags: u32,
     layer_table: Option<(u32, u32)>,
+    gpu_table: Option<(u32, u32)>,
 ) -> Result<Header> {
+    let header_size = if minor >= MINOR_V0_5 {
+        HEADER_SIZE_V0_5
+    } else {
+        HEADER_SIZE
+    };
+    let directory_offset = header_size as u64;
+
     let header = match minor {
+        MINOR_V0_5 => Header::new_v5(
+            dims.width,
+            dims.height,
+            format,
+            default_codec,
+            tile_count,
+            directory_offset,
+            declared_file_size,
+        )?,
         MINOR_V0_4 => Header::new_v4(
             dims.width,
             dims.height,
             format,
             default_codec,
             tile_count,
-            HEADER_SIZE as u64,
+            directory_offset,
             declared_file_size,
         )?,
         MINOR_V0_3 => Header::new_v3(
@@ -534,7 +612,7 @@ pub(crate) fn build_header(
             format,
             default_codec,
             tile_count,
-            HEADER_SIZE as u64,
+            directory_offset,
             declared_file_size,
         )?,
         MINOR_V0_2 => Header::new_v2(
@@ -543,7 +621,7 @@ pub(crate) fn build_header(
             format,
             default_codec,
             tile_count,
-            HEADER_SIZE as u64,
+            directory_offset,
             declared_file_size,
         )?,
         _ => Header::new(
@@ -552,13 +630,17 @@ pub(crate) fn build_header(
             format,
             default_codec,
             tile_count,
-            HEADER_SIZE as u64,
+            directory_offset,
             declared_file_size,
         )?,
     };
     let header = header.with_feature_flags(feature_flags);
-    Ok(match layer_table {
+    let header = match layer_table {
         Some((offset, length)) => header.with_layer_table(offset, length),
+        None => header,
+    };
+    Ok(match gpu_table {
+        Some((offset, length)) => header.with_gpu_table(offset, length),
         None => header,
     })
 }
@@ -591,6 +673,15 @@ pub(crate) fn assemble(
 
     let directory_size = Directory::total_size(tile_count)?;
 
+    // Whether the file carries a GPU payload table decides the header's size,
+    // and so where the directory starts.
+    let has_gpu = options.gpu;
+    let header_size = if has_gpu {
+        HEADER_SIZE_V0_5
+    } else {
+        HEADER_SIZE
+    };
+
     // The layer table's bytes are known before the payload offsets are: its
     // length depends only on the layer names and the number of layers, and
     // its contents — the per-layer byte accounting — depend on the payloads,
@@ -602,17 +693,38 @@ pub(crate) fn assemble(
             let table = LayerTable::new(descriptors);
             table.validate()?;
             let bytes = table.encode()?;
-            let offset = vpng_core::checked_add(HEADER_SIZE as u64, directory_size as u64)?;
+            let offset = vpng_core::checked_add(header_size as u64, directory_size as u64)?;
             let offset = vpng_core::checked_usize(offset)? as u32;
             let length = vpng_core::checked_usize(bytes.len() as u64)? as u32;
             (Some(bytes), Some((offset, length)))
         }
     };
 
-    let mut cursor = vpng_core::checked_add(HEADER_SIZE as u64, directory_size as u64)?;
+    // The GPU table holds one fixed-size record per tile, so its length is
+    // known before the payloads are: it depends only on the tile count.
+    let gpu_table_size = if has_gpu {
+        GPU_TABLE_HEADER_SIZE + GPU_RECORD_SIZE * tile_count as usize
+    } else {
+        0
+    };
+    let gpu_table_range = if has_gpu {
+        let offset = vpng_core::checked_add(header_size as u64, directory_size as u64)?;
+        let offset = vpng_core::checked_add(
+            offset,
+            layer_table_bytes.as_ref().map_or(0, |b| b.len()) as u64,
+        )?;
+        let offset = vpng_core::checked_usize(offset)? as u32;
+        let length = vpng_core::checked_usize(gpu_table_size as u64)? as u32;
+        Some((offset, length))
+    } else {
+        None
+    };
+
+    let mut cursor = vpng_core::checked_add(header_size as u64, directory_size as u64)?;
     if let Some(bytes) = layer_table_bytes.as_ref() {
         cursor = vpng_core::checked_add(cursor, bytes.len() as u64)?;
     }
+    cursor = vpng_core::checked_add(cursor, gpu_table_size as u64)?;
 
     let mut entries: Vec<DirectoryEntry> = Vec::with_capacity(tile_count as usize);
     let mut chosen_codecs: Vec<u8> = Vec::with_capacity(tile_count as usize);
@@ -620,6 +732,8 @@ pub(crate) fn assemble(
     let mut uncompressed_lengths: Vec<u32> = Vec::with_capacity(tile_count as usize);
     let mut level_tile_counts: Vec<u32> = Vec::with_capacity(levels.len());
     let mut level_payload_bytes: Vec<u64> = Vec::with_capacity(levels.len());
+    let mut gpu_records: Vec<GpuRecord> = Vec::with_capacity(tile_count as usize);
+    let mut gpu_payload_bytes = 0u64;
 
     for level in levels {
         let flags = DirectoryEntry::flags_for_level_and_layer(level.index, level.layer)?;
@@ -646,6 +760,36 @@ pub(crate) fn assemble(
             chosen_codecs.push(payload.codec_id);
             compressed_lengths.push(payload.bytes.len() as u64);
             uncompressed_lengths.push(payload.uncompressed_length);
+
+            // The tile's GPU payload follows its lossless payload, and the
+            // table's record says where it is.
+            let record = match payload.gpu.as_ref() {
+                Some(gpu) => {
+                    let bytes = gpu.bytes();
+                    let length = u32::try_from(bytes.len()).map_err(|_| {
+                        Error::resource_limit("a tile's GPU payload length exceeds u32")
+                    })?;
+                    let record = GpuRecord {
+                        payload_offset: cursor,
+                        payload_length: length,
+                        colour_codec: gpu.colour_codec().map_or(0, |codec| codec.id()),
+                        alpha_codec: gpu.alpha_codec().map_or(0, |codec| codec.id()),
+                        payload_checksum: crc32c(&bytes),
+                    };
+                    cursor = vpng_core::checked_add(cursor, bytes.len() as u64)?;
+                    gpu_payload_bytes =
+                        vpng_core::checked_add(gpu_payload_bytes, bytes.len() as u64)?;
+                    record
+                }
+                None => GpuRecord {
+                    payload_offset: 0,
+                    payload_length: 0,
+                    colour_codec: 0,
+                    alpha_codec: 0,
+                    payload_checksum: 0,
+                },
+            };
+            gpu_records.push(record);
         }
         level_tile_counts.push(level.partition.len() as u32);
         level_payload_bytes.push(level_bytes);
@@ -653,6 +797,21 @@ pub(crate) fn assemble(
 
     let directory = Directory::new(entries);
     let directory_bytes = directory.encode()?;
+
+    // The GPU table, whose records are the per-tile GPU payload locators.
+    let gpu_table_bytes = if has_gpu {
+        let table = GpuTable::new(gpu_records);
+        let bytes = table.encode()?;
+        if bytes.len() != gpu_table_size {
+            return Err(Error::internal(format!(
+                "the GPU table is {} bytes, the reservation was {gpu_table_size}",
+                bytes.len()
+            )));
+        }
+        Some(bytes)
+    } else {
+        None
+    };
 
     // The header's default codec is informational; the per-tile entry is
     // authoritative (ADR-0003). Record Raw for an auto-selected file.
@@ -667,20 +826,24 @@ pub(crate) fn assemble(
     // reader; a file that does not, does not. The default path stays v0.1, so
     // the bytes the golden fixtures pin do not move.
     let has_layers = layer_meta.is_some();
-    let minor = content_minor(&chosen_codecs, options.is_v2(), has_layers);
+    let minor = content_minor(&chosen_codecs, options.is_v2(), has_layers, has_gpu);
 
     // The pyramid flag and the levels must agree: a file with more than one
     // level says so, and a file that says so has more than one level. The
     // layer flag and the layer table must agree too, and the two flags are
     // mutually exclusive in v0.4 — a layered file has exactly one level per
-    // layer, so it never has a pyramid.
-    let feature_flags = if has_layers {
-        FEATURE_LAYERS
+    // layer, so it never has a pyramid. The GPU flag is orthogonal to both:
+    // the GPU payload is a sibling of the lossless payload, not a replacement
+    // for it.
+    let mut feature_flags = 0u32;
+    if has_layers {
+        feature_flags |= FEATURE_LAYERS;
     } else if levels.len() > 1 {
-        FEATURE_PYRAMID
-    } else {
-        0
-    };
+        feature_flags |= FEATURE_PYRAMID;
+    }
+    if has_gpu {
+        feature_flags |= FEATURE_GPU;
+    }
     let header = build_header(
         minor,
         dims,
@@ -690,6 +853,7 @@ pub(crate) fn assemble(
         cursor,
         feature_flags,
         layer_table_range,
+        gpu_table_range,
     )?;
 
     let capacity = vpng_core::checked_usize(cursor)?;
@@ -699,9 +863,16 @@ pub(crate) fn assemble(
     if let Some(table) = layer_table_bytes.as_ref() {
         bytes.extend_from_slice(table);
     }
+    if let Some(table) = gpu_table_bytes.as_ref() {
+        bytes.extend_from_slice(table);
+    }
     for level in levels {
         for payload in &level.payloads {
             bytes.extend_from_slice(&payload.bytes);
+            // The GPU payload follows its tile's lossless payload.
+            if let Some(gpu) = payload.gpu.as_ref() {
+                bytes.extend_from_slice(&gpu.bytes());
+            }
         }
     }
 
@@ -753,6 +924,8 @@ pub(crate) fn assemble(
         layer_tile_counts,
         layer_uncompressed_bytes,
         layer_compressed_bytes,
+        gpu_payload_bytes,
+        gpu_table_bytes: gpu_table_bytes.map_or(0, |bytes| bytes.len() as u64),
     })
 }
 

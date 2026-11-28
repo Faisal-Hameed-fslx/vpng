@@ -37,7 +37,7 @@ const VALUE_OPTIONS: &[&str] = &[
 
 /// Long options that are simple flags.
 const SWITCH_OPTIONS: &[&str] = &[
-    "json", "help", "verbose", "quiet", "force", "version", "pyramid", "adaptive",
+    "json", "help", "verbose", "quiet", "force", "version", "pyramid", "adaptive", "gpu",
 ];
 
 #[derive(Debug, Default, Clone)]

@@ -25,6 +25,7 @@
 #![forbid(unsafe_code)]
 
 pub mod composite;
+pub mod gpu;
 pub mod layer;
 pub mod levels;
 
@@ -34,7 +35,7 @@ pub use levels::{derive_levels, Level};
 
 use vpng_codecs::{get_codec, DecodeContext};
 use vpng_container::{
-    crc32c, Directory, DirectoryEntry, Header, LayerTable, HEADER_SIZE, MINOR_V0_3,
+    crc32c, Directory, DirectoryEntry, GpuTable, Header, LayerTable, HEADER_SIZE, MINOR_V0_3,
 };
 use vpng_core::{CanonicalImage, Dimensions, Error, Limits, PixelFormat, Rect, Result};
 use vpng_tiling::{Partition, TileGeometry, TileGrid, TileRect};
@@ -51,6 +52,8 @@ pub struct ContainerParts {
     header: Header,
     directory: Directory,
     layers: Vec<Layer>,
+    /// The GPU payload table, when the container carries one.
+    gpu: Option<GpuTable>,
     format: PixelFormat,
 }
 
@@ -83,6 +86,14 @@ impl ContainerParts {
     /// The container's pixel format.
     pub fn format(&self) -> PixelFormat {
         self.format
+    }
+
+    /// The container's GPU payload table, when it has one.
+    ///
+    /// The table holds one record per tile, in the directory's canonical
+    /// order.
+    pub fn gpu_table(&self) -> Option<&GpuTable> {
+        self.gpu.as_ref()
     }
 }
 
@@ -122,6 +133,7 @@ pub fn parse_container_parts(
     header: Header,
     directory_bytes: &[u8],
     layer_table_bytes: Option<&[u8]>,
+    gpu_table_bytes: Option<&[u8]>,
     file_size: u64,
     limits: &Limits,
 ) -> Result<ContainerParts> {
@@ -199,12 +211,56 @@ pub fn parse_container_parts(
     };
 
     // The payloads come after the directory and, when there is one, after the
-    // layer table.
+    // layer table and the GPU table.
     let mut payloads_start = directory_end;
     if let Some(table) = layer_table.as_ref() {
         payloads_start = vpng_core::checked_add(payloads_start, header.layer_table_length as u64)?;
         let _ = table;
     }
+
+    // The GPU payload table, when the container has one.
+    let gpu_table = match (header.has_gpu(), gpu_table_bytes) {
+        (true, Some(bytes)) => {
+            if bytes.len() != header.gpu_table_length as usize {
+                return Err(Error::corrupt(format!(
+                    "the GPU table is {} bytes, the header says {}",
+                    bytes.len(),
+                    header.gpu_table_length
+                )));
+            }
+            let table = GpuTable::decode(bytes)?;
+            let table_end = vpng_core::checked_add(
+                header.gpu_table_offset as u64,
+                header.gpu_table_length as u64,
+            )?;
+            if (header.gpu_table_offset as u64) < payloads_start || table_end > file_size {
+                return Err(Error::corrupt(
+                    "the GPU table does not fit between the tables and the end of the file",
+                ));
+            }
+            if table.len() != header.tile_count as usize {
+                return Err(Error::corrupt(format!(
+                    "the GPU table holds {} records, the file has {} tiles",
+                    table.len(),
+                    header.tile_count
+                )));
+            }
+            payloads_start =
+                vpng_core::checked_add(payloads_start, header.gpu_table_length as u64)?;
+            Some(table)
+        }
+        (true, None) => {
+            return Err(Error::corrupt(
+                "the container declares a GPU payload table, and the reader did not supply it",
+            ))
+        }
+        (false, Some(bytes)) if !bytes.is_empty() => {
+            return Err(Error::corrupt(
+                "the container has no GPU payload table, but one was supplied",
+            ))
+        }
+        _ => None,
+    };
 
     for (index, entry) in directory.entries.iter().enumerate() {
         if entry.payload_offset < payloads_start {
@@ -213,6 +269,15 @@ pub fn parse_container_parts(
             )));
         }
         limits.validate_tile_payload(entry.compressed_length, entry.uncompressed_length as u64)?;
+        // A GPU block codec is lossy, and a tile's lossless payload is always
+        // lossless, so a directory entry may never name one.
+        if vpng_codecs::is_gpu_block_codec(entry.codec_id) {
+            return Err(Error::unsupported(format!(
+                "tile {index} names codec id {} ({}), which is a GPU block codec and may not be a tile codec",
+                entry.codec_id,
+                vpng_codecs::codec_name(entry.codec_id).unwrap_or("unknown")
+            )));
+        }
         // The three codecs promoted in v0.3 may only be named by a file
         // whose minor version says so.
         if vpng_codecs::is_v0_3_codec(entry.codec_id) && header.minor < MINOR_V0_3 {
@@ -232,6 +297,26 @@ pub fn parse_container_parts(
         }
     }
 
+    // The GPU table's records, against the geometry of the tile each one
+    // describes.
+    if let Some(table) = gpu_table.as_ref() {
+        for (index, record) in table.records.iter().enumerate() {
+            let entry = &directory.entries[index];
+            gpu::validate_record(record, u32::from(entry.width), u32::from(entry.height))?;
+            if record.is_present() {
+                let end = vpng_core::checked_add(
+                    record.payload_offset,
+                    u64::from(record.payload_length),
+                )?;
+                if record.payload_offset < payloads_start || end > file_size {
+                    return Err(Error::corrupt(format!(
+                        "the GPU payload of tile {index} does not fit between the tables and the end of the file"
+                    )));
+                }
+            }
+        }
+    }
+
     directory.validate_payload_ranges(file_size)?;
     directory.validate_tile_sizes(format.bytes_per_pixel())?;
 
@@ -241,6 +326,7 @@ pub fn parse_container_parts(
         header,
         directory,
         layers,
+        gpu: gpu_table,
         format,
     })
 }
@@ -252,6 +338,8 @@ pub struct Document<'a> {
     header: Header,
     directory: Directory,
     layers: Vec<Layer>,
+    /// The GPU payload table, when the file carries one.
+    gpu: Option<GpuTable>,
     format: PixelFormat,
 }
 
@@ -290,10 +378,27 @@ impl<'a> Document<'a> {
             None
         };
 
+        // The GPU payload table, when the file has one, sits with the other
+        // tables.
+        let gpu_table_bytes = if header.has_gpu() {
+            let start = header.gpu_table_offset as usize;
+            let length = header.gpu_table_length as usize;
+            let end = vpng_core::checked_add(start as u64, length as u64)? as usize;
+            if end > bytes.len() {
+                return Err(Error::corrupt(
+                    "the GPU table extends past the end of the file",
+                ));
+            }
+            Some(&bytes[start..end])
+        } else {
+            None
+        };
+
         let parts = parse_container_parts(
             header,
             directory_slice,
             layer_table_bytes,
+            gpu_table_bytes,
             bytes.len() as u64,
             limits,
         )?;
@@ -303,6 +408,7 @@ impl<'a> Document<'a> {
             header: parts.header,
             directory: parts.directory,
             layers: parts.layers,
+            gpu: parts.gpu,
             format: parts.format,
         })
     }
@@ -324,6 +430,93 @@ impl<'a> Document<'a> {
     /// A file written before v0.4 has exactly one layer.
     pub fn layers(&self) -> &[Layer] {
         &self.layers
+    }
+
+    /// The file's GPU payload table, when it has one.
+    ///
+    /// A file without one has no GPU payloads at all, and
+    /// [`Document::decode_gpu_tile`] refuses it.
+    pub fn gpu_table(&self) -> Option<&GpuTable> {
+        self.gpu.as_ref()
+    }
+
+    /// Borrow one tile's **GPU payload** without decoding it.
+    ///
+    /// The bytes are the raw block payload: BC1 colour blocks, then BC4 alpha
+    /// blocks. The tile's checksum is verified before the bytes are handed
+    /// over.
+    pub fn gpu_payload(&self, index: usize) -> Result<&'a [u8]> {
+        let table = self
+            .gpu
+            .as_ref()
+            .ok_or_else(|| Error::unsupported("this file carries no GPU payload table"))?;
+        let record = table
+            .get(index)
+            .ok_or_else(|| Error::invalid(format!("tile index {index} is out of range")))?;
+        if !record.is_present() {
+            return Ok(&[]);
+        }
+        let start = vpng_core::checked_usize(record.payload_offset)?;
+        let len = vpng_core::checked_usize(record.payload_length as u64)?;
+        let end = vpng_core::checked_add(record.payload_offset, u64::from(record.payload_length))?;
+        if end > self.bytes.len() as u64 {
+            return Err(Error::corrupt("the GPU payload escapes the file buffer"));
+        }
+        let payload = &self.bytes[start..start + len];
+        let checksum = crc32c(payload);
+        if checksum != record.payload_checksum {
+            return Err(Error::corrupt(format!(
+                "the GPU payload of tile {index} has checksum {checksum:#010x}, the table says {:#010x}",
+                record.payload_checksum
+            )));
+        }
+        Ok(payload)
+    }
+
+    /// Decode one tile's **GPU payload** into RGBA8 pixels.
+    ///
+    /// The result is **lossy**: BC1 and BC4 throw information away, and what
+    /// comes out is close to the original and not equal to it. The exact
+    /// pixels are [`Document::decode_tile`], and they are what every exact
+    /// operation uses.
+    pub fn decode_gpu_tile(&self, index: usize) -> Result<Vec<u8>> {
+        let table = self
+            .gpu
+            .as_ref()
+            .ok_or_else(|| Error::unsupported("this file carries no GPU payload table"))?;
+        let record = *table
+            .get(index)
+            .ok_or_else(|| Error::invalid(format!("tile index {index} is out of range")))?;
+        let entry = *self
+            .directory
+            .entries
+            .get(index)
+            .ok_or_else(|| Error::invalid(format!("tile index {index} is out of range")))?;
+        let payload = self.gpu_payload(index)?;
+        gpu::decode_gpu_tile(
+            &record,
+            u32::from(entry.width),
+            u32::from(entry.height),
+            payload,
+        )
+    }
+
+    /// Decode a region of the **GPU payload** into RGBA8 pixels.
+    ///
+    /// The result is **lossy**, and it is always RGBA8 whatever the file's own
+    /// format is: a GPU payload is always eight-bit, and a texture is always
+    /// RGBA.
+    pub fn decode_gpu_region(&self, rect: Rect, limits: &Limits) -> Result<CanonicalImage> {
+        if self.gpu.is_none() {
+            return Err(Error::unsupported("this file carries no GPU payload table"));
+        }
+        decode_region_from(
+            self.base_level(),
+            PixelFormat::rgba8(),
+            rect,
+            limits,
+            |index| self.decode_gpu_tile(index),
+        )
     }
 
     /// The number of layers in the file.
